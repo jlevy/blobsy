@@ -1,0 +1,6 @@
+# Managed by tools/IDE, not usually human-edited
+.claude/
+.tbd/
+node_modules/
+template/
+attic/

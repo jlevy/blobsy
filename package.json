@@ -1,0 +1,47 @@
+{
+  "name": "lobs",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": ">=24"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lefthook"
+    ]
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:coverage": "pnpm --filter lobs test:coverage",
+    "publint": "pnpm -r publint",
+    "format": "prettier --write --log-level warn . && uvx flowmark@latest --auto .",
+    "format:md": "uvx flowmark@latest --auto .",
+    "format:check": "prettier --check --log-level warn .",
+    "lint": "eslint . --fix && pnpm typecheck && eslint . --max-warnings 0",
+    "lint:check": "pnpm typecheck && eslint . --max-warnings 0",
+    "precommit": "pnpm format:check && pnpm lint:check",
+    "ci": "pnpm format:check && pnpm lint:check && pnpm build && pnpm publint && pnpm test:coverage",
+    "prepare": "lefthook install",
+    "release": "pnpm build && pnpm publint && pnpm -r publish --access public",
+    "release:changes": "git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --oneline",
+    "upgrade:check": "ncu --format group",
+    "upgrade": "ncu --target minor -u && pnpm install && pnpm test",
+    "upgrade:major": "ncu --target latest --interactive --format group",
+    "compile-template": "python admin/compile_template.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "lefthook": "^2.1.1",
+    "npm-check-updates": "^19.3.2",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.55.0"
+  }
+}

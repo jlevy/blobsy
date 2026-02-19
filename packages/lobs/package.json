@@ -1,0 +1,52 @@
+{
+  "name": "lobs",
+  "version": "0.1.0",
+  "description": "A simple, serverless CLI for large file storage in Git that uses S3, R2, or any other backend",
+  "license": "MIT",
+  "author": "Joshua Levy <joshua@cal.berkeley.edu>",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jlevy/lobs.git",
+    "directory": "packages/lobs"
+  },
+  "homepage": "https://github.com/jlevy/lobs#readme",
+  "bugs": {
+    "url": "https://github.com/jlevy/lobs/issues"
+  },
+  "keywords": [],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "publint": "publint",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "publint": "^0.3.17",
+    "tsdown": "^0.20.3",
+    "vitest": "^4.0.18"
+  }
+}

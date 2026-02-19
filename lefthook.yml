@@ -1,0 +1,94 @@
+# lefthook.yml
+# Git hooks for code quality
+# Pre-commit: Fast checks with auto-fix (target: 2-5 seconds)
+# Pre-push: Full test validation
+#
+# Formatting: Prettier handles code files; flowmark handles markdown.
+# flowmark runs via uvx (no npm install needed, requires uv).
+# Markdown formatting is best-effort — it runs in pre-commit but is not
+# enforced in CI, since flowmark can be brittle on edge cases.
+# To disable flowmark locally, remove or comment out the format-md command.
+
+pre-commit:
+  parallel: true
+
+  commands:
+    # Auto-format code with Prettier (~500ms)
+    # Markdown excluded — handled by flowmark below
+    format:
+      glob: '*.{js,ts,tsx,json,yaml,yml}'
+      run: npx prettier --write --log-level warn {staged_files}
+      stage_fixed: true
+      priority: 1
+
+    # Auto-format markdown with flowmark (~500ms)
+    # Uses uvx so no npm dependency needed (requires uv/uvx installed)
+    format-md:
+      glob: '*.md'
+      exclude:
+        - CLAUDE.md
+        - AGENTS.md
+        - template/**
+      run: uvx flowmark@latest --auto {staged_files}
+      stage_fixed: true
+      priority: 1
+
+    # Lint with auto-fix and caching (~1s first, ~200ms cached)
+    lint:
+      glob: '*.{js,ts,tsx}'
+      run: >
+        npx eslint
+        --cache
+        --cache-location node_modules/.cache/eslint
+        --fix {staged_files}
+      stage_fixed: true
+      priority: 2
+
+    # Type check with incremental mode (~2s)
+    typecheck:
+      glob: '*.{ts,tsx}'
+      run: pnpm typecheck
+      priority: 3
+
+pre-push:
+  commands:
+    verify-tests:
+      run: |
+        echo "🔍 Checking test status for push..."
+
+        # Get current commit hash
+        COMMIT_HASH=$(git rev-parse HEAD)
+        CACHE_DIR="node_modules/.test-cache"
+        CACHE_FILE="$CACHE_DIR/$COMMIT_HASH"
+
+        # Check for uncommitted changes
+        if ! git diff --quiet || ! git diff --cached --quiet; then
+          echo "⚠️  Uncommitted changes detected"
+          echo "📊 Running test suite..."
+          pnpm test
+          exit $?
+        fi
+
+        # Check cache
+        if [ -f "$CACHE_FILE" ]; then
+          SHORT_HASH=$(echo "$COMMIT_HASH" | cut -c1-8)
+          echo "✓ Tests already passed for commit $SHORT_HASH"
+          exit 0
+        fi
+
+        # No cache, run tests
+        echo "📊 Running test suite..."
+        pnpm test
+
+        # Cache on success
+        if [ $? -eq 0 ]; then
+          mkdir -p "$CACHE_DIR"
+          touch "$CACHE_FILE"
+          SHORT_HASH=$(echo "$COMMIT_HASH" | cut -c1-8)
+          echo "✅ Tests passed and cached for commit $SHORT_HASH"
+          exit 0
+        else
+          echo "❌ Tests failed - push blocked"
+          echo "Fix tests and try again, or bypass with: git push --no-verify"
+          exit 1
+        fi

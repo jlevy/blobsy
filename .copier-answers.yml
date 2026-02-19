@@ -1,0 +1,11 @@
+# Changes here will be overwritten by Copier
+_commit: 6eafa40
+_src_path: gh:jlevy/simple-modern-pnpm
+author_email: joshua@cal.berkeley.edu
+author_name: Joshua Levy
+github_org: jlevy
+package_description: A simple, serverless CLI for large file storage in Git that uses
+  S3, R2, or any other backend
+package_name: lobs
+repo_name: lobs
+workspace_name: lobs

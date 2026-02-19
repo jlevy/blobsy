@@ -1,0 +1,16 @@
+dist
+node_modules
+pnpm-lock.yaml
+*.min.js
+*.min.css
+coverage
+.git
+.tbd
+attic
+template
+CLAUDE.md
+AGENTS.md
+
+# Markdown is formatted with flowmark, not Prettier.
+# Use: pnpm format:md (uses uvx flowmark)
+*.md
