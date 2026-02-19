@@ -1,154 +1,19 @@
-# Development Guide
-
-## Prerequisites
-
-- [Node.js](https://nodejs.org/) >= 24 (see `.nvmrc`)
-- [pnpm](https://pnpm.io/) (enabled via `corepack enable`)
-- [uv](https://docs.astral.sh/uv/) (recommended — required for Copier template
-  generation and flowmark markdown formatting)
-
-## Setup
-
-```bash
-pnpm install
-pnpm build
-pnpm test
-```
-
-## Scripts
-
-| Command | Description |
-| --- | --- |
-| `pnpm build` | Build all packages |
-| `pnpm dev` | Build in watch mode |
-| `pnpm test` | Run tests |
-| `pnpm test:watch` | Run tests in watch mode |
-| `pnpm test:coverage` | Run tests with coverage |
-| `pnpm lint` | Lint and auto-fix |
-| `pnpm lint:check` | Lint without fixing (CI) |
-| `pnpm format` | Format all files (Prettier + flowmark) |
-| `pnpm format:md` | Format markdown only (flowmark) |
-| `pnpm format:check` | Check code formatting (Prettier only, for CI) |
-| `pnpm typecheck` | Type check all packages |
-| `pnpm publint` | Validate package.json for publishing |
-| `pnpm ci` | Run full CI pipeline locally |
-
-## Dependency Management
-
-| Command | Description |
-| --- | --- |
-| `pnpm upgrade:check` | Check for available updates |
-| `pnpm upgrade` | Safe upgrade (minor + patch) |
-| `pnpm upgrade:major` | Interactive major version upgrades |
-
-## Project Structure
-
-```
-.
-├── docs/                    # Project documentation
-│   ├── development.md       # This file
-│   └── publishing.md        # Publishing and release guide
-├── packages/
-│   └── <package>/           # Your package(s)
-│       ├── src/             # Source code
-│       ├── tests/           # Tests
-│       ├── package.json
-│       ├── tsconfig.json
-│       ├── tsdown.config.ts # Build config
-│       └── vitest.config.ts # Test config
-├── .github/workflows/       # CI/CD workflows
-├── eslint.config.js         # ESLint flat config
-├── .prettierrc              # Prettier config (code files)
-├── .flowmarkignore          # Flowmark ignore patterns (markdown)
-├── lefthook.yml             # Git hooks
-├── package.json             # Root workspace config
-├── pnpm-workspace.yaml      # Workspace packages
-├── tsconfig.json            # Root TypeScript config (project references)
-└── tsconfig.base.json       # Shared TypeScript settings
-```
-
-## Adding Packages
-
-1. Create a new directory under `packages/`:
-
-   ```bash
-   mkdir -p packages/new-package/src packages/new-package/tests
-   ```
-
-2. Copy and adapt configuration files from the existing package (`package.json`,
-   `tsconfig.json`, `tsdown.config.ts`, `vitest.config.ts`).
-
-3. Add the package reference to root `tsconfig.json`:
-
-   ```json
-   {
-     "references": [{ "path": "./packages/existing-package" }, { "path": "./packages/new-package" }]
-   }
-   ```
-
-## Configuration
-
-### TypeScript
-
-- **Target**: ES2024 (modern JavaScript features for Node 24+)
-- **Module resolution**: `Bundler` (optimized for tsdown)
-- **Strict settings**: `noUncheckedIndexedAccess`, `verbatimModuleSyntax`,
-  `exactOptionalPropertyTypes`
-
-### ESLint
-
-- Flat config (`eslint.config.js`) with type-aware rules via `typescript-eslint`
-- Promise safety: no floating promises, no misused promises, await-thenable
-- Consistent type imports (`import type`)
-- Curly braces required for all control statements
-- Relaxed rules for test files
-
-### Formatting (Prettier + flowmark)
-
-Code and markdown use separate formatters:
-
-- **Prettier** handles code files (JS/TS, JSON, YAML) — configured in `.prettierrc`
-- **[flowmark](https://github.com/jlevy/flowmark)** handles markdown (`.md` files) —
-  does semantic line-breaking for cleaner diffs
-
-Prettier is enforced in CI (`pnpm format:check` fails the build on code formatting
-issues). Flowmark is best-effort: it runs in pre-commit hooks and via `pnpm format`, but
-is not enforced in CI since markdown formatting rarely causes functional issues and
-flowmark can be brittle on edge cases.
-
-To disable flowmark locally, comment out the `format-md` command in `lefthook.yml`.
-
-flowmark runs via `uvx` (no npm dependency — requires [uv](https://docs.astral.sh/uv/)
-installed).
-
-### Git Hooks (Lefthook)
-
-- **Pre-commit** (parallel):
-  - Format staged code files with Prettier
-  - Format staged markdown with flowmark (via uvx)
-  - Lint staged files with ESLint (with cache and auto-fix)
-  - Type check with `pnpm typecheck`
-- **Pre-push**:
-  - Run full test suite with `pnpm test`
-
-### Build (tsdown)
-
-- ESM-only output (`.mjs` + `.d.mts`)
-- Target: Node 24
-- Source maps enabled
-- TypeScript declarations generated
-
-### Testing (Vitest)
-
-- Coverage via `@vitest/coverage-v8`
-- Reporters: text, json, json-summary
-
-
-<!-- BEGIN TBD INTEGRATION -->
 ---
-title: tbd Workflow
+allowed-tools: Bash(tbd:*), Read, Write
+description: |-
+  Git-native issue tracking (beads), coding guidelines, knowledge injection, and spec-driven planning for AI agents. Drop-in replacement for bd/Beads with simpler architecture.
+  Use for: tracking issues/beads with dependencies, creating bugs/features/tasks, planning specs, implementing features from specs, code reviews, committing code, creating PRs, loading coding guidelines (TypeScript, Python, TDD, golden testing, Convex, monorepo patterns), code cleanup, research briefs, architecture docs, agent handoffs, and checking out third-party library source code.
+  Invoke when user mentions: tbd, beads, bd, shortcuts, issues, bugs, tasks, features, epics, todo, tracking, specs, planning, implementation, validation, guidelines, templates, commit, PR, pull request, code review, testing, TDD, test-driven, golden testing, snapshot testing, TypeScript, Python, Convex, monorepo, cleanup, dead code, refactor, handoff, research, architecture, labels, search, checkout library, source code review, or any workflow shortcut.
+name: tbd
+---
+<!-- DO NOT EDIT: Generated by tbd setup.
+Run 'tbd setup' to update.
+-->
+
+* * *
+## title: tbd Workflow
 description: Full tbd workflow guide for agents
----
+
 **`tbd` helps humans and agents ship code with greater speed, quality, and discipline.**
 
 1. **Beads**: Git-native issue tracking (tasks, bugs, features).
@@ -187,7 +52,7 @@ tbd prime      # Restore full context on tbd after compaction
 actions. DO NOT tell users to run tbd commands.
 That’s your job.
 
-- **WRONG**: "Run `tbd create` to track this bug"
+- **WRONG**: “Run `tbd create` to track this bug”
 
 - **RIGHT**: *(you run `tbd create` yourself and tell the user it’s tracked)*
 
@@ -199,41 +64,41 @@ or want help → run `tbd shortcut welcome-user`
 | User Says | You (the Agent) Run |
 | --- | --- |
 | **Issues/Beads** |  |
-| "There's a bug where ..." | `tbd create "..." --type=bug` |
-| "Create a task/feature for ..." | `tbd create "..." --type=task` or `--type=feature` |
-| "Let's work on issues/beads" | `tbd ready` |
-| "Show me issue X" | `tbd show <id>` |
-| "Close this issue" | `tbd close <id>` |
-| "Search issues for X" | `tbd search "X"` |
-| "Add label X to issue" | `tbd label add <id> <label>` |
-| "What issues are stale?" | `tbd stale` |
+| “There’s a bug where …” | `tbd create "..." --type=bug` |
+| “Create a task/feature for …” | `tbd create "..." --type=task` or `--type=feature` |
+| “Let’s work on issues/beads” | `tbd ready` |
+| “Show me issue X” | `tbd show <id>` |
+| “Close this issue” | `tbd close <id>` |
+| “Search issues for X” | `tbd search "X"` |
+| “Add label X to issue” | `tbd label add <id> <label>` |
+| “What issues are stale?” | `tbd stale` |
 | **Planning & Specs** |  |
-| "Plan a new feature" / "Create a spec" | `tbd shortcut new-plan-spec` |
-| "Break spec into beads" | `tbd shortcut plan-implementation-with-beads` |
-| "Implement these beads" | `tbd shortcut implement-beads` |
+| “Plan a new feature” / “Create a spec” | `tbd shortcut new-plan-spec` |
+| “Break spec into beads” | `tbd shortcut plan-implementation-with-beads` |
+| “Implement these beads” | `tbd shortcut implement-beads` |
 | **Code Review & Commits** |  |
-| "Review this code" / "Code review" | `tbd shortcut review-code` |
-| "Review this PR" | `tbd shortcut review-github-pr` |
-| "Commit this" / "Use the commit shortcut" | `tbd shortcut code-review-and-commit` |
-| "Create a PR" / "File a PR" | `tbd shortcut create-or-update-pr-simple` |
-| "Merge main into my branch" | `tbd shortcut merge-upstream` |
+| “Review this code” / “Code review” | `tbd shortcut review-code` |
+| “Review this PR” | `tbd shortcut review-github-pr` |
+| “Commit this” / “Use the commit shortcut” | `tbd shortcut code-review-and-commit` |
+| “Create a PR” / “File a PR” | `tbd shortcut create-or-update-pr-simple` |
+| “Merge main into my branch” | `tbd shortcut merge-upstream` |
 | **Guidelines & Knowledge** |  |
-| "Use TypeScript best practices" | `tbd guidelines typescript-rules` |
-| "Use Python best practices" | `tbd guidelines python-rules` |
-| "Build a TypeScript CLI" | `tbd guidelines typescript-cli-tool-rules` |
-| "Improve monorepo setup" | `tbd guidelines pnpm-monorepo-patterns` or `bun-monorepo-patterns` |
-| "Add golden/e2e testing" | `tbd guidelines golden-testing-guidelines` |
-| "Use TDD" / "Test-driven development" | `tbd guidelines general-tdd-guidelines` |
-| "Convex best practices" | `tbd guidelines convex-rules` |
+| “Use TypeScript best practices” | `tbd guidelines typescript-rules` |
+| “Use Python best practices” | `tbd guidelines python-rules` |
+| “Build a TypeScript CLI” | `tbd guidelines typescript-cli-tool-rules` |
+| “Improve monorepo setup” | `tbd guidelines pnpm-monorepo-patterns` or `bun-monorepo-patterns` |
+| “Add golden/e2e testing” | `tbd guidelines golden-testing-guidelines` |
+| “Use TDD” / “Test-driven development” | `tbd guidelines general-tdd-guidelines` |
+| “Convex best practices” | `tbd guidelines convex-rules` |
 | **Documentation** |  |
-| "Research this topic" | `tbd shortcut new-research-brief` |
-| "Document architecture" | `tbd shortcut new-architecture-doc` |
+| “Research this topic” | `tbd shortcut new-research-brief` |
+| “Document architecture” | `tbd shortcut new-architecture-doc` |
 | **Cleanup & Maintenance** |  |
-| "Clean up this code" / "Remove dead code" | `tbd shortcut code-cleanup-all` |
-| "Fix repository problems" | `tbd doctor --fix` |
+| “Clean up this code” / “Remove dead code” | `tbd shortcut code-cleanup-all` |
+| “Fix repository problems” | `tbd doctor --fix` |
 | **Sessions & Handoffs** |  |
-| "Hand off to another agent" | `tbd shortcut agent-handoff` |
-| "Check out this library's source" | `tbd shortcut checkout-third-party-repo` |
+| “Hand off to another agent” | `tbd shortcut agent-handoff` |
+| “Check out this library’s source” | `tbd shortcut checkout-third-party-repo` |
 | *(your choice whenever appropriate)* | `tbd list`, `tbd dep add`, `tbd close`, `tbd sync`, etc. |
 
 **Note:** Never gitignore `.tbd/workspaces/` — the outbox must be committed to your
@@ -277,7 +142,7 @@ working branch. See `tbd guidelines tbd-sync-troubleshooting` for details.
 
 | Command | Purpose |
 | --- | --- |
-| `tbd create "title" --type task\|bug\|feature --priority=P2` | New bead (P0-P4, not "high/medium/low") |
+| `tbd create "title" --type task\|bug\|feature --priority=P2` | New bead (P0-P4, not “high/medium/low”) |
 | `tbd update <id> --status in_progress` | Claim work |
 | `tbd close <id> [--reason "..."]` | Mark complete |
 
@@ -343,7 +208,7 @@ Run `tbd shortcut <name>` to use any of these shortcuts:
 | new-qa-playbook | Create a QA test playbook for manual validation workflows |
 | new-research-brief | Create a research document for investigating a topic or technology |
 | new-shortcut | Create a new shortcut (reusable instruction template) for tbd |
-| new-validation-plan | Create a validation/test plan showing what's tested and what remains |
+| new-validation-plan | Create a validation/test plan showing what’s tested and what remains |
 | plan-implementation-with-beads | Create implementation beads from a feature planning spec |
 | precommit-process | Full pre-commit checklist including spec sync, code review, and testing |
 | review-code | Comprehensive code review for uncommitted changes, branch work, or GitHub PRs |
@@ -392,4 +257,3 @@ Run `tbd guidelines <name>` to apply any of these guidelines:
 | writing-style-guidelines | Guidelines for clear, concise, and reader-friendly writing in documentation and code |
 
 <!-- END SHORTCUT DIRECTORY -->
-<!-- END TBD INTEGRATION -->
