@@ -1644,3 +1644,117 @@ What `lobs` does not do (V1):
 - Web UI
 
 These are candidates for future versions if demand warrants.
+
+## Open Considerations and Critique
+
+Items below are drawn from
+[round 3 external review](lobs-design-review-round3-gpt5pro.md) (and earlier rounds)
+where the right answer is not yet clear or involves a significant strategic trade-off.
+They are recorded here so the discussion is not lost, and to inform future design
+decisions.
+
+### 1. V1 Product Promise: "Latest Mirror" vs "Immutable Snapshots"
+
+The round 3 review identifies a tension at the heart of the design:
+
+- **Promise A (simple):** "LOBS is a branch-isolated sync layer. Remote holds the latest
+  state per namespace. Use `version` mode or bucket versioning for history." This matches
+  the current path-mirrored remote layout.
+- **Promise B (stronger):** "LOBS makes commits reproducible: pointers reference immutable
+  remote content." This requires CAS-like storage or snapshot identifiers.
+
+The current design uses Promise A mechanics but occasionally uses Promise B language
+(e.g., restoring old versions by checking out old pointers). The design spec needs to
+pick one and be consistent. The versioning semantics bead (`lobs-cx82`) addresses the
+immediate contradictions, but the broader strategic question of whether lobs should ever
+move toward Promise B (and what that would look like) remains open.
+
+### 2. Content-Addressable Storage (CAS) as a Future Direction
+
+The round 3 review suggests that if lobs wants "git checkout old commit -> get the right
+data" to work reliably, it needs immutable object keys (e.g.,
+`objects/<sha256>/<hash>`). This is a fundamental architecture decision:
+
+- CAS enables time-travel, dedup, and reproducibility.
+- CAS breaks remote browsability (the current design's explicit strength).
+- A hybrid is possible: path-mirrored within a snapshot, with immutable snapshot IDs at
+  the top level.
+
+This is explicitly out of V1 scope but worth tracking as a design axis for V2.
+
+### 3. Compression Suffix Convention
+
+Three options were raised across reviews:
+
+1. Accept `.zst` ambiguity and rely on manifest/pointer metadata to distinguish
+   lobs-compressed from natively `.zst` files (simplest, current implicit approach).
+2. Use `.lobs.zst` suffix for lobs-compressed files (clearer remotely, but longer names).
+3. Store compression state only in manifest metadata, not in filename at all.
+
+The round 3 review leans toward option 1 as adequate. The decision should be made
+explicitly and documented.
+
+### 4. Small-File Compression Threshold
+
+The round 3 review suggests a default threshold (e.g., skip compressing files < 4 KB)
+since compression overhead on tiny files can be counterproductive. This is a
+quality-of-life optimization, not a correctness issue. Worth considering but not blocking.
+
+### 5. Dictionary Compression (V2)
+
+Round 1 notes that zstd dictionary training provides 2-5x improvement for small files
+(< 64 KB) sharing structure (common with JSON/YAML datasets). The compression interface
+should be designed to support this later (e.g., a `dictionary` field in config). Deferred.
+
+### 6. Export/Import Specification
+
+The `lobs export` / `lobs import` commands are mentioned but underspecified:
+
+- Does the archive include pointer files?
+- Does `import` create pointer files and gitignore entries?
+- Flat dump or preserved directory structure?
+- Seekable zstd for large archives?
+
+These need specification before implementation but are not blocking other work.
+
+### 7. Integration Surface: Library vs CLI Only
+
+Round 1 asks whether lobs is intended to be used as a library by other tools, as a
+subprocess, or purely as a standalone CLI. The design should state this explicitly. The
+current design implies CLI-only, but the npm package could also expose a programmatic API.
+
+### 8. Mixed Directories: Ignore Patterns vs Include Patterns
+
+The round 3 review notes that the current model (ignore patterns to exclude small files
+from lobs management) means `.gitignore` must be manually adjusted for mixed directories.
+An alternative is flipping to an "include patterns" model where lobs tracks only matching
+files and generates ignore entries for them. This changes the mental model but may be less
+error-prone. The current approach works but is a known sharp edge.
+
+### 9. Per-Pointer Namespace Override Complexity
+
+Per-pointer namespace overrides are powerful but complicate output grouping, partial
+failure handling, and concurrency. The round 3 review agrees with the round 1
+recommendation to group operations by resolved namespace and treat each group
+independently. The question is whether this complexity is justified for V1 or whether it
+should be deferred to keep the initial implementation simpler.
+
+### 10. `lobs sync` Bidirectional Semantics
+
+All three reviews flag `lobs sync` (bidirectional: pull then push) as underspecified and
+potentially dangerous, especially around deletion semantics. The round 3 review
+recommends deferring it from V1 entirely. If kept, the interaction between pull-delete and
+push-delete needs careful specification. A bead (`lobs-br1a`) tracks this.
+
+### 11. s5cmd and Future Transport Engines
+
+The round 3 review mentions s5cmd as a high-performance batching tool worth considering,
+especially if lobs moves to manifest-driven file-by-file orchestration. Not blocking but
+worth tracking as the transfer architecture solidifies.
+
+### 12. `command` Backend as Integration Point
+
+Round 1 notes the `command` backend could serve as a deliberate integration point for
+domain-specific tools, not just an "escape hatch." This reframing has implications for how
+well-specified the template variables and execution model need to be. The security
+restrictions (bead `lobs-vj6p`) must be resolved first.
