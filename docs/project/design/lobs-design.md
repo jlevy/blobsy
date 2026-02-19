@@ -7,8 +7,6 @@
 A standalone CLI for namespace-based sync of large files and directories between local
 gitignored paths and remote storage, with committed pointer files for tracking.
 
-* * *
-
 ## Goals and Principles
 
 1. **Simple:** Simple usage is easy.
@@ -43,8 +41,6 @@ gitignored paths and remote storage, with committed pointer files for tracking.
    Files stored as-is or individually compressed.
    Browsable with standard tools (`aws s3 ls`, web console).
    No opaque databases or content-addressed hash stores.
-
-* * *
 
 ## Related Work
 
@@ -128,8 +124,6 @@ No existing tool combines: committed pointer files for git integration, pluggabl
 backends, pluggable compression, namespace-based branch isolation, bidirectional sync,
 transparent remote storage layout, and a simple standalone CLI. `lobs` fills this gap as
 a namespace-based sync coordinator that delegates heavy lifting to existing tools.
-
-* * *
 
 ## Core Concepts
 
@@ -387,8 +381,6 @@ data/research-batch/
 The section markers prevent accidental edits and make it easy for the CLI to manage
 entries idempotently.
 
-* * *
-
 ## Configuration
 
 ### Hierarchy
@@ -545,8 +537,6 @@ within the directory (e.g., adding `data/analysis/*.parquet` to `.gitignore`).
 present, lobs warns that the user should adjust `.gitignore` to exclude only the
 lobs-managed files, not the entire directory.
 
-* * *
-
 ## Backend System
 
 ### Backend Types
@@ -634,8 +624,6 @@ Uses the standard credential chain for the backend:
 - Instance profiles / IAM roles
 - rclone config (when `sync.tool: rclone`)
 
-* * *
-
 ## Compression System
 
 ### Per-File Compression
@@ -669,8 +657,6 @@ Separate from sync. `lobs export` produces a `tar.zst` archive of tracked files 
 offline sharing, backup, or migration.
 `lobs import` restores from an archive.
 Uses high compression (zstd level 19).
-
-* * *
 
 ## CLI Design
 
@@ -744,7 +730,7 @@ $ lobs init
 Created .lobs/config.yml
 ? Default backend type: s3
 ? Bucket: my-datasets
-? Prefix: arena-v1/
+? Prefix: project-v1/
 ? Region: us-east-1
 Namespace mode: branch (default)
 
@@ -816,8 +802,6 @@ Syncing data/research-batch/ -> branches/main/ ...
   3 files changed, 1 new, 0 deleted
 Done.
 ```
-
-* * *
 
 ## Usage Scenarios
 
@@ -1085,7 +1069,312 @@ config.yaml  embeddings.parquet  model-weights.bin  process.py  README.md  scrip
   Large files flow through lobs.
   Both live in the same directory.
 
-* * *
+### Scenario 4: Fixed Namespace (Shared Data)
+
+Shared reference data — a model, a dataset, a set of fixtures — that every branch reads
+and occasionally updates.
+Uses `fixed` namespace mode: one copy in remote storage, no branch isolation, all users
+and branches see the same data.
+
+**User 1 sets up tracking with fixed namespace:**
+
+```bash
+# Track a shared model directory with fixed namespace
+$ lobs track models/base-model/ --namespace-mode fixed
+Created models/base-model.lobs (manifest enabled, namespace: fixed)
+Added models/base-model/ to .gitignore
+
+$ lobs ns show
+Namespace mode: fixed
+Resolved: fixed/
+
+$ lobs push
+Pushing models/base-model/ -> fixed/ (syncing directory)...
+  5 files, 2.3 GB total (1.1 GB compressed)
+  Manifest written.
+Done. 1 target pushed.
+
+$ git add models/base-model.lobs .gitignore
+$ git commit -m "Track shared base model with lobs (fixed namespace)"
+$ git push
+```
+
+**User 2 pulls on any branch — same data regardless of branch:**
+
+```bash
+$ git checkout feature/experiment-7
+$ git pull origin main  # get the pointer file
+
+$ lobs ns show
+Namespace mode: fixed
+Resolved: fixed/
+
+# Fixed namespace — same remote location regardless of branch
+$ lobs pull
+Pulling models/base-model/ <- fixed/ (syncing directory)...
+  5 files, 2.3 GB (1.1 GB compressed)
+Done. 1 target pulled.
+```
+
+**CI pipeline pulls the same data:**
+
+```bash
+# CI is on main, but it doesn't matter — fixed namespace ignores the branch
+$ lobs pull
+Pulling models/base-model/ <- fixed/ ...
+Done. 1 target pulled.
+```
+
+**User 1 updates the shared model (from any branch):**
+
+```bash
+# On main, or feature/experiment-7, or any branch — doesn't matter
+$ cp retrained-model.bin models/base-model/model.bin
+
+$ lobs status
+  Namespace: fixed/
+  models/base-model/        modified    (0 new, 1 changed, 0 deleted)
+
+$ lobs push
+Pushing models/base-model/ -> fixed/ (syncing directory)...
+  1 changed (800 MB transferred)
+  Manifest updated.
+Done. 1 target pushed.
+
+$ git add models/base-model.lobs
+$ git commit -m "Update base model with retrained weights"
+$ git push
+```
+
+**All users and CI see the update:**
+
+```bash
+# Any branch, any user, any environment
+$ lobs status
+  Namespace: fixed/
+  models/base-model/        stale       (remote has newer version)
+
+$ lobs pull
+Pulling models/base-model/ <- fixed/ ...
+  1 changed (800 MB transferred)
+Done. 1 target pulled.
+```
+
+**Key points:**
+- `fixed` namespace mode means one remote location (`fixed/`) shared by all branches.
+  Switching branches does not change the namespace.
+- Useful for reference data, shared models, common fixtures, or any data that shouldn’t
+  diverge across branches.
+- The workflow is simpler than `branch` mode: no per-branch namespaces to manage, no
+  `lobs gc` needed for cleanup.
+- The tradeoff is no isolation — a push from any branch updates the shared copy for
+  everyone. This is the right choice when all branches should see the same data.
+- Can be mixed with `branch` mode in the same repo: some targets use `fixed`, others use
+  `branch` (configured per-pointer or per-directory).
+
+### Scenario 5: Branch Lifecycle
+
+A directory tracked with lobs (like Scenario 2 or 3) goes through a full branch
+lifecycle: work on main, fork a feature branch, sync on the branch, collaborate, merge
+back, and sync on main again.
+
+This scenario shows how namespace isolation works across branches and what happens at
+each transition.
+
+**Starting state:** A directory `data/research-batch/` is already tracked on main (as in
+Scenario 2). Both User 1 and User 2 have pulled the data.
+
+```bash
+$ lobs ns ls
+  branches/main/           42 files   120.4 MB   updated 2026-02-18
+```
+
+**User 1 makes changes on main:**
+
+```bash
+# On main — update some files
+$ cp updated-report.md data/research-batch/report.md
+$ lobs status
+  Namespace: branches/main/
+  data/research-batch/      modified    (0 new, 1 changed, 0 deleted)
+
+$ lobs push
+Pushing data/research-batch/ -> branches/main/ (syncing directory)...
+  1 changed (0.4 MB transferred)
+  Manifest updated.
+Done. 1 target pushed.
+
+$ git add data/research-batch.lobs
+$ git commit -m "Update research report"
+$ git push
+```
+
+**User 1 creates a feature branch and syncs:**
+
+```bash
+$ git checkout -b feature/new-analysis
+$ git push -u origin feature/new-analysis
+
+# Check the namespace — it changed automatically
+$ lobs ns show
+Namespace mode: branch
+Resolved: branches/feature/new-analysis/
+
+# Status: no data in the new namespace yet
+$ lobs status
+  Namespace: branches/feature/new-analysis/
+  data/research-batch/      local-only  (directory, 42 files)
+
+# Push to create the new namespace with current data
+$ lobs push
+Pushing data/research-batch/ -> branches/feature/new-analysis/ (syncing directory)...
+  42 files, 120.4 MB total (78.2 MB compressed)
+  Manifest written.
+Done. 1 target pushed.
+
+$ git add data/research-batch.lobs
+$ git commit -m "Initialize lobs data on feature branch"
+$ git push
+```
+
+**User 1 makes changes on the feature branch:**
+
+```bash
+# Add new analysis results
+$ cp analysis-v2.parquet data/research-batch/
+$ rm data/research-batch/old-draft.md
+
+$ lobs status
+  Namespace: branches/feature/new-analysis/
+  data/research-batch/      modified    (1 new, 0 changed, 1 deleted)
+
+$ lobs push
+Pushing data/research-batch/ -> branches/feature/new-analysis/ (syncing directory)...
+  1 new, 0 changed, 1 deleted (12.5 MB transferred)
+  Manifest updated.
+Done. 1 target pushed.
+
+$ git add data/research-batch.lobs
+$ git commit -m "Add v2 analysis, remove old draft"
+$ git push
+
+# Namespaces are now isolated — main is unchanged
+$ lobs ns ls
+  branches/main/                    42 files   120.4 MB   updated 2026-02-18
+  branches/feature/new-analysis/    42 files   128.9 MB   updated 2026-02-19
+```
+
+**User 2 joins the feature branch:**
+
+```bash
+$ git fetch
+$ git checkout feature/new-analysis
+
+$ lobs status
+  Namespace: branches/feature/new-analysis/
+  data/research-batch/      stale       (local: main version, remote: feature version)
+
+# Pull the feature branch's data
+$ lobs pull
+Pulling data/research-batch/ (syncing directory)...
+  1 new, 0 changed, 1 deleted (12.5 MB transferred)
+Done. 1 target pulled.
+
+# Make additional changes
+$ cp extra-data.json data/research-batch/
+
+$ lobs push
+Pushing data/research-batch/ -> branches/feature/new-analysis/ (syncing directory)...
+  1 new (0.8 MB transferred)
+  Manifest updated.
+Done. 1 target pushed.
+
+$ git add data/research-batch.lobs
+$ git commit -m "Add supplementary data"
+$ git push
+```
+
+**Branch is merged via CI (GitHub PR):**
+
+```bash
+# PR is merged on GitHub — CI merges feature/new-analysis into main
+# The merged pointer file now reflects the feature branch's latest state
+# But the remote branches/main/ namespace still has the old data
+```
+
+**User 1 updates main after merge:**
+
+```bash
+$ git checkout main
+$ git pull
+# Pointer file updated with feature branch's latest hash
+
+$ lobs ns show
+Namespace mode: branch
+Resolved: branches/main/
+
+# Status: local data matches the pointer (User 1 still has the files from
+# working on the feature branch), but remote branches/main/ is stale
+$ lobs status
+  Namespace: branches/main/
+  data/research-batch/      modified    (local is newer than remote)
+
+# Push to update the main namespace with the merged data
+$ lobs push
+Pushing data/research-batch/ -> branches/main/ (syncing directory)...
+  2 new, 0 changed, 1 deleted (13.3 MB transferred)
+  Manifest updated.
+Done. 1 target pushed.
+
+$ git add data/research-batch.lobs
+$ git commit -m "Sync lobs data to main after merge"
+$ git push
+```
+
+**User 2 syncs main:**
+
+```bash
+$ git checkout main
+$ git pull
+
+$ lobs status
+  Namespace: branches/main/
+  data/research-batch/      up-to-date
+
+# User 2 already has the data from working on the feature branch,
+# and User 1 has pushed it to branches/main/ — nothing to transfer
+$ lobs pull
+Already up-to-date. 0 targets pulled.
+```
+
+**Cleanup — remove the stale feature branch namespace:**
+
+```bash
+$ lobs ns ls
+  branches/main/                    43 files   129.7 MB   updated 2026-02-19
+  branches/feature/new-analysis/    43 files   129.7 MB   updated 2026-02-19
+
+$ lobs gc --dry-run
+Would remove: branches/feature/new-analysis/  (129.7 MB, no local branch)
+
+$ lobs gc
+Removed: branches/feature/new-analysis/ (129.7 MB)
+Done. 1 namespace removed, 129.7 MB freed.
+```
+
+**Key points:**
+- Switching branches changes the resolved namespace automatically.
+  `lobs ns show` confirms which namespace is active.
+- The first `lobs push` on a new branch creates a new namespace with a full copy of the
+  data. Subsequent pushes are incremental.
+- Namespaces are fully isolated: changes on `feature/new-analysis` don’t affect
+  `branches/main/`.
+- After a CI merge, a developer who has the local data must `lobs push` on main to
+  update the `branches/main/` namespace.
+  The pointer file from the merged branch is now on main, but the remote data is still
+  under the old namespace until someone pushes.
+- `lobs gc` cleans up branch namespaces that no longer have a corresponding local
+  branch.
 
 ## Sync Semantics
 
@@ -1166,8 +1455,6 @@ Conflict resolution strategies (configurable via `--strategy`):
 | `local-wins` | Local version overwrites remote. |
 | `remote-wins` | Remote version overwrites local. |
 
-* * *
-
 ## Versioning and Branch Lifecycle
 
 ### How Versioning Works
@@ -1221,8 +1508,6 @@ Done. 2 namespaces removed, 25.3 MB freed.
 
 `gc` never touches `fixed/` or `versions/` namespaces.
 It only removes `branches/` namespaces that have no corresponding local Git branch.
-
-* * *
 
 ## Agent and Automation Integration
 
@@ -1301,8 +1586,6 @@ No “are you sure?” prompts.
 `--dry-run` for preview.
 This makes `lobs` safe to call from scripts, CI pipelines, and agent tool loops.
 
-* * *
-
 ## Implementation Notes
 
 ### Language and Distribution
@@ -1333,8 +1616,6 @@ disk.
 The `local` backend makes testing trivial.
 Integration tests use a temp directory as the “remote.”
 No cloud account needed for development.
-
-* * *
 
 ## Scope Boundaries (V1)
 
