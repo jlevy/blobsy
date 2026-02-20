@@ -155,7 +155,7 @@ portion.
 For teams that want chronologically browsable remote storage:
 
 ```yaml
-# .blobsy/config.yml
+# .blobsy.yml
 remote:
   layout: timestamp   # default: content-addressable
 ```
@@ -294,10 +294,7 @@ blobsy sync ──────────┼─ aws s3 cp data/file2 s3://...
 
 This is simple and works well for typical workloads (tens to hundreds of files).
 The transfer tool (`aws-cli`, `s5cmd`, `rclone`) handles each individual upload/download.
-
-For V1, this is sufficient. A future optimization could batch multiple files per CLI
-invocation (e.g., `s5cmd` supports multi-file operations), but per-file concurrency
-with a reasonable pool size covers the common case.
+Per-file concurrency with a reasonable pool size covers the common case.
 
 ### `blobsy push` / `blobsy pull`
 
@@ -951,6 +948,56 @@ From the main design, the following concepts are no longer needed:
 - **Post-merge promotion** — blobs are where they are, refs point to them
 - **Delete semantics debate** — old blobs exist until GC, new pushes don't overwrite
 
+## V1 Feature Set
+
+Because the design externalizes everything to systems that already solve each subproblem,
+features that would normally be complex add-ons become natural consequences of the
+architecture. Compression and full versioning are both V1 features.
+
+### Compression Is V1
+
+Compression is trivial to implement because:
+
+- **Node 24+ built-in support.** `node:zlib` provides zstd, gzip, and brotli with sync,
+  async, and streaming APIs. No external dependencies, no shelling out.
+- **Simple integration point.** Compress before push, decompress after pull. The hash in
+  `.yref` is always of the original file, so `blobsy status` works unchanged.
+- **Already designed in.** The `.yref` format includes `compressed` and `compressed_size`
+  fields. Compression rules in `.blobsy.yml` make it automatic and per-file-type
+  configurable from day one.
+
+Total implementation cost: a thin wrapper around `node:zlib` streaming APIs.
+
+### Full Versioning Is V1
+
+Versioning requires zero additional implementation because git does it:
+
+- **Git tracks `.yref` files.** Every change to a tracked file produces a new `.yref`
+  commit. `git log data/model.bin.yref` gives the full history — who changed it, when,
+  and what the content hash was at each point.
+- **Content-addressable storage preserves old versions.** Old blobs remain in the remote
+  as long as they haven't been garbage collected. Multiple `.yref` revisions can point to
+  different blobs, all coexisting in the remote.
+- **Rollback is standard git.** To restore an old version:
+
+  ```bash
+  $ git checkout <commit> -- data/model.bin.yref
+  $ blobsy sync    # pulls the old version's blob
+  ```
+
+  No `blobsy rollback` command needed. No versioning metadata to maintain. Git *is* the
+  versioning system.
+
+### What's Deferred (V2+)
+
+- **Batched multi-file transfer.** V1 uses per-file concurrency with a pool
+  (`sync.parallel`). A future optimization could batch multiple files per CLI invocation
+  (e.g., `s5cmd` supports multi-file operations).
+- **Parallel `.yref` directory option.** Storing `.yref` files in a parallel directory
+  (e.g., `data/research.yrefs/`) instead of adjacent to data files.
+- **Advanced GC strategies.** Branch-aware retention policies, age-based remote cleanup.
+- **Multi-backend routing.** Routing different directories to different backends.
+
 ## Open Design Questions
 
 ### Number of `.yref` Files in Large Directories
@@ -1001,3 +1048,7 @@ directory at the repo root holds expired `.yref` files for GC and undo safety.
 Layered `.blobsy.yml` configuration adds automatic externalization (by size and type)
 and compression (by type), so `blobsy track <dir>` makes smart per-file decisions with
 no manual intervention.
+
+Because the design externalizes everything, compression (via Node.js built-in `node:zlib`)
+and full file versioning (via git history of `.yref` files) are both V1 features — they
+emerge naturally from the architecture rather than requiring additional systems.
