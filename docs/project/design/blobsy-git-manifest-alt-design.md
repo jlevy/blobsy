@@ -1,4 +1,4 @@
-# blobsy: Git-Manifest Alternative Design
+# blobsy: Per-File Ref Design
 
 **Status:** Draft
 
@@ -6,737 +6,710 @@
 
 **Supplements:** [blobsy-design.md](blobsy-design.md)
 
-This document describes an alternative approach to manifest storage and remote layout
-that simplifies the architecture by making the `.blobsy` pointer file the manifest and
-the remote a dumb blob store.
-It is a supplemental design — backend system, configuration hierarchy, ignore patterns,
-transfer delegation, and other fundamentals from the main design doc are unchanged.
+This document describes an alternative architecture that eliminates manifests entirely.
+Every tracked file gets its own `.ref` file committed to git.
+Directories are just the recursive case — no special handling needed.
+
+Backend system, configuration hierarchy, transfer delegation, and other fundamentals
+from the main design doc are unchanged.
 
 ## Motivation
 
-The main design stores manifests remotely as separate JSON files.
-This creates several coordination problems:
+The main design has two primitives: single-file pointers and directory pointers (with
+manifests). The previous alternative (inline manifest) unified these into one pointer
+file per tracked path. But there's a simpler option: eliminate manifests entirely.
 
-- **Remote manifest is a shared mutable resource.**
-  Two writers can conflict on it.
-  Conflict detection requires fetching the remote manifest and comparing ETags or
-  timestamps.
-- **Post-merge prefix gap.**
-  After merging a feature branch, the pointer is on main but the data is in
-  `branches/feature-x/`.
-  Someone must manually push to `branches/main/`.
-- **`blobsy status` requires network.**
-  You can't know what's in the remote without fetching the manifest.
-- **Remote layout is mutable.**
-  Each push overwrites the previous state at the same path.
-  No history without S3 bucket versioning.
+**The insight:** a directory of tracked files is just a directory of `.ref` files.
+No manifest needed — git is the manifest.
 
-The git-manifest approach eliminates these by moving the manifest into the `.blobsy`
-pointer file itself and making each push write to a unique, immutable remote prefix.
+This collapses the design to a single primitive: one file, one `.ref`.
 
 ## Core Idea
 
-The `.blobsy` pointer file **is** the manifest.
-It lists every tracked file with its hash and size, inline.
-Git versions it.
+For every large file you want to track:
 
-The remote is a dumb blob store.
-Each `blobsy push` writes to a unique prefix derived from the git commit.
-Pushes never overwrite previous data.
-The remote has no manifest files, no mutable state, no coordination surface.
+```
+data/bigfile.zip           ← actual file (gitignored)
+data/bigfile.zip.ref       ← ref file (committed to git)
+```
 
-All conflict resolution happens in git, via normal merge of the `.blobsy` file.
+The `.ref` file contains the content hash, size, and the remote location of the blob.
+It is a small YAML file committed to git.
+The actual file is gitignored.
 
-## Pointer File Format
+**That's the whole system.** There is no directory type, no manifest, no remote
+coordination state. Git tracks `.ref` files. The remote is a dumb blob store.
 
-### Single File
+### Directories Are Just Recursion
 
-Unchanged from the main design:
+To track a directory, you track every file in it:
+
+```
+data/research/                          ← directory (gitignored)
+data/research/report.md.ref             ← ref (committed)
+data/research/raw/response.json.ref     ← ref (committed)
+data/research/raw/data.parquet.ref      ← ref (committed)
+```
+
+`blobsy add data/research/` creates a `.ref` for every file, recursively.
+Each `.ref` is independent.
+Git diffs, merges, and conflicts work per-file, naturally.
+
+## Ref File Format
 
 ```yaml
 # blobsy — https://github.com/jlevy/blobsy
 
-format: blobsy/0.1
-type: file
-sha256: 7a3f0e...
+format: blobsy-ref/0.1
+sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
-updated: 2026-02-18T12:00:00Z
+remote_prefix: 20260220T140322Z-a3f2b1c
 ```
 
-### Directory (Inline Manifest)
+Fields:
 
-The pointer file contains the full file list:
-
-```yaml
-# blobsy — https://github.com/jlevy/blobsy
-
-format: blobsy/0.1
-type: directory
-updated: 2026-02-20T14:00:00Z
-total_size: 1052672
-files:
-  - path: raw/response.json
-    sha256: b4c8d2...
-    size: 1048576
-  - path: report.md
-    sha256: 7a3f0e...
-    size: 4096
-```
-
-The `files` list is sorted lexicographically by `path` for stable diffs.
-
-**Tradeoffs vs. remote manifest:**
-
-| | Inline manifest | Remote manifest |
+| Field | Type | Description |
 | --- | --- | --- |
-| Versioned by git | Yes (free) | No (remote-only) |
-| Works offline | Yes | No |
-| Git diff shows file changes | Yes (meaningful) | No (only timestamp) |
-| Git merge conflicts | Yes (on `files:` entries) | No (but remote conflicts instead) |
-| Repo size impact | ~100 bytes per tracked file | None |
-| Network to check status | None | Must fetch manifest |
+| `format` | string | Format version (`blobsy-ref/0.1`) |
+| `sha256` | string | 64-char lowercase hex, SHA-256 of the file content |
+| `size` | integer | File size in bytes |
+| `remote_prefix` | string | Remote prefix where the blob was pushed (set by `blobsy push`) |
 
-**Scaling:**
-At 1,000 files, the `.blobsy` file is ~100 KB.
-Git handles this fine — diffs are line-based and meaningful.
-At 100K+ files, diffs get noisy.
-A future extension could support external manifest references for extreme scale, but
-this covers the vast majority of use cases.
+That's it. Four fields.
+
+**Why `remote_prefix` is in the ref:**
+Pull needs to know where to find the blob.
+Storing it in the ref means git versions it, and anyone who checks out the ref can pull
+without additional state.
+Push sets this field; it's empty (or absent) until the first push.
+
+**Why no `updated` timestamp:**
+Git already tracks when the file changed (`git log`).
+A timestamp in the ref adds no information and creates meaningless diffs.
 
 ## Remote Storage Layout
 
-### Prefix Template
+### Default: Content-Addressable
 
-Each push writes to a prefix based on the current git commit.
-The default template is `{timestamp}-{git_hash_short}/`, producing compact ISO 8601
-timestamps with a short git hash suffix:
+The simplest remote layout stores files by their content hash:
 
 ```
-20260220T140322Z-a3f2b1c/
-20260220T151745Z-7d4e9f2/
-20260221T093011Z-b8d1a4e/
+s3://bucket/project/
+  sha256/7a3f0e.../data/bigfile.zip
+  sha256/b4c8d2.../data/research/report.md
+  sha256/a1b2c3.../data/research/raw/response.json
 ```
+
+The key is `sha256/{hash}/{repo-relative-path}`.
+The path suffix is for human browsability — you can see what the file is.
 
 Properties:
 
-- **Sortable.** Lexicographic order = chronological order.
-- **Human-readable.** Immediately obvious when each push happened.
-- **Unique.** Each git commit gets its own prefix. No collisions, no overwrites.
-- **Survives rebases.** The timestamp provides stable ordering even if git hashes
-  change. The old hash is still useful as a forensic breadcrumb (correlate with
-  reflog, debug issues).
+- **Automatic dedup.** Same content = same hash = same remote key. Never re-uploaded.
+- **Immutable.** A key is never overwritten (same hash = same content).
+- **No coordination.** Two people pushing the same file write the same key.
+  S3 PUT is idempotent on identical content.
+- **Browsable.** `aws s3 ls s3://bucket/project/sha256/7a3f0e.../` shows the file with
+  its real name.
 
-### Configurable Prefix Templates
+With content-addressable layout, `remote_prefix` in the ref is the `sha256/{hash}`
+portion.
 
-The prefix template is configurable.
-The default covers most use cases, but teams can choose alternatives:
+### Alternative: Timestamp-Hash Prefixes
+
+For teams that want chronologically browsable remote storage:
 
 ```yaml
 # .blobsy/config.yml
-namespace:
-  prefix_template: "{timestamp}-{git_hash_short}"  # default
+remote:
+  layout: timestamp   # default: content-addressable
 ```
-
-| Template | Example | Properties |
-| --- | --- | --- |
-| `{timestamp}-{git_hash_short}` | `20260220T140322Z-a3f2b1c/` | Default. Sortable, readable, unique, forensic hash. |
-| `{file_hash}` | `b4c8d2e1f3a5.../` | Content-addressable. Automatic dedup across commits and branches. Opaque to browse. |
-| `{timestamp}` | `20260220T140322Z/` | Sortable, no git dependency. Risk: timestamp collision if two commits at same second. |
-| `{git_hash}` | `a3f2b1c4d8e9.../` | Unique, but not sortable or readable. |
-
-**Template variables (V1):**
-
-| Variable | Resolves to | Notes |
-| --- | --- | --- |
-| `{timestamp}` | Compact ISO 8601 UTC (`YYYYMMDDTHHMMSSz`) | Time of push |
-| `{git_hash_short}` | First 7 characters of HEAD commit SHA | Short but sufficient for uniqueness with timestamp |
-| `{git_hash}` | Full 40-character HEAD commit SHA | For content-addressable layouts |
-| `{file_hash}` | SHA-256 of the individual file being uploaded | Per-file content addressing, automatic dedup |
-| `{branch}` | Current git branch name | For branch-grouped layouts |
-
-### Example Remote Layout
-
-With default prefix template:
 
 ```
 s3://bucket/project/
   20260220T140322Z-a3f2b1c/
-    data/prices.parquet
-    data/research-batch/
-      report.md
-      raw/response.json
+    data/bigfile.zip
+    data/research/report.md
+    data/research/raw/response.json
   20260220T151745Z-7d4e9f2/
-    data/research-batch/
-      report.md              # updated file
-      raw/response.json      # unchanged, re-uploaded
-  ...
+    data/research/report.md     ← only this file changed
 ```
 
-With `{file_hash}` prefix (content-addressable):
+This layout creates a snapshot prefix per push.
+Unchanged files are re-uploaded (no dedup).
+Simple and browsable, but uses more storage.
 
-```
-s3://bucket/project/
-  b4c8d2e1f3a5.../data/research-batch/raw/response.json
-  7a3f0e9b2c1d.../data/research-batch/report.md
-  a1b2c3d4e5f6.../data/prices.parquet
-  ...
-```
+### Layout Comparison
 
-Content-addressable layout deduplicates automatically: if a file hasn't changed between
-commits, its hash is the same, so it maps to the same remote key.
-Unchanged files are never re-uploaded.
+| | Content-addressable (default) | Timestamp-hash |
+| --- | --- | --- |
+| Dedup | Automatic | None |
+| Storage | Minimal | Grows per push |
+| Browsability | By hash, then path | Chronological |
+| Push speed | Only new content uploaded | All files every time |
+| GC | Remove unreferenced hashes | Remove unreachable prefixes |
 
 ## Commands
 
-### `blobsy commit`
+### `blobsy add`
 
-Snapshots current local file state into the `.blobsy` manifest.
+Start tracking a file or directory.
 
 ```bash
-$ blobsy commit data/research-batch/
-Scanning data/research-batch/...
-  1 new, 1 modified, 0 deleted
-Updated data/research-batch.blobsy
+# Single file
+$ blobsy add data/bigfile.zip
+Created data/bigfile.zip.ref
+Added data/bigfile.zip to .gitignore
+
+# Directory (recursive)
+$ blobsy add data/research/
+Created data/research/report.md.ref
+Created data/research/raw/response.json.ref
+Created data/research/raw/data.parquet.ref
+Added data/research/ to .gitignore
+3 files tracked.
 ```
 
 What it does:
 
-1. Scan local files in the tracked directory (applying ignore patterns).
-2. Hash each file (using stat cache for unchanged files).
-3. Update the `files:` list in the `.blobsy` pointer.
-4. Update the `updated` timestamp.
+1. For each file (recursively for directories), compute SHA-256.
+2. Create a `.ref` file adjacent to each file.
+3. Add the original file(s) to `.gitignore`.
 
-This is a **local-only** operation.
-It only modifies the `.blobsy` file on disk.
-The user then `git add`s and `git commit`s it as normal.
-
-### `blobsy push`
-
-Uploads blobs to the remote.
+The `.ref` files are not yet git committed. The user does that:
 
 ```bash
-$ blobsy push
-Pushing to 20260220T151745Z-7d4e9f2/ ...
-  data/prices.parquet (15.0 MB)
-  data/research-batch/report.md (4 KB)
-  data/research-batch/raw/response.json (1.0 MB)
-Done. 3 files pushed.
+$ git add data/bigfile.zip.ref
+$ git commit -m "Track bigfile with blobsy"
 ```
 
-**Precondition: `.blobsy` must be git committed.**
-If `.blobsy` has uncommitted changes, push errors:
+**Ignore patterns** work the same as in the main design: configured in
+`.blobsy/config.yml`, use gitignore syntax, applied during recursive add:
 
+```yaml
+# .blobsy/config.yml
+ignore:
+  - "*.py"
+  - "__pycache__/"
+  - ".DS_Store"
 ```
-Error: data/research-batch.blobsy has uncommitted changes.
-Run 'blobsy commit' then 'git add && git commit' first.
-```
-
-This constraint ensures:
-
-- Every push maps to a real git commit (unique prefix).
-- Two people can never collide (different commits = different prefixes).
-- The remote is append-only (no overwrites).
-- GC can check reachability of the git commit to decide what's garbage.
-
-What it does:
-
-1. Verify `.blobsy` is committed in git HEAD.
-2. Resolve prefix template (e.g., `20260220T151745Z-a3f2b1c/`).
-3. For each file in the manifest: check if the remote already has it at the resolved
-   path (for content-addressable templates, this provides dedup).
-4. Upload missing files.
-5. Record the resolved prefix in local state (for `blobsy pull` to know where to find
-   blobs).
-
-### `blobsy pull`
-
-Downloads blobs listed in the current `.blobsy` manifest.
-
-```bash
-$ blobsy pull
-Pulling from 20260220T151745Z-7d4e9f2/ ...
-  data/research-batch/report.md (4 KB)
-  data/research-batch/raw/response.json (1.0 MB)
-Done. 2 files pulled. 1 already up-to-date.
-```
-
-What it does:
-
-1. Read the `.blobsy` manifest.
-2. Determine which remote prefix contains the blobs (from the push metadata
-   or by resolving the prefix for the current commit).
-3. For each file in the manifest: compare local hash to manifest hash.
-4. Download files that are missing or differ.
-
-**Prefix resolution on pull:** After `git pull`, the local `.blobsy` file reflects
-whatever the upstream committed.
-The blobs were pushed by whoever made that commit, under their commit's prefix.
-The `.blobsy` file (or a local mapping) must record which prefix the blobs live under
-so pull knows where to find them.
-
-Options for storing the remote prefix mapping:
-
-1. **Store in the `.blobsy` file itself** as a `remote_prefix` field.
-   Simple, git-versioned, but couples the pointer to a specific push.
-2. **Local-only mapping** (`.blobsy/cache/prefix-map.json`) populated on push and
-   propagated via a convention (e.g., a small remote index file).
-3. **Derive from git metadata** — walk git log to find the commit that last modified the
-   `.blobsy` file, reconstruct the prefix from that commit's hash and timestamp.
-
-Option 3 is the most elegant (no extra state) but requires git history access.
-Option 1 is simplest and most explicit.
-This is a design decision to resolve before implementation.
-
-### `blobsy status`
-
-Compares local files against the `.blobsy` manifest. **Fully offline.**
-
-```bash
-$ blobsy status
-data/research-batch.blobsy:
-  report.md           modified  (local ≠ manifest)
-  raw/response.json   ok
-  new-file.csv        untracked
-data/prices.parquet.blobsy:
-  ok
-```
-
-What it does:
-
-1. For each `.blobsy` pointer, compare local files against the manifest's `files:` list.
-2. Report: ok, modified, deleted, untracked.
-
-No network access needed.
-The manifest is right there in the `.blobsy` file.
 
 ### `blobsy sync`
 
-One command to get fully synced.
+The primary sync command. Ensures local files and remote blobs match the committed refs.
 
 ```bash
 $ blobsy sync
-✓ .blobsy files committed
-✓ Pulled 2 files from remote
-✓ Pushed 1 file to remote
-✓ Fully synced
+Syncing 4 tracked files...
+  data/bigfile.zip                  ✓ up to date
+  data/research/report.md           ↑ pushed (4 KB)
+  data/research/raw/response.json   ↓ pulled (1.0 MB)
+  data/research/raw/data.parquet    ✓ up to date
+Done. 1 pushed, 1 pulled, 2 up to date.
 ```
 
-Algorithm:
+**Precondition: `.ref` files must be committed to git.**
+If any `.ref` has uncommitted changes, sync errors:
 
-1. **Check:** `.blobsy` has uncommitted changes → error with instructions.
-2. **Check:** Local files differ from manifest → warn per file.
-3. **Pull:** Download any files listed in the manifest that are missing locally.
-4. **Push:** Upload any blobs from the manifest that the remote doesn't have.
-5. **Report:** Clean exit = fully synced.
+```
+Error: data/bigfile.zip.ref has uncommitted changes.
+Run 'git add' and 'git commit' first.
+```
 
-Sync only moves blobs.
-It never modifies the manifest.
-The manifest is exclusively owned by `blobsy commit` + `git commit`.
+Algorithm for each `.ref`:
 
-### `blobsy resolve`
+1. **Read the ref** — get `sha256`, `size`, `remote_prefix`.
+2. **Check local file** — hash it (using stat cache for speed).
+3. **If local matches ref and remote has the blob:** nothing to do.
+4. **If local matches ref but remote doesn't have it:** push (upload blob, set
+   `remote_prefix` in ref).
+5. **If local is missing but remote has the blob:** pull (download blob).
+6. **If local differs from ref:** warn — file was modified locally but ref not updated.
+   Sync does not overwrite local modifications.
 
-Helpers for resolving `.blobsy` merge conflicts after `git merge`:
+Each file is independent. Sync handles them all in parallel (up to `sync.parallel`
+concurrent transfers).
+
+### `blobsy push` / `blobsy pull`
+
+Convenience aliases for one-directional sync:
 
 ```bash
-$ blobsy resolve --ours data/research-batch/report.md
-$ blobsy resolve --theirs data/research-batch/report.md
-$ blobsy resolve --ours    # all conflicts
-$ blobsy resolve --theirs  # all conflicts
+$ blobsy push [path...]    # only upload, skip downloads
+$ blobsy pull [path...]    # only download, skip uploads
 ```
 
-During a git merge, the `.blobsy` file may have conflict markers on specific file
-entries:
+Same precondition (refs must be committed).
+Same per-file logic, just filtered to one direction.
 
-```yaml
-  - path: data/results.json
-<<<<<<< HEAD
-    sha256: aaa111...
-    size: 1048576
-=======
-    sha256: ccc333...
-    size: 2097152
->>>>>>> origin/main
+### `blobsy status`
+
+Show the state of all tracked files. **Fully offline.**
+
+```bash
+$ blobsy status
+  data/bigfile.zip              ✓ ok
+  data/research/report.md       modified (local ≠ ref)
+  data/research/raw/resp.json   missing locally
+  data/research/raw/data.parq   ✓ ok (not pushed)
 ```
 
-`blobsy resolve` parses these and picks the chosen side, producing a clean manifest.
-After resolving, the user runs `blobsy push` to ensure the chosen blobs are in the
-remote.
+What it does:
+
+1. Find all `.ref` files in the repo.
+2. For each, compare local file hash against the ref's `sha256`.
+3. Report: ok, modified, missing, not pushed (no `remote_prefix`).
+
+No network access. The ref file has everything needed.
+
+### `blobsy add` (Update Mode)
+
+When files change, re-run `blobsy add` to update the refs:
+
+```bash
+# After modifying report.md
+$ blobsy add data/research/report.md
+Updated data/research/report.md.ref (sha256 changed)
+
+# Or update all refs in a directory
+$ blobsy add data/research/
+Updated data/research/report.md.ref (sha256 changed)
+2 files unchanged.
+
+$ git add data/research/report.md.ref
+$ git commit -m "Update report"
+$ blobsy sync
+```
+
+`blobsy add` is idempotent. Running it on an already-tracked file updates the hash if
+changed, or does nothing if unchanged.
+
+### `blobsy rm`
+
+Stop tracking a file or directory.
+
+```bash
+$ blobsy rm data/bigfile.zip
+Removed data/bigfile.zip.ref
+Removed data/bigfile.zip from .gitignore
+(Local file data/bigfile.zip preserved)
+```
+
+Removes the `.ref` and `.gitignore` entry. Does not delete the local file or remote
+blob.
 
 ## Per-File State Model
 
-Every tracked file has state across four layers:
+Each tracked file has state across three layers:
 
-| Layer | Symbol | What | Where |
-| --- | --- | --- | --- |
-| Local | **L** | Actual file on disk | `data/results.json` |
-| Manifest | **M** | `.blobsy` working copy | `.blobsy` file on disk |
-| Git | **G** | `.blobsy` in git HEAD | `git show HEAD:.blobsy` |
-| Remote | **R** | Blob in remote store | `s3://bucket/prefix/...` |
-
-Each layer has a hash value for the file, or `∅` (absent).
+| Layer | What | Where |
+| --- | --- | --- |
+| **Local** | Actual file on disk | `data/bigfile.zip` |
+| **Ref** | `.ref` committed in git | `data/bigfile.zip.ref` |
+| **Remote** | Blob in remote store | `s3://bucket/.../bigfile.zip` |
 
 ### State Table
 
-**Clean states — everything committed:**
+Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in remote.
 
-| # | L | M | G | R has G? | Description | `status` shows | `sync` does |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | h | h | h | yes | Fully synced | clean | nothing |
-| 2 | h | h | h | no | Committed, not pushed | needs push | uploads blob |
-| 3 | ∅ | h | h | yes | File missing locally | needs pull | downloads blob |
-| 4 | ∅ | h | h | no | Missing everywhere | **data loss** | errors with warning |
-
-**Local changes — before `blobsy commit`:**
-
-| # | L | M | G | R has G? | Description | `status` shows | `sync` does |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 5 | h' | h | h | yes | File modified locally | modified | warns "uncommitted changes" |
-| 6 | h' | h | h | no | Modified + not pushed | modified, needs push | warns + uploads old blob |
-| 7 | ∅ | h | h | yes | File deleted locally | deleted | warns "file deleted locally" |
-| 8 | h | ∅ | ∅ | — | Untracked file | untracked | ignores |
-
-**After `blobsy commit`, before `git commit`:**
-
-| # | L | M | G | R has G? | Description | `status` shows | `sync` does |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 9 | h' | h' | h | yes | Manifest updated, not git committed | uncommitted .blobsy | **errors**: "git commit .blobsy first" |
-| 10 | h | h | ∅ | — | Newly tracked, not git committed | new (uncommitted) | **errors**: same |
-| 11 | ∅ | ∅ | h | yes | Removed from tracking, not git committed | removed (uncommitted) | **errors**: same |
-
-**Orphaned remote state:**
-
-| # | L | M | G | R | Description | Action |
-| --- | --- | --- | --- | --- | --- | --- |
-| 12 | ∅ | ∅ | ∅ | has old blob | Orphaned remote blob | `blobsy gc` candidate |
+| L | R | B | State | `status` | `sync` |
+| --- | --- | --- | --- | --- | --- |
+| h | h | yes | **Synced** | ok | nothing |
+| h | h | no | **Needs push** | ok (not pushed) | pushes blob |
+| ∅ | h | yes | **Needs pull** | missing | pulls blob |
+| ∅ | h | no | **Data loss** | missing (no remote!) | errors |
+| h' | h | yes | **Modified locally** | modified | warns |
+| h' | h | no | **Modified + not pushed** | modified (not pushed) | warns |
+| h | ∅ | — | **Untracked** | (not shown) | (ignored) |
+| ∅ | ∅ | old | **Orphaned remote** | (not shown) | `gc` candidate |
 
 ### Key Invariant
 
-`blobsy sync` succeeds cleanly **only when M = G** (manifest is committed).
-When it succeeds with no warnings, you know:
+`blobsy sync` only operates on files whose `.ref` is committed to git.
+It never modifies `.ref` files (except to set `remote_prefix` after a successful push).
+The user controls the ref via `blobsy add` + `git commit`.
 
-- Manifest is committed in git.
-- Remote has all blobs referenced by the manifest.
-- Local has all files referenced by the manifest.
-- You are fully synced.
-
-`blobsy sync` **never modifies the manifest.**
-It only moves blobs between local and remote.
+Sync succeeds cleanly when all three layers agree.
 
 ## Conflict Model
 
-### Why Conflicts Are Git-Only
+### Why Conflicts Are Trivially Resolved
 
-Because `blobsy push` requires `.blobsy` to be git committed, every push targets a
-unique prefix (unique git commit = unique timestamp + hash).
-Two people pushing simultaneously write to different prefixes.
-There is no remote contention.
+Each file has its own `.ref`. Two people modifying different files change different
+`.ref` files. Git auto-merges with zero conflicts.
 
-The only conflict surface is `git merge` of the `.blobsy` file.
-
-### Conflict Scenarios
-
-**Scenario: Two people modify different files in the same directory.**
+The only conflict case: two people modify **the same file**. Then git sees a conflict on
+that file's `.ref`:
 
 ```
-A: modifies report.md, blobsy commit, git commit, blobsy push
-B: modifies response.json, blobsy commit, git commit, blobsy push
-B: git pull → auto-merge succeeds (different lines in .blobsy)
-B: blobsy push → uploads to new prefix
-```
-
-No conflict.
-Git auto-merges because the changes are on different lines of the `.blobsy` file.
-
-**Scenario: Two people modify the same file.**
-
-```
-A: modifies results.json, blobsy commit, git commit, blobsy push
-B: modifies results.json, blobsy commit, git commit, blobsy push
-B: git pull → CONFLICT on .blobsy (same path, different hashes)
-```
-
-Git surfaces the conflict:
-
-```yaml
-  - path: data/results.json
 <<<<<<< HEAD
-    sha256: aaa111...
-    size: 1048576
+sha256: aaa111...
+size: 1048576
 =======
-    sha256: ccc333...
-    size: 2097152
+sha256: ccc333...
+size: 2097152
 >>>>>>> origin/main
 ```
 
-Resolution options:
+Resolution is the same as any git conflict: pick one side, or merge manually.
 
 ```bash
-blobsy resolve --ours data/results.json     # keep my version
-blobsy resolve --theirs data/results.json   # take their version
+# Accept theirs
+$ git checkout --theirs data/results.json.ref
+$ git add data/results.json.ref
+$ blobsy pull data/results.json    # get their version of the actual file
 ```
 
-After resolving:
+### Comparison to Main Design Conflict Model
+
+| Scenario | Main design | Per-file ref |
+| --- | --- | --- |
+| A modifies X, B modifies Y | Auto-merge (maybe, depends on manifest layout) | Auto-merge (always — different `.ref` files) |
+| A modifies X, B modifies X | Remote manifest conflict + pointer conflict | Git conflict on `X.ref` only |
+| A adds X, B adds Y | Auto-merge | Auto-merge (always — different `.ref` files) |
+| A adds X, B adds X (same path) | Remote manifest conflict | Git conflict on `X.ref` |
+| A deletes X, B modifies X | Complex (manifest + pointer) | Git conflict on `X.ref` |
+| Resolution tool | `blobsy resolve` (custom) | `git checkout --ours/--theirs` (standard) |
+
+**Key advantage:** conflicts are standard git conflicts on individual files.
+No custom resolution tooling needed. Every developer already knows how to resolve git
+conflicts.
+
+## Workflows
+
+### Single User: Track, Push, Pull
 
 ```bash
-git add data/research-batch.blobsy
-git commit
-blobsy push    # ensures chosen blobs are in remote
+# Setup (one-time)
+$ blobsy init
+Created .blobsy/config.yml
+? Bucket: my-datasets
+? Region: us-east-1
+
+# Track files
+$ blobsy add data/model.bin
+Created data/model.bin.ref
+Added data/model.bin to .gitignore
+
+# Commit refs to git
+$ git add data/model.bin.ref .gitignore .blobsy/config.yml
+$ git commit -m "Track model with blobsy"
+
+# Push blobs to remote
+$ blobsy sync
+  data/model.bin   ↑ pushed (500 MB)
+Done. 1 pushed.
+
+# Push git
+$ git push
 ```
 
-**Scenario: One person adds a file, another deletes a file.**
+On another machine:
 
-No conflict.
-Addition adds a new entry to the `files:` list, deletion removes a different entry.
-Git auto-merges.
-
-**Scenario: One person modifies a file, another deletes it.**
-
-Git conflict on the `.blobsy` file: one side has the entry with a new hash, the other
-side removed it.
-Resolved manually or with `blobsy resolve`.
-
-### Summary of Conflict Outcomes
-
-| A does | B does | Git merge result | Resolution |
-| --- | --- | --- | --- |
-| Modify file X | Modify file Y | Auto-merge ✅ | None needed |
-| Modify file X | Modify file X | Conflict ❌ | `blobsy resolve --ours/--theirs` |
-| Add file X | Add file Y | Auto-merge ✅ | None needed |
-| Add file X | Add file X (same path) | Conflict ❌ | `blobsy resolve` |
-| Delete file X | Delete file X | Auto-merge ✅ | None needed |
-| Modify file X | Delete file X | Conflict ❌ | `blobsy resolve` |
-| Add file X | Delete file Y | Auto-merge ✅ | None needed |
-
-## Workflow: Clean Sequential
-
-The simplest case. No conflicts possible.
-
+```bash
+$ git clone <repo>
+$ blobsy sync
+  data/model.bin   ↓ pulled (500 MB)
+Done. 1 pulled.
 ```
-A: edit files
-A: blobsy commit
-A: git add .blobsy && git commit
-A: blobsy push    → writes to 20260220T140322Z-a3f2b1c/
+
+### Two Users: Non-Conflicting Changes
+
+```bash
+# User A modifies report.md
+A: vim data/research/report.md
+A: blobsy add data/research/report.md    # updates .ref
+A: git add data/research/report.md.ref && git commit -m "Update report"
+A: blobsy sync                           # pushes blob
 A: git push
 
-B: git pull       → gets updated .blobsy
-B: blobsy pull    → downloads from 20260220T140322Z-a3f2b1c/
-B: edit files
-B: blobsy commit
-B: git add .blobsy && git commit
-B: blobsy push    → writes to 20260220T151745Z-7d4e9f2/
+# User B modifies data.parquet (concurrently)
+B: python process.py  # writes data/research/data.parquet
+B: blobsy add data/research/data.parquet
+B: git add data/research/data.parquet.ref && git commit -m "Update data"
+B: blobsy sync
+B: git pull                              # auto-merge: different .ref files
+B: git push
+B: blobsy sync                           # pushes blob
+```
+
+No conflicts. Different files = different `.ref` files = auto-merge.
+
+### Two Users: Same File Conflict
+
+```bash
+# User A modifies results.json
+A: blobsy add data/results.json
+A: git add data/results.json.ref && git commit
+A: blobsy sync && git push
+
+# User B also modified results.json
+B: blobsy add data/results.json
+B: git add data/results.json.ref && git commit
+B: git pull
+# CONFLICT on data/results.json.ref
+
+# Resolve: take A's version
+B: git checkout --theirs data/results.json.ref
+B: git add data/results.json.ref
+B: blobsy sync    # pulls A's version of the actual file
+B: git commit -m "Resolve: take A's results"
 B: git push
 ```
 
-Each push writes to a unique prefix.
-No coordination needed beyond normal git workflow.
+### Feature Branch and Merge
 
-## Workflow: Parallel Work with Merge
+```bash
+# Branch off
+$ git checkout -b feature/new-data
 
-Two people working on the same tracked directory simultaneously.
+# Work on the branch
+$ blobsy add data/new-results.parquet
+$ git add data/new-results.parquet.ref && git commit
+$ blobsy sync && git push
 
+# Merge back to main
+$ git checkout main && git merge feature/new-data
+# .ref files merge cleanly (new file = new .ref = no conflict)
+$ blobsy sync    # blobs already in remote from feature branch push
+$ git push
 ```
-A: git checkout -b feature-a
-A: edit report.md
-A: blobsy commit → updates .blobsy
-A: git commit
-A: blobsy push   → 20260220T140322Z-a3f2b1c/
 
-B: git checkout -b feature-b
-B: edit response.json
-B: blobsy commit → updates .blobsy
-B: git commit
-B: blobsy push   → 20260220T141005Z-d4e5f6a/
+**No post-merge prefix gap.**
+The blobs were pushed from the feature branch.
+After merge, the `.ref` files on main point to the same blobs.
+`blobsy sync` on main has nothing to do — the blobs are already there.
 
-# Merge feature-a into main
-A: git checkout main && git merge feature-a
-A: blobsy push   → 20260220T150000Z-b1c2d3e/
-A: git push
-
-# Merge feature-b into main (may conflict on .blobsy)
-B: git checkout main && git pull
-B: git merge feature-b
-# If different files changed: auto-merge, done
-# If same file changed: conflict on .blobsy → resolve → commit
-B: blobsy push   → 20260220T153000Z-e6f7a8b/
-B: git push
-```
+This completely eliminates the P0 issue from the main design (`blobsy-a64l`).
 
 ## Garbage Collection
 
-Each push creates a new prefix.
-Over time, old prefixes accumulate.
-`blobsy gc` cleans them up.
-
-### GC with Timestamp-Hash Prefixes
+With content-addressable layout (default), GC removes blobs not referenced by any
+`.ref` file on any reachable branch:
 
 ```bash
 $ blobsy gc --dry-run
-Scanning remote prefixes...
-  20260215T093000Z-f1a2b3c/  → commit f1a2b3c unreachable  → REMOVE (120 MB)
-  20260218T140322Z-a3f2b1c/  → commit a3f2b1c reachable    → KEEP
-  20260220T151745Z-7d4e9f2/  → commit 7d4e9f2 reachable    → KEEP
-Would remove: 1 prefix, 120 MB
+Scanning refs across all branches...
+Scanning remote blobs...
+  sha256/7a3f0e... referenced by main, feature/x   → KEEP
+  sha256/b4c8d2... referenced by main               → KEEP
+  sha256/old123... not referenced                    → REMOVE (50 MB)
+Would remove: 1 blob, 50 MB
 
 $ blobsy gc
-Removed: 20260215T093000Z-f1a2b3c/ (120 MB)
-Done. 1 prefix removed, 120 MB freed.
+Removed: sha256/old123.../data/old-file.bin (50 MB)
+Done. 1 blob removed, 50 MB freed.
 ```
 
 Algorithm:
 
-1. List all remote prefixes.
-2. Extract the git hash from each prefix.
-3. Check if the commit is reachable from any branch or tag (`git merge-base --is-ancestor`
-   or similar).
-4. Unreachable prefixes are garbage.
+1. Collect all `sha256` values from all `.ref` files across all reachable branches/tags.
+2. List all remote objects.
+3. Remove objects whose hash isn't in the referenced set.
 
-**Safety options:**
+**Safety:**
 
 ```bash
-blobsy gc --dry-run                    # preview only
-blobsy gc --older-than 30d             # only remove prefixes older than 30 days
-blobsy gc --protect-branches "main,release/*"  # never remove prefixes from these branches
+blobsy gc --dry-run              # preview only
+blobsy gc --older-than 30d       # only remove blobs older than 30 days
 ```
 
-### GC with Content-Addressable Prefixes
+With timestamp-hash layout, GC removes entire prefixes whose git commit is unreachable
+(same as the previous alternative design).
 
-When using `{file_hash}` template, GC checks whether any `.blobsy` file on any
-reachable branch references the hash:
+## Gitignore Management
 
-1. Collect all file hashes from all `.blobsy` files across reachable branches.
-2. List all remote object keys.
-3. Remove objects whose hash isn't referenced.
+`blobsy add` manages `.gitignore` entries, same as the main design:
 
-More expensive (must scan all `.blobsy` files across branches) but straightforward.
+```gitignore
+# >>> blobsy-managed (do not edit) >>>
+data/bigfile.zip
+data/research/
+# <<< blobsy-managed <<<
+```
 
-## Comparison with Main Design
+For directories, the entire directory is gitignored and the `.ref` files live alongside
+the actual files *inside* the gitignored directory.
 
-| Aspect | Main design | Git-manifest alternative |
-| --- | --- | --- |
-| Manifest location | Remote (JSON file in S3) | Inline in `.blobsy` (git-versioned) |
-| Remote state | Mutable (overwritten on push) | Immutable (each push = new prefix) |
-| Conflict surface | Remote manifest + git pointer | Git only (`.blobsy` file merge) |
-| `blobsy status` | Requires network (fetch manifest) | Fully offline |
-| `blobsy push` precondition | None | `.blobsy` must be git committed |
-| Post-merge gap | Must push to `branches/main/` | No gap (prefix is per-commit, not per-branch) |
-| Cross-branch dedup | No (V1), yes (V2 versioned storage) | With `{file_hash}` template, yes from day 1 |
-| Storage overhead | One copy per branch prefix | One copy per push (default) or deduplicated (`{file_hash}`) |
-| Remote browsability | Files at `branches/main/path` | Files under `timestamp-hash/path` or flat hash keys |
-| GC complexity | Check if branch exists | Check if commit is reachable (or hash is referenced) |
-| Repo size impact | None (manifest is remote) | ~100 bytes per tracked file in `.blobsy` |
-| Merge conflicts | Rare (pointer is just timestamp) | More common (pointer has file list) |
-| History/reproducibility | Depends on S3 versioning | Every commit preserves its remote prefix |
+Wait — this is a problem. If `data/research/` is gitignored, then
+`data/research/report.md.ref` is also gitignored. Git won't track it.
+
+### Solving the Gitignore Problem
+
+**Option A: Negation patterns.** Gitignore the directory but un-ignore `.ref` files:
+
+```gitignore
+# >>> blobsy-managed (do not edit) >>>
+data/research/
+!data/research/**/*.ref
+# <<< blobsy-managed <<<
+```
+
+This works in git. The `.ref` files are tracked, everything else is ignored.
+But it requires gitignore negation patterns, which can be confusing.
+
+**Option B: `.ref` files live outside the tracked directory.** Instead of putting `.ref`
+files inside the directory, put them in a parallel structure:
+
+```
+data/research/              ← actual files (gitignored)
+  report.md
+  raw/response.json
+data/research.refs/         ← ref files (committed)
+  report.md.ref
+  raw/response.json.ref
+```
+
+Clean separation. The `.refs/` directory is committed, the data directory is gitignored.
+But the parallel structure can be confusing and fragile.
+
+**Option C: Single `.ref` file per directory with inline list (previous design).**
+Falls back to the inline manifest for directories.
+
+**Option D (recommended): `.ref` files inside the directory, with gitignore negation.**
+Option A is the most natural. The `.ref` files live where the files are. Negation
+patterns are a standard git feature, just less commonly used:
+
+```gitignore
+data/research/**
+!data/research/**/*.ref
+!data/research/**/
+```
+
+(The `!**/` line is needed so git traverses subdirectories to find `.ref` files.)
+
+`blobsy add` generates these patterns automatically. Users don't write them by hand.
+
+## Configuration
+
+Minimal changes from the main design:
+
+```yaml
+# .blobsy/config.yml
+backend: default
+
+backends:
+  default:
+    type: s3
+    bucket: my-datasets
+    prefix: project-v1/
+    region: us-east-1
+
+remote:
+  layout: content-addressable    # default | timestamp
+
+sync:
+  tool: auto
+  parallel: 8
+
+checksum:
+  algorithm: sha256
+
+ignore:
+  - "__pycache__/"
+  - "*.pyc"
+  - ".DS_Store"
+```
+
+The `namespace.prefix` template concept from the main design is replaced by
+`remote.layout`. There are no branch-based namespaces — the content hash or
+timestamp-commit prefix handles isolation.
+
+## Comparison with Main Design and Inline Manifest Alternative
+
+| Aspect | Main design | Inline manifest alt | Per-file ref (this doc) |
+| --- | --- | --- | --- |
+| Tracked unit | File or directory | File or directory | File (always) |
+| Manifest | Remote JSON | Inline in `.blobsy` | None (git is the manifest) |
+| Files per tracked path | 1 `.blobsy` | 1 `.blobsy` | 1 `.ref` per file |
+| Directory support | Directory pointer + manifest | Directory pointer + inline file list | Recursive `.ref` files |
+| Conflict granularity | Per-pointer (whole directory) | Per-pointer (whole directory, but line-level merge) | Per-file (independent `.ref`) |
+| Git merge | Rare conflicts on pointer | Structured conflicts on file list | Standard file conflicts (one `.ref` at a time) |
+| Custom tooling needed | `blobsy resolve` | `blobsy resolve` | None (`git checkout --ours/--theirs`) |
+| `blobsy commit` command | N/A | Yes (snapshot dir → manifest) | N/A (`blobsy add` per file) |
+| Offline status | No (need remote manifest) | Yes | Yes |
+| Post-merge gap | Yes (P0 issue) | No | No |
+| Delete semantics | Complex (P0 issue) | Trivial | Trivial |
+| Remote coordination | Manifest is shared mutable state | None (immutable prefixes) | None (content-addressed or immutable prefixes) |
+| Repo clutter | 1 file per tracked path | 1 file per tracked path | 1 `.ref` per tracked file |
+| Gitignore complexity | Simple | Simple | Needs negation patterns for directories |
+| Scaling | Unlimited (manifest is remote) | ~10K files per pointer | Unlimited (one .ref per file, git handles it) |
+
+## What This Design Eliminates
+
+From the main design, the following concepts are no longer needed:
+
+- **Manifests** (remote or inline) — gone entirely
+- **Directory pointer type** — no `type: directory`, just files
+- **`manifest_sha256`** — no manifest to hash
+- **Namespace prefixes / branch isolation** — content-addressable dedup replaces branch
+  prefixes
+- **`blobsy commit`** — `blobsy add` handles hashing
+- **`blobsy resolve`** — standard git conflict resolution works
+- **`blobsy ns ls` / `blobsy ns show` / `blobsy gc` (branch-based)** — replaced by
+  content-addressable GC
+- **Post-merge promotion** — blobs are where they are, refs point to them
+- **Delete semantics debate** — old blobs exist until GC, new pushes don't overwrite
 
 ## Open Design Questions
 
-### How Does Pull Find the Right Remote Prefix?
+### Gitignore Negation Robustness
 
-After `git pull`, you have a `.blobsy` file with a manifest.
-But which remote prefix contains the blobs?
+The `!**/*.ref` negation pattern is standard git, but less commonly used. Questions:
 
-Options:
+- Do all git clients handle this correctly? (Git CLI does. GitHub Desktop, VS Code,
+  etc. should — it's part of the gitignore spec.)
+- Does `.gitignore` interaction with nested `.gitignore` files cause surprises?
+- Should `blobsy doctor` validate that `.ref` files are actually tracked by git?
 
-1. **`remote_prefix` field in `.blobsy`.** Push writes it, git versions it.
-   Simple, but ties the pointer to a specific push.
-   Rebasing changes the commit hash, potentially invalidating the prefix.
+### Number of `.ref` Files in Large Directories
 
-2. **Derive from git log.** Walk history to find the commit that last touched `.blobsy`,
-   reconstruct the prefix.
-   No extra state, but requires git history and is fragile across rebases.
+A directory with 10,000 files creates 10,000 `.ref` files. Questions:
 
-3. **Try multiple prefixes.** Use the manifest's `updated` timestamp and current commit
-   hash to search.
-   Robust but slower.
+- Is this a problem for git performance? (Git handles millions of files routinely.)
+- Is it annoying in file browsers? (The `.ref` files are interspersed with the actual
+  files — but the actual files are gitignored, so `git ls-files` only shows `.ref`s.)
+- Should there be an option to store `.ref` files in a parallel directory
+  (`data/research.refs/`) for cleanliness?
 
-4. **Remote index file.** A small file at a known remote path that maps manifest hashes
-   to prefixes.
-   Push updates it.
-   Pull reads it once.
+### `remote_prefix` for Content-Addressable Layout
 
-Recommendation: option 1 (`remote_prefix` in `.blobsy`) for simplicity.
-The rebase concern is minimal — after a rebase, you `blobsy push` to create a new
-prefix for the new commit, which updates `remote_prefix`.
+With content-addressable layout, the remote key is deterministic from the file hash.
+Do we still need `remote_prefix` in the ref? The pull can reconstruct it from
+`sha256/{hash}`.
 
-### Storage Efficiency: Default Template Duplicates Unchanged Files
+If yes (keep it): the ref is self-contained, works even if the layout config changes.
+If no (omit it): simpler ref format, but pull depends on knowing the layout.
 
-With the default `{timestamp}-{git_hash_short}/` template, each push creates a full copy
-of all tracked files under a new prefix.
-If only one file changed, the other files are re-uploaded.
+Recommendation: keep it. A ref should be self-contained.
 
-Mitigations:
+### Mixed Directories (Some Files in Git, Some in Blobsy)
 
-1. **`{file_hash}` template** eliminates this entirely. Content-addressed = automatic
-   dedup.
-2. **Hybrid approach:** Push checks if the remote already has a file with the same hash
-   under a previous prefix, and skips re-upload.
-   The new prefix then references the old blob (requires either symlinks/redirects in
-   the remote, or a manifest that records per-file remote paths).
-3. **Accept the duplication** for the default template. Storage is cheap. Simplicity
-   wins. Users who care about dedup can use `{file_hash}`.
+A directory where some files are small (committed to git) and others are large (tracked
+by blobsy). With per-file refs, this is natural — only the large files get `.ref` files
+and gitignore entries. But:
 
-Recommendation: start with option 3 (accept duplication) for simplicity.
-Document `{file_hash}` as the optimization.
-Consider option 2 as a future enhancement.
+- The gitignore patterns need to be per-file (not per-directory).
+- `blobsy add` with ignore patterns handles this: files matching ignore patterns are
+  skipped.
+- The user may need to adjust `.gitignore` manually for fine-grained control.
 
-### Scaling Limits of Inline Manifest
-
-The `.blobsy` file grows linearly with the number of tracked files.
-At ~100 bytes per file entry:
-
-| Files | `.blobsy` size | Git diff | Practical? |
-| --- | --- | --- | --- |
-| 100 | ~10 KB | Clean | Yes |
-| 1,000 | ~100 KB | Fine | Yes |
-| 10,000 | ~1 MB | Noisy but workable | Yes, with care |
-| 100,000 | ~10 MB | Unwieldy | Consider external manifest |
-
-For the 100K+ case, a future extension could support a `manifest: external` mode where
-the `.blobsy` file stores only a hash of the full manifest, and the manifest itself is
-stored remotely or in a separate git-tracked file.
-
-### Relationship to `blobsy track` / `blobsy untrack`
-
-`blobsy track <path>` would:
-
-1. Create the `.blobsy` pointer file (as in main design).
-2. Add the path to `.gitignore`.
-3. Run `blobsy commit` to populate the initial manifest.
-
-`blobsy untrack <path>` would:
-
-1. Remove the `.blobsy` pointer file.
-2. Remove the `.gitignore` entry.
-3. Leave local files intact.
-
-### Delete Semantics on Push
-
-Since each push writes to a new prefix, there is no "delete from remote" during normal
-operations.
-If a file is removed from the manifest, it simply doesn't appear in the next push's
-prefix.
-The old prefix still has it.
-
-This makes delete semantics trivial:
-
-- No `--prune` flag needed.
-- No tombstones in manifests.
-- Old data is preserved until GC removes the prefix.
-
-This resolves the open P0 issue from the main design (`blobsy-05j8`) cleanly.
+This is essentially the same tradeoff as the main design's Scenario 3, but slightly
+simpler because there's no directory-level pointer to worry about.
 
 ## Summary
 
-The git-manifest approach trades repo size (~100 bytes per tracked file in `.blobsy`) for
-significant architectural simplification:
+The per-file ref design reduces blobsy to a single primitive:
 
-- No remote manifest coordination.
-- No mutable remote state.
-- No post-merge prefix gap.
-- No push/pull conflicts outside of git.
-- Offline status checks.
-- Trivial delete semantics.
-- Built-in history (every commit preserves its prefix).
-- Optional content-addressable dedup via `{file_hash}` template.
+**One file → one `.ref` → one blob.**
 
-The main cost is more frequent `.blobsy` merge conflicts, but these are structured
-(path + hash entries) and can be tooled with `blobsy resolve`.
+Everything else follows:
+
+- Directories are just recursive application.
+- Git is the manifest.
+- Conflicts are per-file, resolved with standard git tools.
+- The remote is a dumb blob store (content-addressable by default).
+- No remote coordination, no mutable state, no manifests.
+- Post-merge gaps and delete semantics are non-issues.
+
+The main tradeoff is gitignore complexity for tracked directories (negation patterns).
