@@ -315,6 +315,49 @@ For independent verification outside of lobs, SHA-256 is available everywhere:
 - Linux: `sha256sum <file>`
 - Windows: `Get-FileHash <file> -Algorithm SHA256`
 
+#### Why SHA-256 Over Provider-Native Hashes
+
+Cloud storage providers each compute their own checksums, but the landscape is too
+fragmented to rely on (see
+[backing store research](../research/current/research-2026-02-19-backing-store-features.md),
+Part 5). AWS S3 auto-computes CRC64NVME, GCS uses CRC32C, Azure uses MD5 (only for small
+uploads — large block uploads may have no server-side hash at all), Backblaze uses
+SHA-1, and R2/Wasabi/Tigris use MD5 ETags for non-multipart uploads only.
+Multipart uploads (standard for large files) produce composite checksums on most
+providers that don’t match a simple hash of the whole file — CRC64NVME on S3 is the
+notable exception.
+
+Computing SHA-256 independently and storing it in pointer files and manifests is the
+only portable approach that works consistently across all providers.
+It sidesteps all provider-specific hash fragmentation and gives lobs a single,
+well-understood verification mechanism regardless of backend.
+
+The transport layer already handles transfer integrity (S3 verifies uploads via ETags,
+`aws s3 sync` and `rclone` verify transfers internally), so lobs does not need to
+compute a provider-compatible hash for upload verification.
+When using the built-in SDK, lobs can provide `x-amz-checksum-sha256` with the upload
+and S3 verifies server-side — but this uses the same SHA-256 lobs already computes, not
+an additional algorithm.
+
+#### Future: Remote Staleness Detection via Provider Hashes
+
+One optimization for a future version: after a successful push, lobs could store the
+provider’s response hash (e.g., ETag, `x-amz-checksum-crc64nvme`) in the manifest as an
+opaque key-value pair — recording both the hash type and value (e.g.,
+`{"provider_hash_algorithm": "etag", "provider_hash": "\"d41d8cd9...\""}`). This enables
+cheap remote staleness detection: a `HeadObject` request returns the current provider
+hash, and if it matches the stored value, the remote file hasn’t changed since last push
+— without downloading or re-hashing.
+
+Storing the hash type alongside the value is important: if a user changes backends
+(e.g., migrates from S3 to R2), the stored provider hash becomes invalid.
+By recording the algorithm/type, lobs can detect the mismatch and fall back to a full
+comparison rather than silently producing wrong results.
+
+This is not needed for V1 — manifests and SHA-256 hashes handle all verification needs.
+But it would make `lobs status` faster for large deployments where even fetching the
+manifest is expensive compared to a single HEAD request per file.
+
 ### Manifests
 
 Manifests track the contents of directory targets.
@@ -1376,6 +1419,190 @@ Done. 1 namespace removed, 129.7 MB freed.
 - `lobs gc` cleans up branch namespaces that no longer have a corresponding local
   branch.
 
+## Corner Cases and Pitfalls
+
+The usage scenarios above show happy paths.
+This section catalogs what goes wrong and how lobs handles it (or how the user
+recovers).
+
+### Push/Commit Coordination
+
+**Pushed data but forgot to commit the pointer.** User runs `lobs push` (data uploads to
+remote) but doesn’t `git add` and `git commit` the updated `.lobs` pointer file.
+Other users have no way to know the remote data changed.
+The pointer in git still references the old hash.
+
+Recovery: commit the pointer file.
+Until then, other users see no change.
+
+Detection: `lobs status` on the pusher’s machine shows “up-to-date” (local matches
+remote). The problem is invisible to the pusher — it only manifests when other users
+don’t see the update.
+This is the most common mistake.
+
+**Committed the pointer but forgot to push data.** User updates a file, runs `git add`
+and `git commit` on the `.lobs` pointer (perhaps manually edited, or from a previous
+`lobs push` that was followed by more local changes before the data was re-pushed).
+Other users pull from git, see the updated pointer, run `lobs pull`, and the remote data
+doesn’t match the pointer hash — or doesn’t exist at all in the namespace.
+
+Recovery: the original user runs `lobs push` to upload the data that matches the
+committed pointer.
+
+Detection: `lobs pull` fails or warns when the remote file’s hash doesn’t match the
+pointer. `lobs status` on the pulling user’s machine shows “missing” with a pointer hash
+that can’t be resolved remotely.
+
+**Pushed data, then switched branches without committing.** User runs `lobs push` on
+branch A, then `git checkout B` without committing the updated pointer.
+The pointer update is lost (unstaged changes discarded by checkout, or left as
+uncommitted modifications).
+The data is in the remote namespace but nothing in git references it.
+
+Recovery: switch back to branch A, the uncommitted pointer changes may still be in the
+working tree. If lost, re-run `lobs push` to regenerate the pointer.
+
+### Post-Merge Namespace Gap
+
+After a branch merge (especially via CI/GitHub PR), the merged pointer file is on main
+but the `branches/main/` remote namespace still has pre-merge data.
+This is because the pointer doesn’t store the namespace — it’s resolved at runtime from
+the current branch.
+
+The data exists in `branches/feature-x/` but a user on main resolves to
+`branches/main/`.
+
+Recovery: a developer who has the local data (from working on the feature branch) checks
+out main and runs `lobs push`. This uploads the data to `branches/main/`.
+
+This is the expected workflow, not a bug — but it’s the most surprising behavior for new
+users. Scenario 5 walks through this in detail.
+
+Potential future improvement: `lobs push --from-namespace <ns>` to copy data between
+namespaces without needing the local files.
+
+### Concurrent Writers
+
+**Two users pushing to the same branch namespace.** With manifests enabled (default),
+the second push fails with exit code 2 if the manifest changed since the user’s last
+pull. The user must `lobs pull` first to get the latest state, then `lobs push` again.
+
+Without manifests, the transport tool (`aws s3 sync`, `rclone`) handles conflicts via
+last-write-wins semantics.
+Files may be partially overwritten if pushes overlap.
+
+**Two users updating fixed-namespace data simultaneously.** Same conflict detection
+applies. With manifests, the second writer gets a conflict error.
+Without manifests, last-write-wins.
+Fixed namespace data that changes frequently should use manifests (the default) and
+coordinate writes.
+
+### Interrupted Transfers
+
+**Push interrupted midway.** Some files uploaded, manifest not yet updated (manifest is
+written atomically at the end).
+Re-running `lobs push` is safe: already-uploaded files are detected via hash comparison
+and skipped. Only remaining files are transferred.
+The manifest is written after all uploads succeed.
+
+**Pull interrupted midway.** Some files downloaded, others missing.
+Re-running `lobs pull` is safe: already-downloaded files that match the manifest hash
+are skipped. Partially downloaded files (wrong size or hash) are re-downloaded.
+
+### Branch and Namespace Edge Cases
+
+**Detached HEAD.** Pushes go to `detached/<shortsha>/`. This works but creates
+namespaces that `lobs gc` does not clean up by default (gc only cleans `branches/`
+namespaces). CI environments that check out specific commits (detached HEAD) can
+accumulate orphaned namespaces.
+
+Mitigation: CI should use `--namespace-mode fixed` or explicit `--version` for CI-built
+data. For manual detached HEAD work, use `lobs ns ls` to find and manually remove
+orphaned `detached/` namespaces.
+
+**`lobs gc` deletes a colleague’s branch namespace.** `gc` checks local branches only.
+If a colleague has a remote branch that you haven’t fetched, `gc` considers its
+namespace stale and removes it.
+
+Mitigation: run `git fetch --all` before `lobs gc` to ensure all remote branches are
+known locally. Or use `lobs gc --dry-run` first to review what would be removed.
+The round 1 review (S2) recommends checking remote tracking branches as well — this may
+be addressed in implementation.
+
+**First push on a new branch is a full copy.** When you create a feature branch and
+`lobs push`, lobs uploads all files to the new `branches/feature-x/` namespace — even
+though the data is identical to `branches/main/`. There is no cross-namespace
+deduplication in V1. For large datasets, this can be slow and expensive.
+
+Mitigation: this is a known V1 limitation (listed in Scope Boundaries).
+For very large datasets where branch copies are impractical, consider `fixed` namespace
+mode or `version` mode instead.
+
+### Gitignore Misconfiguration
+
+**Mixed directory: forgot to adjust `.gitignore`.** After adding ignore patterns to a
+tracked directory, `lobs track` initially adds the entire directory to `.gitignore`. If
+the user doesn’t adjust this to exclude only the lobs-managed files, the small
+git-managed files are also gitignored — they won’t appear in `git status` and won’t be
+committed.
+
+Detection: `git status` doesn’t show the small files.
+`ls` shows them locally but they’re invisible to git.
+
+Recovery: edit `.gitignore` to replace the blanket directory entry with specific entries
+for the lobs-managed files only (as shown in Scenario 3).
+
+**Mixed directory: accidentally committed large files to git.** The inverse problem:
+`.gitignore` doesn’t cover the lobs-managed files, so `git add .` stages them.
+Large files end up in git history permanently.
+
+Detection: `git status` shows large files as staged.
+Commit sizes are unexpectedly large.
+
+Prevention: always verify `.gitignore` after setting up a mixed directory.
+`lobs status` shows which files are lobs-managed — cross-check against `.gitignore`.
+
+### Git Workflow Interactions
+
+**`git stash` doesn’t affect lobs data.** Stashing saves the pointer file changes but
+leaves the actual data (gitignored) untouched.
+After `git stash pop`, the pointer is restored but the local data may have changed in
+the meantime. Run `lobs status` after unstashing to check consistency.
+
+**`git revert` of a pointer update.** Reverting a commit that updated a pointer file
+restores the old hash in the pointer.
+The local data still has the newer content.
+`lobs status` shows “modified” (local doesn’t match pointer).
+`lobs pull` downloads the older version from remote (if it still exists in the namespace
+— lobs does not delete old versions from remote during normal sync).
+
+**`git rebase` / `git cherry-pick` with pointer conflicts.** Pointer files can conflict
+during rebase just like any other file.
+Standard git conflict resolution applies.
+After resolving, run `lobs status` to verify the pointer is consistent with local data,
+and `lobs push` if needed.
+
+**Manually edited `.lobs` pointer file.** If a user or tool modifies the hash, size, or
+other fields in a pointer file, `lobs status` may show incorrect state.
+`lobs verify` detects mismatches between the pointer hash and the actual local file.
+`lobs push` recalculates the hash and overwrites the pointer with correct values.
+
+### Credential and Backend Errors
+
+**Missing or expired credentials.** `lobs push` and `lobs pull` fail with an
+authentication error from the underlying transport tool (aws-cli, rclone, or the
+built-in SDK). The error message comes from the transport layer, not from lobs.
+
+Recovery: configure credentials via the standard mechanism for the backend (environment
+variables, `~/.aws/credentials`, IAM roles, rclone config).
+
+**`sync.tool: auto` selects the wrong tool.** A user has aws-cli installed for other
+purposes, but it’s not configured for the lobs backend’s endpoint or region.
+Auto-detection picks aws-cli, which fails.
+
+Mitigation: set `sync.tool` explicitly in config (e.g., `sync.tool: built-in`) to bypass
+auto-detection. Or configure aws-cli for the target endpoint.
+
 ## Sync Semantics
 
 ### Push (Local to Remote)
@@ -1641,6 +1868,8 @@ What `lobs` does not do (V1):
 - Content-addressable storage (path-mirrored only)
 - Multi-writer merge logic
 - Signed manifests or end-to-end cryptographic verification chains
+- Remote staleness detection via provider hashes (storing ETags/CRC64NVME from upload
+  responses for cheap `HeadObject`-based checks — see Integrity Model section)
 - Web UI
 
 These are candidates for future versions if demand warrants.
