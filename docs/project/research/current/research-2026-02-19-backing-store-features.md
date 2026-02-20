@@ -222,8 +222,8 @@ For users running MinIO, they can enable server-side compression AND set
 | Storage | $0.023/GB/month |
 | PUT/COPY/POST/LIST | $0.005 per 1,000 |
 | GET/SELECT | $0.0004 per 1,000 |
-| Egress (first 10 TB) | $0.09/GB |
-| Free tier | 5 GB for 12 months |
+| Egress (first 10 TB) | $0.09/GB (first 100 GB/month free, shared across all AWS services) |
+| Free tier | 5 GB storage for 12 months; 100 GB data transfer out/month (always free) |
 
 ### 2.2 Google Cloud Storage
 
@@ -255,15 +255,18 @@ For users running MinIO, they can enable server-side compression AND set
 `gcloud storage rsync` would consider everything “changed” and re-upload.
 This is exactly the problem blobsy’s manifest-based SHA-256 change detection solves.
 
-**Pricing (US multi-region, Standard):**
+**Pricing (Standard):**
 
-| Item | Cost |
-| --- | --- |
-| Storage | $0.020/GB/month |
-| Class A ops (PUT/LIST) | $0.05 per 10,000 |
-| Class B ops (GET/HEAD) | $0.004 per 10,000 |
-| Egress (first 1 TB) | ~$0.12/GB (Premium tier) |
-| Free tier | 5 GB (always free, not time-limited) |
+| Item | Single Region (us-east1) | US Multi-Region |
+| --- | --- | --- |
+| Storage | $0.020/GB/month | $0.026/GB/month |
+| Class A ops (PUT/LIST) | $0.05 per 10,000 | $0.10 per 10,000 |
+| Class B ops (GET/HEAD) | $0.004 per 10,000 | $0.004 per 10,000 |
+| Egress (first 1 TB) | ~$0.12/GB (Premium tier) | ~$0.12/GB (Premium tier) |
+| Free tier | 5 GB (always free, not time-limited); 100 GB egress/month |  |
+
+**Note:** Multi-region Class A ops doubled from $0.05 to $0.10 per 10,000 in April 2023.
+For most blobsy use cases, single-region is the better value.
 
 **Multipart upload limitation:** Composite objects (from multipart upload) only have
 CRC32C hashes, not MD5. Not a problem for blobsy (uses SHA-256 independently).
@@ -323,7 +326,7 @@ Good S3 compatibility.**
 | --- | --- |
 | **API** | S3-compatible |
 | **S3 compatibility** | Good. Works with `--endpoint-url` on aws-cli, rclone, and SDKs. |
-| **Storage classes** | Standard, Infrequent Access ($0.01/GB, 30d min, $0.01/GB retrieval) |
+| **Storage classes** | Standard ($0.015/GB), Infrequent Access ($0.01/GB, 30d min, $0.01/GB retrieval) |
 | **Versioning** | Yes |
 | **Lifecycle rules** | Standard -> IA only (one-way). IA -> Standard requires CopyObject. |
 | **Decompressive transcoding** | Yes -- same as GCS. Avoid for blobsy. |
@@ -337,10 +340,13 @@ Good S3 compatibility.**
 | Item | Cost |
 | --- | --- |
 | Storage (Standard) | $0.015/GB/month |
+| Storage (Infrequent Access) | $0.01/GB/month (30d min, $0.01/GB retrieval) |
 | Egress | **$0 (free)** |
 | Class A ops (PUT/LIST) | $4.50 per million ($0.045 per 10,000) |
+| Class A ops (IA) | $9.00 per million ($0.09 per 10,000) |
 | Class B ops (GET) | $0.36 per million ($0.0036 per 10,000) |
-| Free tier | 10 GB storage, 1M Class A, 10M Class B per month |
+| Class B ops (IA) | $0.90 per million ($0.009 per 10,000) |
+| Free tier | 10 GB storage, 1M Class A, 10M Class B per month (Standard only) |
 
 **blobsy integration:** Works with `type: s3` and custom endpoint.
 Already covered by the design.
@@ -459,8 +465,9 @@ versioning via pointer files and namespaces).
 
 | Provider | Storage $/GB/mo | Egress $/GB | PUT/10K | GET/10K | Free Tier | Min Charge |
 | --- | --- | --- | --- | --- | --- | --- |
-| **AWS S3** | $0.023 | $0.09 | $0.05 | $0.004 | 5 GB (12 mo) | None |
-| **GCS** | $0.020 | ~$0.12 | $0.05 | $0.004 | 5 GB (always) | None |
+| **AWS S3** | $0.023 | $0.09 | $0.05 | $0.004 | 5 GB (12 mo) + 100 GB egress/mo | None |
+| **GCS** (single region) | $0.020 | ~$0.12 | $0.05 | $0.004 | 5 GB (always) + 100 GB egress/mo | None |
+| **GCS** (multi-region) | $0.026 | ~$0.12 | $0.10 | $0.004 | (same) | None |
 | **Azure Blob** | $0.018 | $0.087 | $0.05 | $0.004 | 5 GB (12 mo) | None |
 | **Cloudflare R2** | $0.015 | **$0** | $0.045 | $0.0036 | 10 GB | None |
 | **Backblaze B2** | $0.005 | Free (3x) | **$0** | $0.004 | 10 GB | None |
