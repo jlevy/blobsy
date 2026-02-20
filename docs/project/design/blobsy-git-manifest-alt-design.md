@@ -51,7 +51,7 @@ data/research/raw/response.json.yref     ← ref (committed)
 data/research/raw/data.parquet.yref      ← ref (committed)
 ```
 
-`blobsy add data/research/` creates a `.yref` for every file, recursively.
+`blobsy track data/research/` creates a `.yref` for every file, recursively.
 Each `.yref` is independent.
 Git diffs, merges, and conflicts work per-file, naturally.
 
@@ -151,30 +151,42 @@ Simple and browsable, but uses more storage.
 
 ## Commands
 
-### `blobsy add`
+### `blobsy track`
 
-Start tracking a file or directory.
+Start tracking a file or directory with blobsy.
 
 ```bash
-# Single file
-$ blobsy add data/bigfile.zip
+# Single file — always externalizes, regardless of size rules
+$ blobsy track data/bigfile.zip
+Tracking data/bigfile.zip
 Created data/bigfile.zip.yref
 Added data/bigfile.zip to .gitignore
 
-# Directory (recursive)
-$ blobsy add data/research/
-Created data/research/report.md.yref
-Created data/research/raw/response.json.yref
-Created data/research/raw/data.parquet.yref
-Added data/research/ to .gitignore
-3 files tracked.
+# Directory — applies externalization rules to decide per-file
+$ blobsy track data/research/
+Scanning data/research/...
+  data/research/report.md          (12 KB, .md)    → kept in git
+  data/research/config.yaml        (800 B, .yaml)  → kept in git
+  data/research/model.bin          (500 MB, .bin)   → externalized (.yref)
+  data/research/raw/response.json  (2 MB, .json)    → kept in git (never list)
+  data/research/raw/data.parquet   (50 MB, .parquet) → externalized (.yref)
+2 files tracked, 3 kept in git.
 ```
+
+**Key distinction:**
+
+- **Explicit file** (`blobsy track data/bigfile.zip`): always externalizes. You named
+  the file — that's explicit intent.
+- **Directory** (`blobsy track data/research/`): applies the `externalize` rules from
+  `.blobsy.yml` (size threshold, always/never patterns) to decide per-file.
 
 What it does:
 
-1. For each file (recursively for directories), compute SHA-256.
-2. Create a `.yref` file adjacent to each file.
-3. Add the original file(s) to `.gitignore`.
+1. For each file to externalize: compute SHA-256, create a `.yref` adjacent to the file,
+   add the original file to `.gitignore`.
+2. For directories: skip files that don't meet the externalization rules (they stay in
+   git as normal files).
+3. Skip files matching `ignore` patterns.
 
 The `.yref` files are not yet git committed. The user does that:
 
@@ -183,15 +195,19 @@ $ git add data/bigfile.zip.yref
 $ git commit -m "Track bigfile with blobsy"
 ```
 
-**Ignore patterns** work the same as in the main design: configured in
-`.blobsy/config.yml`, use gitignore syntax, applied during recursive add:
+`blobsy track` is idempotent. Running it on an already-tracked file updates the hash
+if the file changed, or does nothing if unchanged. This makes it the single command for
+both "start tracking" and "update after modification":
 
-```yaml
-# .blobsy/config.yml
-ignore:
-  - "*.py"
-  - "__pycache__/"
-  - ".DS_Store"
+```bash
+# After modifying a tracked file
+$ blobsy track data/research/model.bin
+Updated data/research/model.bin.yref (sha256 changed)
+
+# Or refresh all tracked files in a directory
+$ blobsy track data/research/
+Updated data/research/model.bin.yref (sha256 changed)
+1 file updated, 1 unchanged.
 ```
 
 ### `blobsy sync`
@@ -225,7 +241,8 @@ Algorithm for each `.yref`:
    `remote_prefix` in ref).
 5. **If local is missing but remote has the blob:** pull (download blob).
 6. **If local differs from ref:** warn — file was modified locally but ref not updated.
-   Sync does not overwrite local modifications.
+   Run `blobsy track` to update the ref first. Sync does not overwrite local
+   modifications.
 
 Each file is independent. Sync handles them all in parallel (up to `sync.parallel`
 concurrent transfers).
@@ -262,41 +279,27 @@ What it does:
 
 No network access. The ref file has everything needed.
 
-### `blobsy add` (Update Mode)
-
-When files change, re-run `blobsy add` to update the refs:
-
-```bash
-# After modifying report.md
-$ blobsy add data/research/report.md
-Updated data/research/report.md.yref (sha256 changed)
-
-# Or update all refs in a directory
-$ blobsy add data/research/
-Updated data/research/report.md.yref (sha256 changed)
-2 files unchanged.
-
-$ git add data/research/report.md.yref
-$ git commit -m "Update report"
-$ blobsy sync
-```
-
-`blobsy add` is idempotent. Running it on an already-tracked file updates the hash if
-changed, or does nothing if unchanged.
-
-### `blobsy rm`
+### `blobsy untrack`
 
 Stop tracking a file or directory.
 
 ```bash
-$ blobsy rm data/bigfile.zip
+$ blobsy untrack data/bigfile.zip
+Untracked data/bigfile.zip
 Removed data/bigfile.zip.yref
 Removed data/bigfile.zip from .gitignore
-(Local file data/bigfile.zip preserved)
+(Local file preserved)
+
+# Directory (recursive)
+$ blobsy untrack data/research/
+Untracked 2 files in data/research/
+Removed data/research/model.bin.yref
+Removed data/research/raw/data.parquet.yref
+(Local files preserved)
 ```
 
-Removes the `.yref` and `.gitignore` entry. Does not delete the local file or remote
-blob.
+Removes the `.yref` and `.gitignore` entry. Does not delete local files or remote blobs.
+The user then `git add` + `git commit` to finalize the untracking.
 
 ## Per-File State Model
 
@@ -327,7 +330,7 @@ Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in re
 
 `blobsy sync` only operates on files whose `.yref` is committed to git.
 It never modifies `.yref` files (except to set `remote_prefix` after a successful push).
-The user controls the ref via `blobsy add` + `git commit`.
+The user controls the ref via `blobsy track` + `git commit`.
 
 Sync succeeds cleanly when all three layers agree.
 
@@ -382,17 +385,18 @@ conflicts.
 ```bash
 # Setup (one-time)
 $ blobsy init
-Created .blobsy/config.yml
+Created .blobsy.yml
 ? Bucket: my-datasets
 ? Region: us-east-1
 
 # Track files
-$ blobsy add data/model.bin
+$ blobsy track data/model.bin
+Tracking data/model.bin
 Created data/model.bin.yref
 Added data/model.bin to .gitignore
 
 # Commit refs to git
-$ git add data/model.bin.yref .gitignore .blobsy/config.yml
+$ git add data/model.bin.yref .gitignore .blobsy.yml
 $ git commit -m "Track model with blobsy"
 
 # Push blobs to remote
@@ -418,14 +422,14 @@ Done. 1 pulled.
 ```bash
 # User A modifies report.md
 A: vim data/research/report.md
-A: blobsy add data/research/report.md    # updates .yref
+A: blobsy track data/research/report.md    # updates .yref
 A: git add data/research/report.md.yref && git commit -m "Update report"
-A: blobsy sync                           # pushes blob
+A: blobsy sync                             # pushes blob
 A: git push
 
 # User B modifies data.parquet (concurrently)
 B: python process.py  # writes data/research/data.parquet
-B: blobsy add data/research/data.parquet
+B: blobsy track data/research/data.parquet
 B: git add data/research/data.parquet.yref && git commit -m "Update data"
 B: blobsy sync
 B: git pull                              # auto-merge: different .yref files
@@ -439,12 +443,12 @@ No conflicts. Different files = different `.yref` files = auto-merge.
 
 ```bash
 # User A modifies results.json
-A: blobsy add data/results.json
+A: blobsy track data/results.json
 A: git add data/results.json.yref && git commit
 A: blobsy sync && git push
 
 # User B also modified results.json
-B: blobsy add data/results.json
+B: blobsy track data/results.json
 B: git add data/results.json.yref && git commit
 B: git pull
 # CONFLICT on data/results.json.yref
@@ -464,7 +468,7 @@ B: git push
 $ git checkout -b feature/new-data
 
 # Work on the branch
-$ blobsy add data/new-results.parquet
+$ blobsy track data/new-results.parquet
 $ git add data/new-results.parquet.yref && git commit
 $ blobsy sync && git push
 
@@ -519,7 +523,7 @@ With timestamp-hash layout, GC removes entire prefixes whose git commit is unrea
 
 ## Gitignore Management
 
-`blobsy add` manages `.gitignore` entries, same as the main design:
+`blobsy track` manages `.gitignore` entries, same as the main design:
 
 ```gitignore
 # >>> blobsy-managed (do not edit) >>>
@@ -578,7 +582,7 @@ data/research/**
 
 (The `!**/` line is needed so git traverses subdirectories to find `.yref` files.)
 
-`blobsy add` generates these patterns automatically. Users don't write them by hand.
+`blobsy track` generates these patterns automatically. Users don't write them by hand.
 
 ## Configuration: `.blobsy.yml`
 
@@ -669,13 +673,13 @@ checksum:
 ```
 
 This means blobsy works out of the box with zero configuration.
-`blobsy add data/` uses sensible rules even if no `.blobsy.yml` exists.
+`blobsy track data/` uses sensible rules even if no `.blobsy.yml` exists.
 The only thing that *must* be configured is the backend (bucket, region, etc.) —
 everything else has a working default.
 
 ### Externalization Rules
 
-When `blobsy add <dir>` runs, it decides which files get externalized (`.yref` +
+When `blobsy track <dir>` runs, it decides which files get externalized (`.yref` +
 gitignored) vs. left alone (committed directly to git). The decision is based on
 **size** and **file type**:
 
@@ -694,10 +698,10 @@ externalize:
     - "*.json"
 ```
 
-**How it works with `blobsy add`:**
+**How it works with `blobsy track`:**
 
 ```bash
-$ blobsy add data/research/
+$ blobsy track data/research/
   data/research/report.md          (12 KB, .md)    → kept in git
   data/research/config.yaml        (800 B, .yaml)  → kept in git
   data/research/model.bin          (500 MB, .bin)   → externalized (.yref)
@@ -706,7 +710,7 @@ $ blobsy add data/research/
 3 files kept in git, 2 externalized.
 ```
 
-This eliminates the "mixed directory" problem entirely. `blobsy add` on a directory
+This eliminates the "mixed directory" problem entirely. `blobsy track` on a directory
 is smart by default — small text files stay in git, large binaries get `.yref` files.
 No manual per-file decisions needed.
 
@@ -830,7 +834,7 @@ compress:
 The combination of per-directory `.blobsy.yml`, externalization rules, and compression
 rules means:
 
-- **`blobsy add <dir>` just works.** No manual per-file decisions. The rules decide
+- **`blobsy track <dir>` just works.** No manual per-file decisions. The rules decide
   what's externalized and what stays in git.
 - **Compression is automatic.** Text-like formats get compressed. Already-compressed
   formats are left alone. Users don't think about it.
@@ -850,7 +854,7 @@ rules means:
 | Conflict granularity | Per-pointer (whole directory) | Per-pointer (whole directory, but line-level merge) | Per-file (independent `.yref`) |
 | Git merge | Rare conflicts on pointer | Structured conflicts on file list | Standard file conflicts (one `.yref` at a time) |
 | Custom tooling needed | `blobsy resolve` | `blobsy resolve` | None (`git checkout --ours/--theirs`) |
-| `blobsy commit` command | N/A | Yes (snapshot dir → manifest) | N/A (`blobsy add` per file) |
+| `blobsy commit` command | N/A | Yes (snapshot dir → manifest) | N/A (`blobsy track` per file) |
 | Offline status | No (need remote manifest) | Yes | Yes |
 | Post-merge gap | Yes (P0 issue) | No | No |
 | Delete semantics | Complex (P0 issue) | Trivial | Trivial |
@@ -868,7 +872,7 @@ From the main design, the following concepts are no longer needed:
 - **`manifest_sha256`** — no manifest to hash
 - **Namespace prefixes / branch isolation** — content-addressable dedup replaces branch
   prefixes
-- **`blobsy commit`** — `blobsy add` handles hashing
+- **`blobsy commit`** — `blobsy track` handles hashing (idempotent: track + update)
 - **`blobsy resolve`** — standard git conflict resolution works
 - **`blobsy ns ls` / `blobsy ns show` / `blobsy gc` (branch-based)** — replaced by
   content-addressable GC
@@ -909,12 +913,12 @@ Recommendation: keep it. A ref should be self-contained.
 
 ### Mixed Directories (Some Files in Git, Some in Blobsy)
 
-Resolved by externalization rules. `blobsy add <dir>` uses `min_size`, `always`, and
+Resolved by externalization rules. `blobsy track <dir>` uses `min_size`, `always`, and
 `never` patterns to decide per-file. Small text files stay in git; large binaries get
 `.yref` files. No manual decisions needed.
 
 For mixed directories, gitignore entries are per-file (not per-directory), since only
-some files are externalized. `blobsy add` manages these automatically.
+some files are externalized. `blobsy track` manages these automatically.
 
 ## Summary
 
@@ -934,5 +938,5 @@ Everything else follows:
 The main tradeoff is gitignore complexity for tracked directories (negation patterns).
 
 Layered `.blobsy.yml` configuration adds automatic externalization (by size and type)
-and compression (by type), so `blobsy add <dir>` makes smart per-file decisions with
+and compression (by type), so `blobsy track <dir>` makes smart per-file decisions with
 no manual intervention.
