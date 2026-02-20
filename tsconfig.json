@@ -1,4 +1,4 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/lobs" }]
+  "references": [{ "path": "./packages/blobsy" }]
 }

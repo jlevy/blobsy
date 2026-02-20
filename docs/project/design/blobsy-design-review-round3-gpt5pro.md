@@ -1,10 +1,10 @@
-# Senior Technical Review: LOBS (Large Object Storage for Git Repos)
+# Senior Technical Review: BLOBSY (Large Object Storage for Git Repos)
 
 **Docs reviewed:**
 
 * Sync tools + architecture landscape research
 * Atomic file write behavior across transports
-* LOBS design doc (draft)
+* BLOBSY design doc (draft)
 * Prior review notes: checksums/integrity (round 2)
 * Prior review notes: general (round 1)
 
@@ -12,7 +12,7 @@
 
 ## 1) Market placement, “does this fill a room?”, and strategic focus
 
-### Where LOBS sits in the ecosystem
+### Where BLOBSY sits in the ecosystem
 
 From the landscape research, there are broadly two families of solutions for “git + big
 data” workflows:
@@ -33,7 +33,7 @@ data” workflows:
 Separately there are **raw sync engines** (rclone/rsync/aws-cli) with no
 pointer/manifest coordination layer.
 
-LOBS explicitly chooses a hybrid position:
+BLOBSY explicitly chooses a hybrid position:
 
 * It is **not** Git hooks/filters + transparent checkout (unlike Git LFS).
 * It is **not** a pipeline / dataset orchestration framework (unlike DVC).
@@ -66,12 +66,12 @@ immutability.
 
 **Strategic recommendation:** Pick a crisp product promise for V1:
 
-* **V1 Promise A (simple):** “LOBS is a branch-isolated *sync* layer.
+* **V1 Promise A (simple):** “BLOBSY is a branch-isolated *sync* layer.
   Remote holds the *latest* state per namespace.
   Use `version` mode or bucket versioning for history.”
   This matches the transparent remote layout and avoids building CAS + GC.
 
-* **V1 Promise B (stronger):** “LOBS makes commits reproducible: pointers reference
+* **V1 Promise B (stronger):** “BLOBSY makes commits reproducible: pointers reference
   immutable remote content.”
   This requires a design shift (snapshots/CAS or equivalent).
 
@@ -84,13 +84,13 @@ mechanics. That mismatch will create user confusion and correctness complaints.
 
 ### The core mental model is good
 
-The “`.lobs` pointer file adjacent to a gitignored path” is a clean, explicit
+The “`.blobsy` pointer file adjacent to a gitignored path” is a clean, explicit
 convention:
 
 * It keeps Git clean (small pointers in Git history; large blobs out-of-band).
 * It avoids smudge/clean hooks and makes “getting large data” an explicit action
-  (`lobs pull`).
-* It is agent-friendly (a `.lobs` file is discoverable and self-documenting).
+  (`blobsy pull`).
+* It is agent-friendly (a `.blobsy` file is discoverable and self-documenting).
 
 This is one of the strongest design choices.
 
@@ -108,8 +108,8 @@ literal remote path in pointers (avoids embedding branch names in pointers).
 
 ### Delegating transfers is sensible
 
-Letting mature tools do the heavy lifting (`aws-cli`, `rclone`, fallback SDK) keeps LOBS
-small and leverages battle-tested retry/parallelism behavior.
+Letting mature tools do the heavy lifting (`aws-cli`, `rclone`, fallback SDK) keeps
+BLOBSY small and leverages battle-tested retry/parallelism behavior.
 
 Also: your atomic write research supports this delegation story—AWS CLI and rclone
 already provide per-file atomic downloads in common cases, reducing the number of tricky
@@ -140,8 +140,8 @@ I’ll get into that under gaps.
 ### P0-1: Versioning semantics are inconsistent with the proposed remote layout
 
 The design claims you can restore an older version by checking out an older pointer and
-running `lobs pull`, because “the current namespace still contains the data” and LOBS
-“never deletes remote objects during normal sync operations.”
+running `blobsy pull`, because “the current namespace still contains the data” and
+BLOBSY “never deletes remote objects during normal sync operations.”
 
 But the remote layout shown is *mutable path-based keys* (e.g.,
 `branches/main/data/prices.parquet.zst`). Pushing new data to the same path overwrites
@@ -188,7 +188,7 @@ You don’t need to jump fully to “opaque CAS everywhere” if you want browsa
 can keep “path-mirrored” *within* a snapshot, while still using immutable snapshot ids
 at the top level.
 
-If you want LOBS to feel correct in Git terms (checkout old commit → get the right
+If you want BLOBSY to feel correct in Git terms (checkout old commit → get the right
 data), you’ll eventually need something like Option B.
 
 * * *
@@ -218,18 +218,18 @@ Recommended V1 contract:**
 
 1. Add a command (even if V1 is minimal):
 
-   * `lobs promote --from <source-namespace> --to <target-namespace> [paths...]`
-   * or `lobs ns copy <from> <to> [paths...]` For S3 this can use server-side
+   * `blobsy promote --from <source-namespace> --to <target-namespace> [paths...]`
+   * or `blobsy ns copy <from> <to> [paths...]` For S3 this can use server-side
      CopyObject, which is fast and avoids re-downloading.
 
 2. Add a CI/verifier command:
 
-   * `lobs check-remote` that verifies that for the current commit’s pointers, the
+   * `blobsy check-remote` that verifies that for the current commit’s pointers, the
      expected objects/manifests exist in the resolved namespace.
      This directly addresses the “pointer committed but data not pushed” failure mode
      called out in the earlier review.
 
-3. Make `lobs push` semantics robust to “remote missing”:
+3. Make `blobsy push` semantics robust to “remote missing”:
 
    * Even if local bytes match the pointer hash, if the remote object is missing in the
      current namespace, `push` should upload it (without changing the pointer).
@@ -273,7 +273,7 @@ This one change greatly improves:
 
 DVC’s success here is instructive: directory tracking works because Git stores a stable
 identifier for the directory snapshot.
-LOBS needs the same idea, even if the remote store is path-mirrored.
+BLOBSY needs the same idea, even if the remote store is path-mirrored.
 
 * * *
 
@@ -292,21 +292,21 @@ multipart uploads. If you compress, it’s a checksum of the compressed bytes an
 * **If you truly need remote-vs-local-vs-pointer conflict detection:** You must store a
   comparable remote-side digest:
 
-  * as object metadata (e.g., `x-amz-meta-lobs-sha256: <uncompressed-sha256>`) *or*
+  * as object metadata (e.g., `x-amz-meta-blobsy-sha256: <uncompressed-sha256>`) *or*
   * as a sidecar object `file.ext.lobsmeta.json` containing `{sha256, size, ...}`.
     Sidecar is more transport-agnostic (works with any backend and any sync tool).
 
 * **If you don’t need this in V1:** Lean into the “Git is the coordination layer” model:
 
-  * conflict is detected at merge-time of `.lobs` pointers in Git and/or at
+  * conflict is detected at merge-time of `.blobsy` pointers in Git and/or at
     directory-manifest concurrency checks,
   * single-file remote conflicts are handled by “pull first, then push” discipline.
 
 Given your stated “single-writer model (V1)” and the complexity of portable metadata
 setting across aws-cli/rclone/custom backends, I would **drop single-file remote
-conflict detection from V1** and rely on pointer workflow + optional `lobs check-remote`
-in CI. Keep the pointer-level common ancestor logic as a *future* enhancement once you
-have a universal metadata/sidecar story.
+conflict detection from V1** and rely on pointer workflow + optional
+`blobsy check-remote` in CI. Keep the pointer-level common ancestor logic as a *future*
+enhancement once you have a universal metadata/sidecar story.
 
 * * *
 
@@ -322,14 +322,14 @@ Those don’t automatically compose unless you add one of these mechanisms:
 
 1. **Staging directory representation:**
 
-   * lobs materializes a “remote view” directory with `.zst` files,
+   * blobsy materializes a “remote view” directory with `.zst` files,
    * then runs `aws s3 sync` on that staging directory.
    * pull does the reverse: sync into a staging directory then decompress into working
      dir.
 
 2. **File-by-file transfer orchestration:**
 
-   * lobs decides exactly which files to upload/download (via manifest diff),
+   * blobsy decides exactly which files to upload/download (via manifest diff),
    * compresses each file to a temp file (or streams) and calls `aws s3 cp` /
      `rclone copy` for that file,
    * no `sync` used for compressed representations.
@@ -340,13 +340,13 @@ handles incremental,” but doesn’t lock down which approach is used when.
 **Recommendation (maintainable and correct):**
 
 * When `manifest: true` (directory), treat transfer tools as **copy engines**, not diff
-  engines. LOBS owns diffing using manifest hashes; transfer tool only moves bytes for a
-  known list of objects.
+  engines. BLOBSY owns diffing using manifest hashes; transfer tool only moves bytes for
+  a known list of objects.
 * When `manifest: false`, allow “pure delegation mode” using `aws s3 sync` /
   `rclone sync` (and probably require `compression: none` for that mode, unless you do
   staging).
 
-This keeps the code coherent: one mode is “LOBS-coordinated,” the other is
+This keeps the code coherent: one mode is “BLOBSY-coordinated,” the other is
 “tool-coordinated.”
 
 * * *
@@ -357,7 +357,7 @@ This keeps the code coherent: one mode is “LOBS-coordinated,” the other is
 
 **What’s good**
 
-* Small human-readable pointer files with an explicit `format: lobs/0.1`.
+* Small human-readable pointer files with an explicit `format: blobsy/0.1`.
 * Including `sha256` + `size` for single files is correct and makes diffs meaningful.
 
 **Gaps / improvements**
@@ -380,7 +380,7 @@ This keeps the code coherent: one mode is “LOBS-coordinated,” the other is
    Today, some of these live in config hierarchy (including global).
    That’s risky.
 
-4. **Stability of formatting matters.** If LOBS rewrites pointer YAML, enforce stable
+4. **Stability of formatting matters.** If BLOBSY rewrites pointer YAML, enforce stable
    key ordering and minimal diffs.
    Don’t reorder keys or emit different quoting on each run.
 
@@ -389,7 +389,7 @@ This keeps the code coherent: one mode is “LOBS-coordinated,” the other is
 Single file:
 
 ```yaml
-format: lobs/0.1
+format: blobsy/0.1
 type: file
 sha256: <64-lower-hex>
 size: <bytes>
@@ -401,7 +401,7 @@ updated: <iso-utc>
 Directory:
 
 ```yaml
-format: lobs/0.1
+format: blobsy/0.1
 type: directory
 manifest: true
 manifest_sha256: <64-lower-hex>           # or tree hash
@@ -493,7 +493,7 @@ updated: <iso-utc>
    * If mode is `version` and no version id is set, is it an error?
      (It should be.)
    * Do versions accumulate forever?
-     If yes, provide explicit `lobs ns rm versions/<id>` or optional GC policy.
+     If yes, provide explicit `blobsy ns rm versions/<id>` or optional GC policy.
 
 4. **Per-pointer namespace overrides and mixed namespaces** This is powerful but will
    complicate:
@@ -557,7 +557,7 @@ workflows).
 The atomic writes research is directly relevant:
 
 * AWS CLI and rclone do per-file atomic downloads by default; the built-in AWS SDK
-  streaming path does not, so LOBS must implement temp+rename for built-in downloads.
+  streaming path does not, so BLOBSY must implement temp+rename for built-in downloads.
 * Pointer files and any local manifest caches must also be written atomically
   (temp+rename).
 * Per-file atomicity ≠ transactional directory sync; idempotency + rerun is the right
@@ -565,14 +565,14 @@ The atomic writes research is directly relevant:
 
 **Concrete recommendations**
 
-1. Implement a consistent atomic write utility in LOBS:
+1. Implement a consistent atomic write utility in BLOBSY:
 
    * small files: write-file-atomic / atomically
    * streaming large files: stream to temp file in same directory and rename
 
 2. Add a cleanup story:
 
-   * `lobs clean` or startup cleanup of `.lobs-tmp-*` remnants.
+   * `blobsy clean` or startup cleanup of `.blobsy-tmp-*` remnants.
 
 3. Document expected interrupted-state behavior:
 
@@ -590,7 +590,7 @@ Recommendation:
 * `auto` should perform a lightweight capability check (credentials + endpoint
   reachability) and fall through to the next tool on failure.
 
-* Add `lobs doctor` to print:
+* Add `blobsy doctor` to print:
 
   * resolved backend + endpoint
   * selected sync tool and why
@@ -613,7 +613,7 @@ transfers” principle.)
 
 **Where it needs more spec**
 
-1. **Where does compression occur?** You should explicitly define whether LOBS:
+1. **Where does compression occur?** You should explicitly define whether BLOBSY:
 
    * streams compression into upload (only possible with built-in SDK / custom
      pipeline), or
@@ -626,8 +626,8 @@ transfers” principle.)
    * record the per-file “stored_as” in manifest.
 
 3. **Suffix ambiguity** Prior review flagged `.zst` ambiguity (native `.zst` vs
-   LOBS-compressed). The simplest path is to accept it and rely on pointer/manifest
-   metadata. If you want remote clarity, consider `.lobs.zst`.
+   BLOBSY-compressed). The simplest path is to accept it and rely on pointer/manifest
+   metadata. If you want remote clarity, consider `.blobsy.zst`.
 
 4. **Small-file thresholds** (optional) Compression overhead on tiny files can be
    counterproductive. Consider a default threshold (e.g., don’t compress < 4KB) or at
@@ -651,8 +651,8 @@ transfers” principle.)
    `.gitignore` adjustments.
    For V1, I would either:
 
-   * strongly recommend “keep LOBS-managed data in dedicated directories,” or
-   * flip the model from “ignore patterns” to “include patterns” (so LOBS can generate
+   * strongly recommend “keep BLOBSY-managed data in dedicated directories,” or
+   * flip the model from “ignore patterns” to “include patterns” (so BLOBSY can generate
      ignore entries for the included large files and leave the rest normal).
 
 * * *
@@ -662,7 +662,7 @@ transfers” principle.)
 There’s a direct contradiction between:
 
 * “No interactive prompts” in Agent Integration, and
-* the interactive `lobs init` example.
+* the interactive `blobsy init` example.
 
 **Recommendation:** Clarify policy as:
 
@@ -679,7 +679,7 @@ Also consider a **schema version** for `--json` output so automation isn’t bri
 This is a big maintainability and adoption issue that isn’t currently addressed:
 
 * Repo-level config can include `type: command` backends and custom compression
-  commands. If those configs are committed, then **running `lobs pull` can execute
+  commands. If those configs are committed, then **running `blobsy pull` can execute
   arbitrary commands from a repo you cloned**.
 
 That’s a serious supply-chain footgun.
@@ -688,11 +688,11 @@ That’s a serious supply-chain footgun.
 
 * Disallow `command` backend and custom compress/decompress commands from repo config by
   default. Allow them only in user-level config, or require an explicit
-  `--allow-unsafe-config` / `lobs trust` action per repo.
+  `--allow-unsafe-config` / `blobsy trust` action per repo.
 * At minimum: print a loud warning the first time a repo tries to execute repo-specified
   commands.
 
-This one change dramatically improves safety and makes it easier to recommend LOBS
+This one change dramatically improves safety and makes it easier to recommend BLOBSY
 broadly.
 
 * * *
@@ -703,7 +703,7 @@ If you want a maintainable V1 that still has flexibility:
 
 ### Keep (core differentiators)
 
-* `.lobs` pointers + `track/untrack`
+* `.blobsy` pointers + `track/untrack`
 * `push/pull/status/verify`
 * namespace modes: `branch` and `fixed` (ship `version` only if fully specified)
 * directory manifests with SHA-256 and `manifest_sha256` in pointer
@@ -712,8 +712,8 @@ If you want a maintainable V1 that still has flexibility:
 
 ### Defer or narrow
 
-* `lobs sync` (bidirectional) → defer until you have clear delete semantics and conflict
-  handling (prior review called it dangerous/underspecified).
+* `blobsy sync` (bidirectional) → defer until you have clear delete semantics and
+  conflict handling (prior review called it dangerous/underspecified).
 * `command` backend → defer or restrict to user config (security)
 * advanced namespace GC (`ns ls` with sizes) → can be slow/expensive; start with minimal
   `gc --dry-run` + safe checks
@@ -753,7 +753,8 @@ This keeps the surface area tight, while keeping room to expand.
 * Decide and document remote versioning semantics (latest mirror vs immutable
   snapshots).
 * Add `manifest_sha256` (or tree hash) to directory pointers.
-* Define branch merge/promotion workflow (and ideally add `lobs promote` or `ns copy`).
+* Define branch merge/promotion workflow (and ideally add `blobsy promote` or
+  `ns copy`).
 * Resolve delete semantics (local prune, remote prune, default safety).
 * Either implement remote hash metadata/sidecar for single-file conflict detection or
   remove from V1.
@@ -765,19 +766,19 @@ This keeps the surface area tight, while keeping room to expand.
 
 * Branch name sanitization spec.
 * `gc` safety: check remote branches, detached namespaces, TTL.
-* Auto tool detection robustness + `lobs doctor`.
+* Auto tool detection robustness + `blobsy doctor`.
 * Security model: restrict repo-specified command execution.
 
 ### P2 (nice-to-have / later)
 
-* Compression suffix clarity (`.lobs.zst`) and dictionary compression future-proofing.
+* Compression suffix clarity (`.blobsy.zst`) and dictionary compression future-proofing.
 * Export/import spec details.
 
 * * *
 
 ## Closing assessment
 
-The backbone of LOBS—**explicit pointer files, namespace-based separation, remote
+The backbone of BLOBSY—**explicit pointer files, namespace-based separation, remote
 manifests, and delegated transfer**—is a strong and market-relevant architecture for the
 “plain directories + S3 sync” gap identified in your research.
 

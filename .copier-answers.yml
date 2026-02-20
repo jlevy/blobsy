@@ -6,6 +6,6 @@ author_name: Joshua Levy
 github_org: jlevy
 package_description: A simple, serverless CLI for large file storage in Git that uses
   S3, R2, or any other backend
-package_name: lobs
-repo_name: lobs
-workspace_name: lobs
+package_name: blobsy
+repo_name: blobsy
+workspace_name: blobsy

@@ -1,7 +1,7 @@
 tbd_format: f03
 tbd_version: 0.1.22
 display:
-  id_prefix: lobs
+  id_prefix: blobsy
 sync:
   branch: tbd-sync
   remote: origin

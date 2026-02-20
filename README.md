@@ -1,4 +1,4 @@
-# lobs
+# blobsy
 
 A simple, serverless CLI for large file storage in Git that uses S3, R2, or any other
 backend

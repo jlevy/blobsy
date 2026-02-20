@@ -6,7 +6,7 @@
 
 **Related**:
 
-- [lobs-design.md](../../design/lobs-design.md) -- lobs design document
+- [blobsy-design.md](../../design/blobsy-design.md) -- blobsy design document
 
 * * *
 
@@ -374,7 +374,7 @@ remote storage.
 
 This section surveys tools that can serve as **delegated transport engines** -- CLIs or
 libraries that handle the actual upload/download of files to S3-compatible storage.
-A sync framework like lobs can delegate heavy lifting to these tools rather than
+A sync framework like blobsy can delegate heavy lifting to these tools rather than
 implementing its own transfer logic.
 
 Key properties for a transport tool:
@@ -707,7 +707,7 @@ The TypeScript SDK provides only a `ReadableStream` from `GetObjectCommand`. All
 filesystem management is the caller’s responsibility.
 The standard pattern for atomic streaming writes in Node.js:
 
-1. Write to a temp file in the same directory (e.g., `file.lobs-tmp-XXXXXX`).
+1. Write to a temp file in the same directory (e.g., `file.blobsy-tmp-XXXXXX`).
 2. On stream completion, `fs.rename(temp, final)` (atomic within the same filesystem).
 3. On error, `fs.unlink(temp)`.
 
@@ -947,7 +947,7 @@ ds+https://example.com/data/my-dataset    # Plain HTTPS (static hosting)
 ```
 
 The `ds://` scheme is illustrative -- a real implementation would choose a scheme
-appropriate to the tool (e.g., `lobs://` for lobs).
+appropriate to the tool (e.g., `blobsy://` for blobsy).
 
 ### URI Resolution Flow
 

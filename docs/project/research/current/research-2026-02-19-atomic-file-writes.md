@@ -1,10 +1,10 @@
-# Research: Atomic File Writes for lobs Sync Operations
+# Research: Atomic File Writes for blobsy Sync Operations
 
 **Date:** 2026-02-19
 
 **Related:**
 
-- [lobs-design.md](../../design/lobs-design.md) -- lobs design document
+- [blobsy-design.md](../../design/blobsy-design.md) -- blobsy design document
 - [research-sync-tools-landscape.md](research-sync-tools-landscape.md) -- Key findings
   integrated into Section 1.6 (Atomic File Write Behavior Across Transports)
 
@@ -12,14 +12,14 @@
 
 ## Summary
 
-A core design question for lobs: when pulling files from remote storage, should lobs
+A core design question for blobsy: when pulling files from remote storage, should blobsy
 ensure each file is written atomically (temp file + rename)?
 Or can it rely on the transport tool to handle this?
 
 **Finding:** AWS CLI and rclone both write atomically by default.
-The built-in `@aws-sdk/client-s3` path does not -- lobs must handle it.
+The built-in `@aws-sdk/client-s3` path does not -- blobsy must handle it.
 This means the design’s `sync.tool: auto` hierarchy (aws-cli -> rclone -> built-in) has
-different atomicity guarantees depending on which tool is selected, and lobs needs to
+different atomicity guarantees depending on which tool is selected, and blobsy needs to
 fill the gap for the built-in fallback.
 
 * * *
@@ -117,28 +117,28 @@ await pipeline(response.Body, createWriteStream("/path/to/file"));
 This writes directly to the final path.
 If the process is interrupted, you get a partial file at the destination.
 
-**lobs must implement atomic writes when using the built-in S3 transport.**
+**blobsy must implement atomic writes when using the built-in S3 transport.**
 
 * * *
 
-## Implications for lobs
+## Implications for blobsy
 
 ### What the design gets for free
 
 When `sync.tool` is `aws-cli` or `rclone` (the first two options in the `auto`
 resolution order), file writes are already atomic.
-lobs doesn’t need to wrap these tools with additional atomic-write logic.
+blobsy doesn’t need to wrap these tools with additional atomic-write logic.
 
 This covers the majority of real-world usage, since `auto` prefers aws-cli and rclone
 over built-in.
 
-### What lobs must handle itself
+### What blobsy must handle itself
 
-When `sync.tool` is `built-in` (the `@aws-sdk/client-s3` fallback), lobs must implement
-atomic writes:
+When `sync.tool` is `built-in` (the `@aws-sdk/client-s3` fallback), blobsy must
+implement atomic writes:
 
 1. Download to a temp file in the same directory as the target (e.g.,
-   `file.parquet.lobs-tmp-XXXXXX`).
+   `file.parquet.blobsy-tmp-XXXXXX`).
 2. On success, `fs.rename(temp, final)` (atomic on POSIX within the same filesystem).
 3. On failure, `fs.unlink(temp)`.
 
@@ -149,25 +149,25 @@ different mounts.
 
 ### Manifest writes
 
-Regardless of transport tool, lobs writes manifests itself.
-The remote manifest (`.lobs-manifest.json`) should be written atomically:
+Regardless of transport tool, blobsy writes manifests itself.
+The remote manifest (`.blobsy-manifest.json`) should be written atomically:
 
 - **Remote:** Upload the complete manifest as a single S3 PUT. S3 PUTs are atomic -- the
   object either exists in full or doesn’t. There is no risk of a partial manifest on S3.
-- **Local:** If lobs ever caches manifests locally, use temp file + rename.
+- **Local:** If blobsy ever caches manifests locally, use temp file + rename.
 
 ### Pointer file writes
 
-Pointer files (`.lobs` files) are written by lobs, not by the transport tool.
-These should also use temp file + rename, since a partial `.lobs` file would break
+Pointer files (`.blobsy` files) are written by blobsy, not by the transport tool.
+These should also use temp file + rename, since a partial `.blobsy` file would break
 subsequent operations.
 
 * * *
 
 ## Atomic Write Libraries for Node.js
 
-For lobs’s built-in transport path (and for writing pointer files and local manifests),
-there are several options:
+For blobsy’s built-in transport path (and for writing pointer files and local
+manifests), there are several options:
 
 ### [`write-file-atomic`](https://www.npmjs.com/package/write-file-atomic)
 
@@ -204,7 +204,7 @@ async function atomicStreamWrite(
   targetPath: string,
 ): Promise<void> {
   const suffix = randomBytes(6).toString("hex");
-  const tempPath = `${targetPath}.lobs-tmp-${suffix}`;
+  const tempPath = `${targetPath}.blobsy-tmp-${suffix}`;
 
   try {
     await pipeline(source, createWriteStream(tempPath));
@@ -234,11 +234,11 @@ No library needed -- the pattern is simple enough to implement directly.
 | `aws-cli` | Yes | AWS CLI (s3transfer) | Target untouched; temp file may remain |
 | `rclone` | Yes (default) | rclone | Target untouched; `.partial` may remain |
 | `rclone --inplace` | No | N/A | Target is partial |
-| `built-in` | Must be implemented | lobs | lobs must use temp + rename |
+| `built-in` | Must be implemented | blobsy | blobsy must use temp + rename |
 
-| lobs-written file | Atomic? | How? |
+| blobsy-written file | Atomic? | How? |
 | --- | --- | --- |
-| `.lobs` pointer files | Should be | `write-file-atomic` or manual temp + rename |
+| `.blobsy` pointer files | Should be | `write-file-atomic` or manual temp + rename |
 | Remote manifests | Yes (inherent) | S3 PUT is atomic |
 | Local manifest cache | Should be | `write-file-atomic` or manual temp + rename |
 
@@ -250,19 +250,19 @@ No library needed -- the pattern is simple enough to implement directly.
 
 2. **Implement atomic writes in the built-in transport path.** Use the streaming temp +
    rename pattern above.
-   Use a recognizable prefix (e.g., `.lobs-tmp-`) so stale temp files from interrupted
+   Use a recognizable prefix (e.g., `.blobsy-tmp-`) so stale temp files from interrupted
    operations can be identified and cleaned up.
 
-3. **Use `write-file-atomic` (or equivalent) for all lobs-written files:** pointer
+3. **Use `write-file-atomic` (or equivalent) for all blobsy-written files:** pointer
    files, local config updates, any local manifest cache.
 
-4. **Do not add an `--inplace` flag to lobs.** The atomicity guarantee should be
+4. **Do not add an `--inplace` flag to blobsy.** The atomicity guarantee should be
    unconditional. Users who want non-atomic rclone behavior can set
-   `sync.extra_flags: "--inplace"` in config, but lobs shouldn’t encourage it.
+   `sync.extra_flags: "--inplace"` in config, but blobsy shouldn’t encourage it.
 
-5. **Add a `lobs clean` or cleanup mechanism** that removes stale `.lobs-tmp-*` files
-   left behind by interrupted operations.
-   Or simply: on push/pull startup, remove any existing `.lobs-tmp-*` files in target
+5. **Add a `blobsy clean` or cleanup mechanism** that removes stale `.blobsy-tmp-*`
+   files left behind by interrupted operations.
+   Or simply: on push/pull startup, remove any existing `.blobsy-tmp-*` files in target
    directories before beginning.
 
 6. **Note that per-file atomicity does not give transactional sync.** If a directory

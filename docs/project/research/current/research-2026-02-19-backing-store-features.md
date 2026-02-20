@@ -6,13 +6,13 @@
 
 **Related:**
 
-- [lobs-design.md](../../design/lobs-design.md) -- lobs design document
+- [blobsy-design.md](../../design/blobsy-design.md) -- blobsy design document
 - [research-2026-02-19-sync-tools-landscape.md](research-2026-02-19-sync-tools-landscape.md)
   -- companion research on sync tools, transport engines, and architecture options
 
 ## Overview
 
-This research investigates the **backing store layer** for lobs: cloud object storage
+This research investigates the **backing store layer** for blobsy: cloud object storage
 providers and their features relevant to syncing large files.
 The key questions are whether any provider offers transparent compression, how sync
 tools interact with each provider, and how providers compare on pricing, features, and
@@ -22,13 +22,13 @@ compatibility.
 
 1. Which storage providers offer transparent compression (compress on write, decompress
    on read)?
-2. How does “decompressive transcoding” (GCS, R2) work, and is it useful for lobs?
+2. How does “decompressive transcoding” (GCS, R2) work, and is it useful for blobsy?
 3. What are the sync tool capabilities per provider (`aws s3 sync`,
    `gcloud storage rsync`, `azcopy`, `rclone`)?
 4. How do providers compare on pricing, features, S3 compatibility, and SDK support?
-5. Should lobs do client-side compression, or can it rely on the storage layer?
-6. What automatic hashes/checksums does each provider compute, and can lobs use them to
-   verify if a local file matches a remote file without downloading it?
+5. Should blobsy do client-side compression, or can it rely on the storage layer?
+6. What automatic hashes/checksums does each provider compute, and can blobsy use them
+   to verify if a local file matches a remote file without downloading it?
 
 ## Scope
 
@@ -39,7 +39,7 @@ compatibility.
 
 ## Part 1: Storage-Layer Compression
 
-The central question: can lobs delegate compression to the storage provider?
+The central question: can blobsy delegate compression to the storage provider?
 
 ### 1.1 True Transparent Compression
 
@@ -91,7 +91,7 @@ Must be explicitly enabled with `allow_encryption=on`. When enabled, MinIO pads
 compressed output to 256-byte multiples to obscure size information.
 
 **Bottom line:** MinIO proves transparent compression works at the storage layer.
-But it’s self-hosted only, which limits relevance for lobs’s primary use case (hosted
+But it’s self-hosted only, which limits relevance for blobsy’s primary use case (hosted
 cloud storage).
 
 #### All Other Providers: No Transparent Compression
@@ -183,16 +183,16 @@ The landscape is clear:
 | --- | --- | --- | --- |
 | **Transparent (MinIO-style)** | Self-hosted only | ETags break, cross-provider replication fails | Not portable enough |
 | **Decompressive transcoding (GCS/R2)** | GCS, R2 | Range requests break, checksums invalidated, billing surprises | Avoid -- too many edge cases |
-| **Client-side compression** | Works with all providers | Adds `.zst` extension, changes file size; lobs manages the mapping | The portable solution |
+| **Client-side compression** | Works with all providers | Adds `.zst` extension, changes file size; blobsy manages the mapping | The portable solution |
 | **No compression** | Works with all providers | Maximum simplicity, `aws s3 sync` delegation works perfectly | Simplest option |
 
-**The lobs design should treat compression as a client-side concern.** Files stored with
-`.zst` extensions (not HTTP `Content-Encoding` headers) avoid all provider-specific
+**The blobsy design should treat compression as a client-side concern.** Files stored
+with `.zst` extensions (not HTTP `Content-Encoding` headers) avoid all provider-specific
 decompressive transcoding edge cases.
 The skip_extensions list for already-compressed formats is essential.
 
 For users running MinIO, they can enable server-side compression AND set
-`compression: none` in lobs config for the best of both worlds.
+`compression: none` in blobsy config for the best of both worlds.
 
 ## Part 2: Provider Feature Comparison
 
@@ -239,7 +239,7 @@ For users running MinIO, they can enable server-side compression AND set
 | **Object composition** | Compose up to 32 objects server-side (no data transfer) |
 | **Parallel composite uploads** | Auto-split large files into chunks, upload in parallel, compose server-side |
 | **Turbo replication** | 15-minute RPO for dual-region buckets (SLA-backed) |
-| **Decompressive transcoding** | Yes -- see Section 1.2 (not recommended for lobs) |
+| **Decompressive transcoding** | Yes -- see Section 1.2 (not recommended for blobsy) |
 | **HTTP protocol** | HTTP/2 |
 | **Sync tool** | `gcloud storage rsync` (checksums or mtime; `gsutil` is deprecated) |
 | **Node.js SDK** | `@google-cloud/storage` (mature, streaming, resumable uploads, TransferManager for parallel ops) |
@@ -253,7 +253,7 @@ For users running MinIO, they can enable server-side compression AND set
 
 **Important:** After `git checkout`, mtime resets on all files.
 `gcloud storage rsync` would consider everything “changed” and re-upload.
-This is exactly the problem lobs’s manifest-based SHA-256 change detection solves.
+This is exactly the problem blobsy’s manifest-based SHA-256 change detection solves.
 
 **Pricing (US multi-region, Standard):**
 
@@ -266,9 +266,9 @@ This is exactly the problem lobs’s manifest-based SHA-256 change detection sol
 | Free tier | 5 GB (always free, not time-limited) |
 
 **Multipart upload limitation:** Composite objects (from multipart upload) only have
-CRC32C hashes, not MD5. Not a problem for lobs (uses SHA-256 independently).
+CRC32C hashes, not MD5. Not a problem for blobsy (uses SHA-256 independently).
 
-**lobs integration path:** Use `type: s3` with HMAC keys and
+**blobsy integration path:** Use `type: s3` with HMAC keys and
 `endpoint: https://storage.googleapis.com` for V1. No new backend type needed.
 A future native `type: gcs` backend would enable ADC auth and parallel composite
 uploads.
@@ -310,7 +310,7 @@ Requires dedicated backend support, not S3-compatible.**
 | Egress (5 GB - 10 TB) | $0.087/GB |
 | Free tier | 5 GB for 12 months |
 
-**lobs integration path:** Cannot use `type: s3`. Needs a distinct `type: azure-blob`
+**blobsy integration path:** Cannot use `type: s3`. Needs a distinct `type: azure-blob`
 backend. Lowest-effort path is via `sync.tool: rclone` (rclone has native `azureblob`
 backend). For `built-in` engine, add `@azure/storage-blob` as an optional dependency.
 
@@ -326,7 +326,7 @@ Good S3 compatibility.**
 | **Storage classes** | Standard, Infrequent Access ($0.01/GB, 30d min, $0.01/GB retrieval) |
 | **Versioning** | Yes |
 | **Lifecycle rules** | Standard -> IA only (one-way). IA -> Standard requires CopyObject. |
-| **Decompressive transcoding** | Yes -- same as GCS. Avoid for lobs. |
+| **Decompressive transcoding** | Yes -- same as GCS. Avoid for blobsy. |
 | **Compression** | None at storage layer |
 | **Sync tool** | `aws s3 sync` with `--endpoint-url`, rclone |
 | **Node.js SDK** | Uses `@aws-sdk/client-s3` with R2 endpoint |
@@ -342,7 +342,7 @@ Good S3 compatibility.**
 | Class B ops (GET) | $0.36 per million ($0.0036 per 10,000) |
 | Free tier | 10 GB storage, 1M Class A, 10M Class B per month |
 
-**lobs integration:** Works with `type: s3` and custom endpoint.
+**blobsy integration:** Works with `type: s3` and custom endpoint.
 Already covered by the design.
 
 ### 2.5 Backblaze B2
@@ -371,7 +371,7 @@ Free uploads.**
 | LIST | First 2,500/day free, then $0.004 per 1,000 |
 | Free tier | 10 GB storage |
 
-**lobs integration:** Works with `type: s3` and custom endpoint.
+**blobsy integration:** Works with `type: s3` and custom endpoint.
 
 ### 2.6 Wasabi
 
@@ -426,8 +426,8 @@ Zero egress. No versioning.**
 **Maturity:** Production-grade since 2025. Series A ($25M, Spark Capital).
 Used by fal.ai, Hedra, Railway.
 
-**lobs integration:** Works with `type: s3` and custom endpoint.
-Lack of versioning is a limitation but not blocking for lobs (lobs manages its own
+**blobsy integration:** Works with `type: s3` and custom endpoint.
+Lack of versioning is a limitation but not blocking for blobsy (blobsy manages its own
 versioning via pointer files and namespaces).
 
 ### 2.8 DigitalOcean Spaces
@@ -553,7 +553,7 @@ dataset pulled 10 times/month, compression saves ~$600/month in egress alone (vs
 
 **Not worth it:**
 
-- Already-compressed data (the lobs `skip_extensions` list handles this)
+- Already-compressed data (the blobsy `skip_extensions` list handles this)
 - Latency-sensitive single-file operations
 
 ### 4.4 Compression Performance vs Network Throughput
@@ -577,12 +577,12 @@ Client-side compression conflicts with full sync delegation:
 | Scenario | `aws s3 sync` delegation? |
 | --- | --- |
 | `compression: none` | Yes -- `aws s3 sync ./local/ s3://bucket/prefix/` just works |
-| `compression: zstd` | No -- lobs must compress to temp dir, then sync the temp dir, or manage individual uploads |
+| `compression: zstd` | No -- blobsy must compress to temp dir, then sync the temp dir, or manage individual uploads |
 
-With `compression: none`, lobs can truly delegate directory sync to the transport tool.
-With compression enabled, lobs must mediate every file transfer (compress before upload,
-decompress after download), and the “transparent storage format” goal is partially
-compromised (remote has `.zst` files).
+With `compression: none`, blobsy can truly delegate directory sync to the transport
+tool. With compression enabled, blobsy must mediate every file transfer (compress before
+upload, decompress after download), and the “transparent storage format” goal is
+partially compromised (remote has `.zst` files).
 
 **Design recommendation:** Default to `compression: none` for maximum simplicity and
 sync delegation compatibility.
@@ -591,7 +591,7 @@ the added complexity.
 
 ## Part 5: Automatic Hashes and Remote Verification
 
-A key question for lobs: can you check if a local file matches a remote file **without
+A key question for blobsy: can you check if a local file matches a remote file **without
 downloading it**? This depends on what hashes each provider computes automatically and
 whether those hashes are retrievable via metadata APIs.
 
@@ -673,8 +673,8 @@ The `@google-cloud/storage` SDK exposes them via `file.metadata.crc32c` and
 ```
 
 **Limitation:** Composite objects (from parallel composite uploads or object
-composition) only have CRC32C, not MD5. If lobs ever uses parallel composite uploads for
-GCS, it can only verify via CRC32C.
+composition) only have CRC32C, not MD5. If blobsy ever uses parallel composite uploads
+for GCS, it can only verify via CRC32C.
 
 **Gotcha:** `gcloud storage rsync` uses these checksums for change detection when you
 pass `--checksums-only`, making it more reliable than `aws s3 sync`’s size+mtime
@@ -701,8 +701,8 @@ client doesn’t set it, the blob has **no hash at all**.
 
 **This is the weakest checksum support of any major provider.** Large files uploaded
 without explicit MD5 cannot be verified remotely.
-If lobs supports Azure Blob, it should always compute and set MD5 (or a custom metadata
-hash) during upload.
+If blobsy supports Azure Blob, it should always compute and set MD5 (or a custom
+metadata hash) during upload.
 
 ### 5.5 Backblaze B2
 
@@ -753,9 +753,9 @@ For multipart, use the CRC64NVME full-object checksum if specified at upload tim
 | **Tigris** | Yes (non-multipart) | MD5 (ETag) | Composite only | Medium |
 | **DO Spaces** | Yes (non-multipart) | MD5 (ETag) | Composite only | Medium |
 
-### 5.8 Implications for lobs
+### 5.8 Implications for blobsy
 
-**lobs’s SHA-256 approach is validated.** The provider-native checksum landscape is
+**blobsy’s SHA-256 approach is validated.** The provider-native checksum landscape is
 fragmented:
 
 - Different providers use different algorithms (CRC64NVME, CRC32C, MD5, SHA-1)
@@ -763,7 +763,7 @@ fragmented:
 - Some providers (Azure, B2 for large files) may have no hash at all
 - Composite checksums don’t match simple file hashes
 
-lobs’s design of computing SHA-256 independently and storing it in pointer
+blobsy’s design of computing SHA-256 independently and storing it in pointer
 files/manifests is the **only portable approach** that works consistently across all
 providers. It avoids all the provider-specific hash fragmentation.
 
@@ -774,12 +774,12 @@ providers. It avoids all the provider-specific hash fragmentation.
    S3 can verify SHA-256, GCS can verify CRC32C/MD5, etc.
 2. **Quick staleness check:** `HeadObject` returning a provider hash is cheaper than
    downloading the file to re-hash.
-   If lobs tracks the provider-side hash (e.g., ETag) in the manifest alongside SHA-256,
-   it can do a quick remote check without download.
+   If blobsy tracks the provider-side hash (e.g., ETag) in the manifest alongside
+   SHA-256, it can do a quick remote check without download.
 3. **S3 Batch Operations:** For large-scale verification, S3’s server-side compute
    checksum can verify billions of objects without any data transfer.
 
-**Recommendation:** lobs should:
+**Recommendation:** blobsy should:
 
 - Always provide a checksum during upload (SHA-256 for S3, CRC32C for GCS) for transfer
   integrity
@@ -788,7 +788,7 @@ providers. It avoids all the provider-specific hash fragmentation.
 - Not rely on provider checksums for change detection (too fragmented, too many edge
   cases with multipart uploads)
 
-## Part 6: lobs Backend Integration Strategy
+## Part 6: blobsy Backend Integration Strategy
 
 ### 6.1 V1: S3-Compatible Providers via `type: s3`
 
@@ -857,7 +857,7 @@ lowest-effort path to multi-cloud support.
 
 1. **Client-side compression is the only portable approach.** No hosted provider offers
    transparent compression.
-   The lobs design correctly treats compression as a client concern.
+   The blobsy design correctly treats compression as a client concern.
 
 2. **Consider `compression: none` as default.** Maximum simplicity, full sync delegation
    to transport tools, transparent remote storage.
@@ -865,13 +865,13 @@ lowest-effort path to multi-cloud support.
 
 3. **Avoid `Content-Encoding: gzip` for storage.** GCS decompressive transcoding and
    R2’s similar behavior create too many edge cases.
-   Lobs should store `.zst` files as opaque blobs with
+   Blobsy should store `.zst` files as opaque blobs with
    `Content-Type: application/octet-stream`.
 
 4. **SHA-256 in pointer files is the right choice for change detection.** ETags are
    unreliable across providers (MinIO compression changes them, GCS transcoding
    invalidates them, multipart uploads produce non-MD5 ETags).
-   Lobs’s independent SHA-256 hashing sidesteps all of this.
+   Blobsy’s independent SHA-256 hashing sidesteps all of this.
 
 5. **`type: s3` covers most providers in V1.** GCS, R2, B2, Wasabi, Tigris, DO Spaces
    all work via S3-compatible endpoint.
