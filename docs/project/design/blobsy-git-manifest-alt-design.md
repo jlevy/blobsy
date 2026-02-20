@@ -24,7 +24,7 @@ systems that already solve each subproblem well:
 | Conflict resolution | Git (standard merge on `.yref` files) | Nothing — git handles it |
 | File transfer | External CLI tools (`aws-cli`, `s5cmd`, `rclone`) | Orchestrates concurrency |
 | Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
-| Compression | Standard algorithms (`zstd`, `gzip`) | Decides what to compress, shells out |
+| Compression | Node.js built-in `node:zlib` (`zstd`, `gzip`, `brotli`) | Decides what to compress, applies rules |
 | History / versioning | Git (commit history of `.yref` files) | Nothing — git handles it |
 
 **Simple should be simple, complex should be possible.** Every pluggable layer has a
@@ -33,8 +33,8 @@ sensible default. Zero config gets you working. But everything is overridable:
 - **Remote layout:** content-addressable by default, timestamp-hash if you want
   chronological browsing, or custom.
 - **Transfer tool:** auto-detected, or pinned to a specific CLI.
-- **Compression:** zstd by default, gzip if you need compatibility, none if you don't
-  want it. Per-file-type rules.
+- **Compression:** zstd by default (built into Node 24+ via `node:zlib`), gzip or
+  brotli if preferred, none if you don't want it. Per-file-type rules.
 - **Externalization:** size threshold + type patterns. Works out of the box, fully
   configurable per-directory.
 - **Backend:** S3 by default, any object store via config.
@@ -785,14 +785,17 @@ No manual per-file decisions needed.
 
 ### Compression Rules
 
-Blobsy can compress files before uploading to the remote, and decompress on pull.
+Blobsy compresses files before uploading to the remote and decompresses on pull.
+Node 24+ has built-in zstd, gzip, and brotli support in `node:zlib` — no external
+dependencies or CLI tools needed. Compression runs in-process with streaming support.
+
 Compression is controlled by **file type** and **size**:
 
 ```yaml
 # .blobsy.yml
 compress:
   min_size: 100kb                  # don't bother compressing tiny files
-  algorithm: zstd                  # zstd (default) | gzip | none
+  algorithm: zstd                  # zstd (default) | gzip | brotli | none
   always:                          # always compress these
     - "*.json"
     - "*.csv"
