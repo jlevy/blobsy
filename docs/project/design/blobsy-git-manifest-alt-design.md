@@ -7,7 +7,7 @@
 **Supplements:** [blobsy-design.md](blobsy-design.md)
 
 This document describes an alternative architecture that eliminates manifests entirely.
-Every tracked file gets its own `.ref` file committed to git.
+Every tracked file gets its own `.yref` file committed to git.
 Directories are just the recursive case — no special handling needed.
 
 Backend system, configuration hierarchy, transfer delegation, and other fundamentals
@@ -19,10 +19,10 @@ The main design has two primitives: single-file pointers and directory pointers 
 manifests). The previous alternative (inline manifest) unified these into one pointer
 file per tracked path. But there's a simpler option: eliminate manifests entirely.
 
-**The insight:** a directory of tracked files is just a directory of `.ref` files.
+**The insight:** a directory of tracked files is just a directory of `.yref` files.
 No manifest needed — git is the manifest.
 
-This collapses the design to a single primitive: one file, one `.ref`.
+This collapses the design to a single primitive: one file, one `.yref`.
 
 ## Core Idea
 
@@ -30,15 +30,15 @@ For every large file you want to track:
 
 ```
 data/bigfile.zip           ← actual file (gitignored)
-data/bigfile.zip.ref       ← ref file (committed to git)
+data/bigfile.zip.yref       ← ref file (committed to git)
 ```
 
-The `.ref` file contains the content hash, size, and the remote location of the blob.
+The `.yref` file contains the content hash, size, and the remote location of the blob.
 It is a small YAML file committed to git.
 The actual file is gitignored.
 
 **That's the whole system.** There is no directory type, no manifest, no remote
-coordination state. Git tracks `.ref` files. The remote is a dumb blob store.
+coordination state. Git tracks `.yref` files. The remote is a dumb blob store.
 
 ### Directories Are Just Recursion
 
@@ -46,13 +46,13 @@ To track a directory, you track every file in it:
 
 ```
 data/research/                          ← directory (gitignored)
-data/research/report.md.ref             ← ref (committed)
-data/research/raw/response.json.ref     ← ref (committed)
-data/research/raw/data.parquet.ref      ← ref (committed)
+data/research/report.md.yref             ← ref (committed)
+data/research/raw/response.json.yref     ← ref (committed)
+data/research/raw/data.parquet.yref      ← ref (committed)
 ```
 
-`blobsy add data/research/` creates a `.ref` for every file, recursively.
-Each `.ref` is independent.
+`blobsy add data/research/` creates a `.yref` for every file, recursively.
+Each `.yref` is independent.
 Git diffs, merges, and conflicts work per-file, naturally.
 
 ## Ref File Format
@@ -60,7 +60,7 @@ Git diffs, merges, and conflicts work per-file, naturally.
 ```yaml
 # blobsy — https://github.com/jlevy/blobsy
 
-format: blobsy-ref/0.1
+format: blobsy-yref/0.1
 sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
 remote_prefix: 20260220T140322Z-a3f2b1c
@@ -70,7 +70,7 @@ Fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `format` | string | Format version (`blobsy-ref/0.1`) |
+| `format` | string | Format version (`blobsy-yref/0.1`) |
 | `sha256` | string | 64-char lowercase hex, SHA-256 of the file content |
 | `size` | integer | File size in bytes |
 | `remote_prefix` | string | Remote prefix where the blob was pushed (set by `blobsy push`) |
@@ -158,14 +158,14 @@ Start tracking a file or directory.
 ```bash
 # Single file
 $ blobsy add data/bigfile.zip
-Created data/bigfile.zip.ref
+Created data/bigfile.zip.yref
 Added data/bigfile.zip to .gitignore
 
 # Directory (recursive)
 $ blobsy add data/research/
-Created data/research/report.md.ref
-Created data/research/raw/response.json.ref
-Created data/research/raw/data.parquet.ref
+Created data/research/report.md.yref
+Created data/research/raw/response.json.yref
+Created data/research/raw/data.parquet.yref
 Added data/research/ to .gitignore
 3 files tracked.
 ```
@@ -173,13 +173,13 @@ Added data/research/ to .gitignore
 What it does:
 
 1. For each file (recursively for directories), compute SHA-256.
-2. Create a `.ref` file adjacent to each file.
+2. Create a `.yref` file adjacent to each file.
 3. Add the original file(s) to `.gitignore`.
 
-The `.ref` files are not yet git committed. The user does that:
+The `.yref` files are not yet git committed. The user does that:
 
 ```bash
-$ git add data/bigfile.zip.ref
+$ git add data/bigfile.zip.yref
 $ git commit -m "Track bigfile with blobsy"
 ```
 
@@ -208,15 +208,15 @@ Syncing 4 tracked files...
 Done. 1 pushed, 1 pulled, 2 up to date.
 ```
 
-**Precondition: `.ref` files must be committed to git.**
-If any `.ref` has uncommitted changes, sync errors:
+**Precondition: `.yref` files must be committed to git.**
+If any `.yref` has uncommitted changes, sync errors:
 
 ```
-Error: data/bigfile.zip.ref has uncommitted changes.
+Error: data/bigfile.zip.yref has uncommitted changes.
 Run 'git add' and 'git commit' first.
 ```
 
-Algorithm for each `.ref`:
+Algorithm for each `.yref`:
 
 1. **Read the ref** — get `sha256`, `size`, `remote_prefix`.
 2. **Check local file** — hash it (using stat cache for speed).
@@ -256,7 +256,7 @@ $ blobsy status
 
 What it does:
 
-1. Find all `.ref` files in the repo.
+1. Find all `.yref` files in the repo.
 2. For each, compare local file hash against the ref's `sha256`.
 3. Report: ok, modified, missing, not pushed (no `remote_prefix`).
 
@@ -269,14 +269,14 @@ When files change, re-run `blobsy add` to update the refs:
 ```bash
 # After modifying report.md
 $ blobsy add data/research/report.md
-Updated data/research/report.md.ref (sha256 changed)
+Updated data/research/report.md.yref (sha256 changed)
 
 # Or update all refs in a directory
 $ blobsy add data/research/
-Updated data/research/report.md.ref (sha256 changed)
+Updated data/research/report.md.yref (sha256 changed)
 2 files unchanged.
 
-$ git add data/research/report.md.ref
+$ git add data/research/report.md.yref
 $ git commit -m "Update report"
 $ blobsy sync
 ```
@@ -290,12 +290,12 @@ Stop tracking a file or directory.
 
 ```bash
 $ blobsy rm data/bigfile.zip
-Removed data/bigfile.zip.ref
+Removed data/bigfile.zip.yref
 Removed data/bigfile.zip from .gitignore
 (Local file data/bigfile.zip preserved)
 ```
 
-Removes the `.ref` and `.gitignore` entry. Does not delete the local file or remote
+Removes the `.yref` and `.gitignore` entry. Does not delete the local file or remote
 blob.
 
 ## Per-File State Model
@@ -305,7 +305,7 @@ Each tracked file has state across three layers:
 | Layer | What | Where |
 | --- | --- | --- |
 | **Local** | Actual file on disk | `data/bigfile.zip` |
-| **Ref** | `.ref` committed in git | `data/bigfile.zip.ref` |
+| **Ref** | `.yref` committed in git | `data/bigfile.zip.yref` |
 | **Remote** | Blob in remote store | `s3://bucket/.../bigfile.zip` |
 
 ### State Table
@@ -325,8 +325,8 @@ Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in re
 
 ### Key Invariant
 
-`blobsy sync` only operates on files whose `.ref` is committed to git.
-It never modifies `.ref` files (except to set `remote_prefix` after a successful push).
+`blobsy sync` only operates on files whose `.yref` is committed to git.
+It never modifies `.yref` files (except to set `remote_prefix` after a successful push).
 The user controls the ref via `blobsy add` + `git commit`.
 
 Sync succeeds cleanly when all three layers agree.
@@ -335,11 +335,11 @@ Sync succeeds cleanly when all three layers agree.
 
 ### Why Conflicts Are Trivially Resolved
 
-Each file has its own `.ref`. Two people modifying different files change different
-`.ref` files. Git auto-merges with zero conflicts.
+Each file has its own `.yref`. Two people modifying different files change different
+`.yref` files. Git auto-merges with zero conflicts.
 
 The only conflict case: two people modify **the same file**. Then git sees a conflict on
-that file's `.ref`:
+that file's `.yref`:
 
 ```
 <<<<<<< HEAD
@@ -355,8 +355,8 @@ Resolution is the same as any git conflict: pick one side, or merge manually.
 
 ```bash
 # Accept theirs
-$ git checkout --theirs data/results.json.ref
-$ git add data/results.json.ref
+$ git checkout --theirs data/results.json.yref
+$ git add data/results.json.yref
 $ blobsy pull data/results.json    # get their version of the actual file
 ```
 
@@ -364,11 +364,11 @@ $ blobsy pull data/results.json    # get their version of the actual file
 
 | Scenario | Main design | Per-file ref |
 | --- | --- | --- |
-| A modifies X, B modifies Y | Auto-merge (maybe, depends on manifest layout) | Auto-merge (always — different `.ref` files) |
-| A modifies X, B modifies X | Remote manifest conflict + pointer conflict | Git conflict on `X.ref` only |
-| A adds X, B adds Y | Auto-merge | Auto-merge (always — different `.ref` files) |
-| A adds X, B adds X (same path) | Remote manifest conflict | Git conflict on `X.ref` |
-| A deletes X, B modifies X | Complex (manifest + pointer) | Git conflict on `X.ref` |
+| A modifies X, B modifies Y | Auto-merge (maybe, depends on manifest layout) | Auto-merge (always — different `.yref` files) |
+| A modifies X, B modifies X | Remote manifest conflict + pointer conflict | Git conflict on `X.yref` only |
+| A adds X, B adds Y | Auto-merge | Auto-merge (always — different `.yref` files) |
+| A adds X, B adds X (same path) | Remote manifest conflict | Git conflict on `X.yref` |
+| A deletes X, B modifies X | Complex (manifest + pointer) | Git conflict on `X.yref` |
 | Resolution tool | `blobsy resolve` (custom) | `git checkout --ours/--theirs` (standard) |
 
 **Key advantage:** conflicts are standard git conflicts on individual files.
@@ -388,11 +388,11 @@ Created .blobsy/config.yml
 
 # Track files
 $ blobsy add data/model.bin
-Created data/model.bin.ref
+Created data/model.bin.yref
 Added data/model.bin to .gitignore
 
 # Commit refs to git
-$ git add data/model.bin.ref .gitignore .blobsy/config.yml
+$ git add data/model.bin.yref .gitignore .blobsy/config.yml
 $ git commit -m "Track model with blobsy"
 
 # Push blobs to remote
@@ -418,40 +418,40 @@ Done. 1 pulled.
 ```bash
 # User A modifies report.md
 A: vim data/research/report.md
-A: blobsy add data/research/report.md    # updates .ref
-A: git add data/research/report.md.ref && git commit -m "Update report"
+A: blobsy add data/research/report.md    # updates .yref
+A: git add data/research/report.md.yref && git commit -m "Update report"
 A: blobsy sync                           # pushes blob
 A: git push
 
 # User B modifies data.parquet (concurrently)
 B: python process.py  # writes data/research/data.parquet
 B: blobsy add data/research/data.parquet
-B: git add data/research/data.parquet.ref && git commit -m "Update data"
+B: git add data/research/data.parquet.yref && git commit -m "Update data"
 B: blobsy sync
-B: git pull                              # auto-merge: different .ref files
+B: git pull                              # auto-merge: different .yref files
 B: git push
 B: blobsy sync                           # pushes blob
 ```
 
-No conflicts. Different files = different `.ref` files = auto-merge.
+No conflicts. Different files = different `.yref` files = auto-merge.
 
 ### Two Users: Same File Conflict
 
 ```bash
 # User A modifies results.json
 A: blobsy add data/results.json
-A: git add data/results.json.ref && git commit
+A: git add data/results.json.yref && git commit
 A: blobsy sync && git push
 
 # User B also modified results.json
 B: blobsy add data/results.json
-B: git add data/results.json.ref && git commit
+B: git add data/results.json.yref && git commit
 B: git pull
-# CONFLICT on data/results.json.ref
+# CONFLICT on data/results.json.yref
 
 # Resolve: take A's version
-B: git checkout --theirs data/results.json.ref
-B: git add data/results.json.ref
+B: git checkout --theirs data/results.json.yref
+B: git add data/results.json.yref
 B: blobsy sync    # pulls A's version of the actual file
 B: git commit -m "Resolve: take A's results"
 B: git push
@@ -465,19 +465,19 @@ $ git checkout -b feature/new-data
 
 # Work on the branch
 $ blobsy add data/new-results.parquet
-$ git add data/new-results.parquet.ref && git commit
+$ git add data/new-results.parquet.yref && git commit
 $ blobsy sync && git push
 
 # Merge back to main
 $ git checkout main && git merge feature/new-data
-# .ref files merge cleanly (new file = new .ref = no conflict)
+# .yref files merge cleanly (new file = new .yref = no conflict)
 $ blobsy sync    # blobs already in remote from feature branch push
 $ git push
 ```
 
 **No post-merge prefix gap.**
 The blobs were pushed from the feature branch.
-After merge, the `.ref` files on main point to the same blobs.
+After merge, the `.yref` files on main point to the same blobs.
 `blobsy sync` on main has nothing to do — the blobs are already there.
 
 This completely eliminates the P0 issue from the main design (`blobsy-a64l`).
@@ -485,7 +485,7 @@ This completely eliminates the P0 issue from the main design (`blobsy-a64l`).
 ## Garbage Collection
 
 With content-addressable layout (default), GC removes blobs not referenced by any
-`.ref` file on any reachable branch:
+`.yref` file on any reachable branch:
 
 ```bash
 $ blobsy gc --dry-run
@@ -503,7 +503,7 @@ Done. 1 blob removed, 50 MB freed.
 
 Algorithm:
 
-1. Collect all `sha256` values from all `.ref` files across all reachable branches/tags.
+1. Collect all `sha256` values from all `.yref` files across all reachable branches/tags.
 2. List all remote objects.
 3. Remove objects whose hash isn't in the referenced set.
 
@@ -528,55 +528,55 @@ data/research/
 # <<< blobsy-managed <<<
 ```
 
-For directories, the entire directory is gitignored and the `.ref` files live alongside
+For directories, the entire directory is gitignored and the `.yref` files live alongside
 the actual files *inside* the gitignored directory.
 
 Wait — this is a problem. If `data/research/` is gitignored, then
-`data/research/report.md.ref` is also gitignored. Git won't track it.
+`data/research/report.md.yref` is also gitignored. Git won't track it.
 
 ### Solving the Gitignore Problem
 
-**Option A: Negation patterns.** Gitignore the directory but un-ignore `.ref` files:
+**Option A: Negation patterns.** Gitignore the directory but un-ignore `.yref` files:
 
 ```gitignore
 # >>> blobsy-managed (do not edit) >>>
 data/research/
-!data/research/**/*.ref
+!data/research/**/*.yref
 # <<< blobsy-managed <<<
 ```
 
-This works in git. The `.ref` files are tracked, everything else is ignored.
+This works in git. The `.yref` files are tracked, everything else is ignored.
 But it requires gitignore negation patterns, which can be confusing.
 
-**Option B: `.ref` files live outside the tracked directory.** Instead of putting `.ref`
+**Option B: `.yref` files live outside the tracked directory.** Instead of putting `.yref`
 files inside the directory, put them in a parallel structure:
 
 ```
 data/research/              ← actual files (gitignored)
   report.md
   raw/response.json
-data/research.refs/         ← ref files (committed)
-  report.md.ref
-  raw/response.json.ref
+data/research.yrefs/         ← ref files (committed)
+  report.md.yref
+  raw/response.json.yref
 ```
 
-Clean separation. The `.refs/` directory is committed, the data directory is gitignored.
+Clean separation. The `.yrefs/` directory is committed, the data directory is gitignored.
 But the parallel structure can be confusing and fragile.
 
-**Option C: Single `.ref` file per directory with inline list (previous design).**
+**Option C: Single `.yref` file per directory with inline list (previous design).**
 Falls back to the inline manifest for directories.
 
-**Option D (recommended): `.ref` files inside the directory, with gitignore negation.**
-Option A is the most natural. The `.ref` files live where the files are. Negation
+**Option D (recommended): `.yref` files inside the directory, with gitignore negation.**
+Option A is the most natural. The `.yref` files live where the files are. Negation
 patterns are a standard git feature, just less commonly used:
 
 ```gitignore
 data/research/**
-!data/research/**/*.ref
+!data/research/**/*.yref
 !data/research/**/
 ```
 
-(The `!**/` line is needed so git traverses subdirectories to find `.ref` files.)
+(The `!**/` line is needed so git traverses subdirectories to find `.yref` files.)
 
 `blobsy add` generates these patterns automatically. Users don't write them by hand.
 
@@ -621,19 +621,19 @@ timestamp-commit prefix handles isolation.
 | --- | --- | --- | --- |
 | Tracked unit | File or directory | File or directory | File (always) |
 | Manifest | Remote JSON | Inline in `.blobsy` | None (git is the manifest) |
-| Files per tracked path | 1 `.blobsy` | 1 `.blobsy` | 1 `.ref` per file |
-| Directory support | Directory pointer + manifest | Directory pointer + inline file list | Recursive `.ref` files |
-| Conflict granularity | Per-pointer (whole directory) | Per-pointer (whole directory, but line-level merge) | Per-file (independent `.ref`) |
-| Git merge | Rare conflicts on pointer | Structured conflicts on file list | Standard file conflicts (one `.ref` at a time) |
+| Files per tracked path | 1 `.blobsy` | 1 `.blobsy` | 1 `.yref` per file |
+| Directory support | Directory pointer + manifest | Directory pointer + inline file list | Recursive `.yref` files |
+| Conflict granularity | Per-pointer (whole directory) | Per-pointer (whole directory, but line-level merge) | Per-file (independent `.yref`) |
+| Git merge | Rare conflicts on pointer | Structured conflicts on file list | Standard file conflicts (one `.yref` at a time) |
 | Custom tooling needed | `blobsy resolve` | `blobsy resolve` | None (`git checkout --ours/--theirs`) |
 | `blobsy commit` command | N/A | Yes (snapshot dir → manifest) | N/A (`blobsy add` per file) |
 | Offline status | No (need remote manifest) | Yes | Yes |
 | Post-merge gap | Yes (P0 issue) | No | No |
 | Delete semantics | Complex (P0 issue) | Trivial | Trivial |
 | Remote coordination | Manifest is shared mutable state | None (immutable prefixes) | None (content-addressed or immutable prefixes) |
-| Repo clutter | 1 file per tracked path | 1 file per tracked path | 1 `.ref` per tracked file |
+| Repo clutter | 1 file per tracked path | 1 file per tracked path | 1 `.yref` per tracked file |
 | Gitignore complexity | Simple | Simple | Needs negation patterns for directories |
-| Scaling | Unlimited (manifest is remote) | ~10K files per pointer | Unlimited (one .ref per file, git handles it) |
+| Scaling | Unlimited (manifest is remote) | ~10K files per pointer | Unlimited (one .yref per file, git handles it) |
 
 ## What This Design Eliminates
 
@@ -655,22 +655,22 @@ From the main design, the following concepts are no longer needed:
 
 ### Gitignore Negation Robustness
 
-The `!**/*.ref` negation pattern is standard git, but less commonly used. Questions:
+The `!**/*.yref` negation pattern is standard git, but less commonly used. Questions:
 
 - Do all git clients handle this correctly? (Git CLI does. GitHub Desktop, VS Code,
   etc. should — it's part of the gitignore spec.)
 - Does `.gitignore` interaction with nested `.gitignore` files cause surprises?
-- Should `blobsy doctor` validate that `.ref` files are actually tracked by git?
+- Should `blobsy doctor` validate that `.yref` files are actually tracked by git?
 
-### Number of `.ref` Files in Large Directories
+### Number of `.yref` Files in Large Directories
 
-A directory with 10,000 files creates 10,000 `.ref` files. Questions:
+A directory with 10,000 files creates 10,000 `.yref` files. Questions:
 
 - Is this a problem for git performance? (Git handles millions of files routinely.)
-- Is it annoying in file browsers? (The `.ref` files are interspersed with the actual
-  files — but the actual files are gitignored, so `git ls-files` only shows `.ref`s.)
-- Should there be an option to store `.ref` files in a parallel directory
-  (`data/research.refs/`) for cleanliness?
+- Is it annoying in file browsers? (The `.yref` files are interspersed with the actual
+  files — but the actual files are gitignored, so `git ls-files` only shows `.yref`s.)
+- Should there be an option to store `.yref` files in a parallel directory
+  (`data/research.yrefs/`) for cleanliness?
 
 ### `remote_prefix` for Content-Addressable Layout
 
@@ -686,7 +686,7 @@ Recommendation: keep it. A ref should be self-contained.
 ### Mixed Directories (Some Files in Git, Some in Blobsy)
 
 A directory where some files are small (committed to git) and others are large (tracked
-by blobsy). With per-file refs, this is natural — only the large files get `.ref` files
+by blobsy). With per-file refs, this is natural — only the large files get `.yref` files
 and gitignore entries. But:
 
 - The gitignore patterns need to be per-file (not per-directory).
@@ -701,7 +701,7 @@ simpler because there's no directory-level pointer to worry about.
 
 The per-file ref design reduces blobsy to a single primitive:
 
-**One file → one `.ref` → one blob.**
+**One file → one `.yref` → one blob.**
 
 Everything else follows:
 
