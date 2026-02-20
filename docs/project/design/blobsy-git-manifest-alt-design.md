@@ -13,6 +13,41 @@ Directories are just the recursive case — no special handling needed.
 Backend system, configuration hierarchy, transfer delegation, and other fundamentals
 from the main design doc are unchanged.
 
+## Design Principles
+
+**Externalize everything.** Blobsy does as little as possible itself. It delegates to
+systems that already solve each subproblem well:
+
+| Concern | Delegated to | Blobsy's role |
+| --- | --- | --- |
+| Manifest / file tracking | Git (`.yref` files are git-versioned) | Creates and updates `.yref` files |
+| Conflict resolution | Git (standard merge on `.yref` files) | Nothing — git handles it |
+| File transfer | External CLI tools (`aws-cli`, `s5cmd`, `rclone`) | Orchestrates concurrency |
+| Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
+| Compression | Standard algorithms (`zstd`, `gzip`) | Decides what to compress, shells out |
+| History / versioning | Git (commit history of `.yref` files) | Nothing — git handles it |
+
+**Simple should be simple, complex should be possible.** Every pluggable layer has a
+sensible default. Zero config gets you working. But everything is overridable:
+
+- **Remote layout:** content-addressable by default, timestamp-hash if you want
+  chronological browsing, or custom.
+- **Transfer tool:** auto-detected, or pinned to a specific CLI.
+- **Compression:** zstd by default, gzip if you need compatibility, none if you don't
+  want it. Per-file-type rules.
+- **Externalization:** size threshold + type patterns. Works out of the box, fully
+  configurable per-directory.
+- **Backend:** S3 by default, any object store via config.
+
+**One primitive.** The entire system reduces to: one file, one `.yref`, one blob.
+Directories, sync, conflicts, GC — all follow from this. There is no second kind of
+thing.
+
+**Unopinionated where it doesn't matter.** Blobsy doesn't care how you organize your
+remote storage, what compression you use, or which transfer tool you prefer. It cares
+about the contract: a `.yref` file points to a blob, and the blob must be reachable.
+Everything else is pluggable.
+
 ## Motivation
 
 The main design has two primitives: single-file pointers and directory pointers (with
