@@ -1,11 +1,11 @@
 ---
 type: is
 id: is-01khvjx2dwsd6xwd8wm8xmw9y6
-title: Design spec fixes from round 3 external review
+title: Design spec review issues (rounds 1-3)
 kind: epic
 status: open
 priority: 1
-version: 28
+version: 29
 labels: []
 dependencies:
   - type: blocks
@@ -63,5 +63,5 @@ dependencies:
   - type: blocks
     target: is-01khvk2tmd247ca157d6h4b5wg
 created_at: 2026-02-19T18:34:24.571Z
-updated_at: 2026-02-19T18:37:42.473Z
+updated_at: 2026-02-20T04:14:07.283Z
 ---
