@@ -15,10 +15,10 @@ from the main design doc are unchanged.
 
 ## Design Principles
 
-**Externalize everything.** Blobsy does as little as possible itself. It delegates to
-systems that already solve each subproblem well:
+**Externalize everything.** Blobsy does as little as possible itself.
+It delegates to systems that already solve each subproblem well:
 
-| Concern | Delegated to | Blobsy's role |
+| Concern | Delegated to | Blobsy’s role |
 | --- | --- | --- |
 | Manifest / file tracking | Git (`.yref` files are git-versioned) | Creates and updates `.yref` files |
 | Conflict resolution | Git (standard merge on `.yref` files) | Nothing — git handles it |
@@ -28,31 +28,34 @@ systems that already solve each subproblem well:
 | History / versioning | Git (commit history of `.yref` files) | Nothing — git handles it |
 
 **Simple should be simple, complex should be possible.** Every pluggable layer has a
-sensible default. Zero config gets you working. But everything is overridable:
+sensible default. Zero config gets you working.
+But everything is overridable:
 
 - **Remote layout:** content-addressable by default, timestamp-hash if you want
   chronological browsing, or custom.
 - **Transfer tool:** auto-detected, or pinned to a specific CLI.
-- **Compression:** zstd by default (built into Node 24+ via `node:zlib`), gzip or
-  brotli if preferred, none if you don't want it. Per-file-type rules.
-- **Externalization:** size threshold + type patterns. Works out of the box, fully
-  configurable per-directory.
+- **Compression:** zstd by default (built into Node 24+ via `node:zlib`), gzip or brotli
+  if preferred, none if you don’t want it.
+  Per-file-type rules.
+- **Externalization:** size threshold + type patterns.
+  Works out of the box, fully configurable per-directory.
 - **Backend:** S3 by default, any object store via config.
 
 **One primitive.** The entire system reduces to: one file, one `.yref`, one blob.
-Directories, sync, conflicts, GC — all follow from this. There is no second kind of
-thing.
+Directories, sync, conflicts, GC — all follow from this.
+There is no second kind of thing.
 
-**Unopinionated where it doesn't matter.** Blobsy doesn't care how you organize your
-remote storage, what compression you use, or which transfer tool you prefer. It cares
-about the contract: a `.yref` file points to a blob, and the blob must be reachable.
-Everything else is pluggable.
+**Unopinionated where it doesn’t matter.** Blobsy doesn’t care how you organize your
+remote storage, what compression you use, or which transfer tool you prefer.
+It cares about the contract: a `.yref` file points to a blob, and the blob must be
+reachable. Everything else is pluggable.
 
 ## Motivation
 
 The main design has two primitives: single-file pointers and directory pointers (with
 manifests). The previous alternative (inline manifest) unified these into one pointer
-file per tracked path. But there's a simpler option: eliminate manifests entirely.
+file per tracked path.
+But there’s a simpler option: eliminate manifests entirely.
 
 **The insight:** a directory of tracked files is just a directory of `.yref` files.
 No manifest needed — git is the manifest.
@@ -72,8 +75,9 @@ The `.yref` file contains the content hash, size, and the remote location of the
 It is a small YAML file committed to git.
 The actual file is gitignored.
 
-**That's the whole system.** There is no directory type, no manifest, no remote
-coordination state. Git tracks `.yref` files. The remote is a dumb blob store.
+**That’s the whole system.** There is no directory type, no manifest, no remote
+coordination state. Git tracks `.yref` files.
+The remote is a dumb blob store.
 
 ### Directories Are Just Recursion
 
@@ -110,17 +114,15 @@ Fields:
 | `size` | integer | File size in bytes |
 | `remote_prefix` | string | Remote prefix where the blob was pushed (set by `blobsy push`) |
 
-That's it. Four fields.
+That’s it. Four fields.
 
-**Why `remote_prefix` is in the ref:**
-Pull needs to know where to find the blob.
+**Why `remote_prefix` is in the ref:** Pull needs to know where to find the blob.
 Storing it in the ref means git versions it, and anyone who checks out the ref can pull
 without additional state.
-Push sets this field; it's empty (or absent) until the first push.
+Push sets this field; it’s empty (or absent) until the first push.
 
-**Why no `updated` timestamp:**
-Git already tracks when the file changed (`git log`).
-A timestamp in the ref adds no information and creates meaningless diffs.
+**Why no `updated` timestamp:** Git already tracks when the file changed (`git log`). A
+timestamp in the ref adds no information and creates meaningless diffs.
 
 ## Remote Storage Layout
 
@@ -135,12 +137,13 @@ s3://bucket/project/
   sha256/a1b2c3.../data/research/raw/response.json
 ```
 
-The key is `sha256/{hash}/{repo-relative-path}`.
-The path suffix is for human browsability — you can see what the file is.
+The key is `sha256/{hash}/{repo-relative-path}`. The path suffix is for human
+browsability — you can see what the file is.
 
 Properties:
 
-- **Automatic dedup.** Same content = same hash = same remote key. Never re-uploaded.
+- **Automatic dedup.** Same content = same hash = same remote key.
+  Never re-uploaded.
 - **Immutable.** A key is never overwritten (same hash = same content).
 - **No coordination.** Two people pushing the same file write the same key.
   S3 PUT is idempotent on identical content.
@@ -176,7 +179,7 @@ Simple and browsable, but uses more storage.
 
 ### Layout Comparison
 
-| | Content-addressable (default) | Timestamp-hash |
+|  | Content-addressable (default) | Timestamp-hash |
 | --- | --- | --- |
 | Dedup | Automatic | None |
 | Storage | Minimal | Grows per push |
@@ -210,8 +213,8 @@ Scanning data/research/...
 
 **Key distinction:**
 
-- **Explicit file** (`blobsy track data/bigfile.zip`): always externalizes. You named
-  the file — that's explicit intent.
+- **Explicit file** (`blobsy track data/bigfile.zip`): always externalizes.
+  You named the file — that’s explicit intent.
 - **Directory** (`blobsy track data/research/`): applies the `externalize` rules from
   `.blobsy.yml` (size threshold, always/never patterns) to decide per-file.
 
@@ -219,20 +222,23 @@ What it does:
 
 1. For each file to externalize: compute SHA-256, create a `.yref` adjacent to the file,
    add the original file to `.gitignore`.
-2. For directories: skip files that don't meet the externalization rules (they stay in
+2. For directories: skip files that don’t meet the externalization rules (they stay in
    git as normal files).
 3. Skip files matching `ignore` patterns.
 
-The `.yref` files are not yet git committed. The user does that:
+The `.yref` files are not yet git committed.
+The user does that:
 
 ```bash
 $ git add data/bigfile.zip.yref
 $ git commit -m "Track bigfile with blobsy"
 ```
 
-`blobsy track` is idempotent. Running it on an already-tracked file updates the hash
-if the file changed, or does nothing if unchanged. This makes it the single command for
-both "start tracking" and "update after modification":
+`blobsy track` is idempotent.
+Running it on an already-tracked file updates the hash if the file changed, or does
+nothing if unchanged.
+This makes it the single command for both “start tracking” and “update after
+modification”:
 
 ```bash
 # After modifying a tracked file
@@ -247,7 +253,8 @@ Updated data/research/model.bin.yref (sha256 changed)
 
 ### `blobsy sync`
 
-The primary sync command. Ensures local files and remote blobs match the committed refs.
+The primary sync command.
+Ensures local files and remote blobs match the committed refs.
 
 ```bash
 $ blobsy sync
@@ -259,8 +266,8 @@ Syncing 4 tracked files...
 Done. 1 pushed, 1 pulled, 2 up to date.
 ```
 
-**Precondition: `.yref` files must be committed to git.**
-If any `.yref` has uncommitted changes, sync errors:
+**Precondition: `.yref` files must be committed to git.** If any `.yref` has uncommitted
+changes, sync errors:
 
 ```
 Error: data/bigfile.zip.yref has uncommitted changes.
@@ -272,18 +279,18 @@ Algorithm for each `.yref`:
 1. **Read the ref** — get `sha256`, `size`, `remote_prefix`.
 2. **Check local file** — hash it (using stat cache for speed).
 3. **If local matches ref and remote has the blob:** nothing to do.
-4. **If local matches ref but remote doesn't have it:** push (upload blob, set
+4. **If local matches ref but remote doesn’t have it:** push (upload blob, set
    `remote_prefix` in ref).
 5. **If local is missing but remote has the blob:** pull (download blob).
 6. **If local differs from ref:** warn — file was modified locally but ref not updated.
-   Run `blobsy track` to update the ref first. Sync does not overwrite local
-   modifications.
+   Run `blobsy track` to update the ref first.
+   Sync does not overwrite local modifications.
 
 **Transfer mechanics:**
 
-Each file is an independent transfer. Unlike `aws s3 sync` (which operates on
-directories), blobsy sync issues one CLI invocation per file, running up to
-`sync.parallel` (default: 8) concurrently:
+Each file is an independent transfer.
+Unlike `aws s3 sync` (which operates on directories), blobsy sync issues one CLI
+invocation per file, running up to `sync.parallel` (default: 8) concurrently:
 
 ```
                        ┌─ aws s3 cp data/file1 s3://...
@@ -293,7 +300,8 @@ blobsy sync ──────────┼─ aws s3 cp data/file2 s3://...
 ```
 
 This is simple and works well for typical workloads (tens to hundreds of files).
-The transfer tool (`aws-cli`, `s5cmd`, `rclone`) handles each individual upload/download.
+The transfer tool (`aws-cli`, `s5cmd`, `rclone`) handles each individual
+upload/download.
 Per-file concurrency with a reasonable pool size covers the common case.
 
 ### `blobsy push` / `blobsy pull`
@@ -310,7 +318,8 @@ Same per-file logic, just filtered to one direction.
 
 ### `blobsy status`
 
-Show the state of all tracked files. **Fully offline.**
+Show the state of all tracked files.
+**Fully offline.**
 
 ```bash
 $ blobsy status
@@ -323,7 +332,7 @@ $ blobsy status
 What it does:
 
 1. Find all `.yref` files in the repo.
-2. For each, compare local file hash against the ref's `sha256`.
+2. For each, compare local file hash against the ref’s `sha256`.
 3. Report: ok, modified, missing, not pushed (no `remote_prefix`).
 
 No network access. The ref file has everything needed.
@@ -354,8 +363,9 @@ What it does:
 2. Remove the gitignore entry.
 3. Leave local files and remote blobs untouched.
 
-The user then `git add` + `git commit` to finalize. The trash gives `blobsy gc` a record
-of which remote blobs were once referenced — see [The `.blobsy/` Directory](#the-blobsy-directory).
+The user then `git add` + `git commit` to finalize.
+The trash gives `blobsy gc` a record of which remote blobs were once referenced — see
+[The `.blobsy/` Directory](#the-blobsy-directory).
 
 ## Per-File State Model
 
@@ -398,7 +408,7 @@ Each file has its own `.yref`. Two people modifying different files change diffe
 `.yref` files. Git auto-merges with zero conflicts.
 
 The only conflict case: two people modify **the same file**. Then git sees a conflict on
-that file's `.yref`:
+that file’s `.yref`:
 
 ```
 <<<<<<< HEAD
@@ -431,8 +441,8 @@ $ blobsy pull data/results.json    # get their version of the actual file
 | Resolution tool | `blobsy resolve` (custom) | `git checkout --ours/--theirs` (standard) |
 
 **Key advantage:** conflicts are standard git conflicts on individual files.
-No custom resolution tooling needed. Every developer already knows how to resolve git
-conflicts.
+No custom resolution tooling needed.
+Every developer already knows how to resolve git conflicts.
 
 ## Workflows
 
@@ -535,8 +545,7 @@ $ blobsy sync    # blobs already in remote from feature branch push
 $ git push
 ```
 
-**No post-merge prefix gap.**
-The blobs were pushed from the feature branch.
+**No post-merge prefix gap.** The blobs were pushed from the feature branch.
 After merge, the `.yref` files on main point to the same blobs.
 `blobsy sync` on main has nothing to do — the blobs are already there.
 
@@ -544,8 +553,8 @@ This completely eliminates the P0 issue from the main design (`blobsy-a64l`).
 
 ## The `.blobsy/` Directory
 
-Every repo with blobsy tracking has a `.blobsy/` directory at the repo root. It is
-committed to git.
+Every repo with blobsy tracking has a `.blobsy/` directory at the repo root.
+It is committed to git.
 
 ```
 .blobsy/
@@ -556,15 +565,16 @@ committed to git.
 
 ### Purpose
 
-When you `blobsy untrack` a file, the `.yref` is moved here instead of deleted. This
-serves two purposes:
+When you `blobsy untrack` a file, the `.yref` is moved here instead of deleted.
+This serves two purposes:
 
 1. **GC paper trail.** `blobsy gc` can scan `.blobsy/trash/` to find remote blobs that
-   were once tracked but are no longer referenced by any live `.yref`. Without the trash,
-   GC would have to walk the entire git history to discover orphaned blobs.
+   were once tracked but are no longer referenced by any live `.yref`. Without the
+   trash, GC would have to walk the entire git history to discover orphaned blobs.
 
 2. **Undo safety net.** If you untrack something by mistake, the `.yref` is still in
-   `.blobsy/trash/` (and in git history). You can recover it.
+   `.blobsy/trash/` (and in git history).
+   You can recover it.
 
 ### GC Cleans the Trash
 
@@ -587,7 +597,7 @@ branches are kept until those references are also gone.
 
 - **No config.** Config lives in `.blobsy.yml` files (hierarchical, placed anywhere).
 - **No cache.** Caches (stat cache, hash cache) live outside git, e.g.,
-  `~/.cache/blobsy/` or a local-only `.blobsy-cache/` that's gitignored.
+  `~/.cache/blobsy/` or a local-only `.blobsy-cache/` that’s gitignored.
 - **No manifests.** There are no manifests.
 
 The `.blobsy/` directory is small and focused: just the trash.
@@ -613,9 +623,10 @@ Done. 1 blob removed, 50 MB freed.
 
 Algorithm:
 
-1. Collect all `sha256` values from all `.yref` files across all reachable branches/tags.
+1. Collect all `sha256` values from all `.yref` files across all reachable
+   branches/tags.
 2. List all remote objects.
-3. Remove objects whose hash isn't in the referenced set.
+3. Remove objects whose hash isn’t in the referenced set.
 
 **Safety:**
 
@@ -629,8 +640,9 @@ With timestamp-hash layout, GC removes entire prefixes whose git commit is unrea
 
 ## Gitignore Management
 
-`blobsy track` manages `.gitignore` with explicit per-file entries. No wildcards, no
-negation patterns. Every tracked file gets its own gitignore line:
+`blobsy track` manages `.gitignore` with explicit per-file entries.
+No wildcards, no negation patterns.
+Every tracked file gets its own gitignore line:
 
 ```gitignore
 # >>> blobsy-managed (do not edit) >>>
@@ -640,15 +652,19 @@ data/research/raw/data.parquet
 # <<< blobsy-managed <<<
 ```
 
-`blobsy track` adds a line. `blobsy untrack` removes it. That's it.
+`blobsy track` adds a line.
+`blobsy untrack` removes it.
+That’s it.
 
-This is simpler than directory-level patterns or negation rules. For a directory with
-1,000 tracked files, `.gitignore` gets 1,000 lines in the blobsy-managed block. This is
-fine — `.gitignore` files can be large, and the lines are sorted and predictable.
+This is simpler than directory-level patterns or negation rules.
+For a directory with 1,000 tracked files, `.gitignore` gets 1,000 lines in the
+blobsy-managed block.
+This is fine — `.gitignore` files can be large, and the lines are sorted and
+predictable.
 
-The `.yref` files live adjacent to their data files. Since only the data files are
-gitignored (not the directory), git sees the `.yref` files normally. No negation patterns
-needed.
+The `.yref` files live adjacent to their data files.
+Since only the data files are gitignored (not the directory), git sees the `.yref` files
+normally. No negation patterns needed.
 
 ## Configuration: `.blobsy.yml`
 
@@ -740,14 +756,14 @@ checksum:
 
 This means blobsy works out of the box with zero configuration.
 `blobsy track data/` uses sensible rules even if no `.blobsy.yml` exists.
-The only thing that *must* be configured is the backend (bucket, region, etc.) —
-everything else has a working default.
+The only thing that *must* be configured is the backend (bucket, region, etc.)
+— everything else has a working default.
 
 ### Externalization Rules
 
 When `blobsy track <dir>` runs, it decides which files get externalized (`.yref` +
-gitignored) vs. left alone (committed directly to git). The decision is based on
-**size** and **file type**:
+gitignored) vs. left alone (committed directly to git).
+The decision is based on **size** and **file type**:
 
 ```yaml
 # .blobsy.yml
@@ -776,15 +792,17 @@ $ blobsy track data/research/
 3 files kept in git, 2 externalized.
 ```
 
-This eliminates the "mixed directory" problem entirely. `blobsy track` on a directory
-is smart by default — small text files stay in git, large binaries get `.yref` files.
+This eliminates the “mixed directory” problem entirely.
+`blobsy track` on a directory is smart by default — small text files stay in git, large
+binaries get `.yref` files.
 No manual per-file decisions needed.
 
 ### Compression Rules
 
 Blobsy compresses files before uploading to the remote and decompresses on pull.
 Node 24+ has built-in zstd, gzip, and brotli support in `node:zlib` — no external
-dependencies or CLI tools needed. Compression runs in-process with streaming support.
+dependencies or CLI tools needed.
+Compression runs in-process with streaming support.
 
 Compression is controlled by **file type** and **size**:
 
@@ -840,7 +858,7 @@ subdirectories can add their own.
 ### Backend and Sync Settings
 
 Backend and sync settings live in the repo-root `.blobsy.yml` (or user-global).
-These don't cascade per-directory — a file is pushed to one backend.
+These don’t cascade per-directory — a file is pushed to one backend.
 
 ```yaml
 # .blobsy.yml (repo root)
@@ -903,14 +921,16 @@ compress:
 The combination of per-directory `.blobsy.yml`, externalization rules, and compression
 rules means:
 
-- **`blobsy track <dir>` just works.** No manual per-file decisions. The rules decide
-  what's externalized and what stays in git.
-- **Compression is automatic.** Text-like formats get compressed. Already-compressed
-  formats are left alone. Users don't think about it.
-- **Overrides are local.** A `data/raw/.blobsy.yml` can say "externalize everything,
-  compress nothing" without affecting the rest of the repo.
+- **`blobsy track <dir>` just works.** No manual per-file decisions.
+  The rules decide what’s externalized and what stays in git.
+- **Compression is automatic.** Text-like formats get compressed.
+  Already-compressed formats are left alone.
+  Users don’t think about it.
+- **Overrides are local.** A `data/raw/.blobsy.yml` can say “externalize everything,
+  compress nothing” without affecting the rest of the repo.
 - **User defaults travel.** `~/.blobsy.yml` sets your preferred compression algorithm,
-  default ignore patterns, etc. across all repos.
+  default ignore patterns, etc.
+  across all repos.
 
 ## Comparison with Main Design and Inline Manifest Alternative
 
@@ -946,25 +966,29 @@ From the main design, the following concepts are no longer needed:
 - **`blobsy ns ls` / `blobsy ns show` / `blobsy gc` (branch-based)** — replaced by
   content-addressable GC
 - **Post-merge promotion** — blobs are where they are, refs point to them
-- **Delete semantics debate** — old blobs exist until GC, new pushes don't overwrite
+- **Delete semantics debate** — old blobs exist until GC, new pushes don’t overwrite
 
 ## V1 Feature Set
 
-Because the design externalizes everything to systems that already solve each subproblem,
-features that would normally be complex add-ons become natural consequences of the
-architecture. Compression and full versioning are both V1 features.
+Because the design externalizes everything to systems that already solve each
+subproblem, features that would normally be complex add-ons become natural consequences
+of the architecture.
+Compression and full versioning are both V1 features.
 
 ### Compression Is V1
 
 Compression is trivial to implement because:
 
 - **Node 24+ built-in support.** `node:zlib` provides zstd, gzip, and brotli with sync,
-  async, and streaming APIs. No external dependencies, no shelling out.
-- **Simple integration point.** Compress before push, decompress after pull. The hash in
-  `.yref` is always of the original file, so `blobsy status` works unchanged.
-- **Already designed in.** The `.yref` format includes `compressed` and `compressed_size`
-  fields. Compression rules in `.blobsy.yml` make it automatic and per-file-type
-  configurable from day one.
+  async, and streaming APIs.
+  No external dependencies, no shelling out.
+- **Simple integration point.** Compress before push, decompress after pull.
+  The hash in `.yref` is always of the original file, so `blobsy status` works
+  unchanged.
+- **Already designed in.** The `.yref` format includes `compressed` and
+  `compressed_size` fields.
+  Compression rules in `.blobsy.yml` make it automatic and per-file-type configurable
+  from day one.
 
 Total implementation cost: a thin wrapper around `node:zlib` streaming APIs.
 
@@ -975,9 +999,11 @@ Versioning requires zero additional implementation because git does it:
 - **Git tracks `.yref` files.** Every change to a tracked file produces a new `.yref`
   commit. `git log data/model.bin.yref` gives the full history — who changed it, when,
   and what the content hash was at each point.
+
 - **Content-addressable storage preserves old versions.** Old blobs remain in the remote
-  as long as they haven't been garbage collected. Multiple `.yref` revisions can point to
-  different blobs, all coexisting in the remote.
+  as long as they haven’t been garbage collected.
+  Multiple `.yref` revisions can point to different blobs, all coexisting in the remote.
+
 - **Rollback is standard git.** To restore an old version:
 
   ```bash
@@ -985,10 +1011,11 @@ Versioning requires zero additional implementation because git does it:
   $ blobsy sync    # pulls the old version's blob
   ```
 
-  No `blobsy rollback` command needed. No versioning metadata to maintain. Git *is* the
-  versioning system.
+  No `blobsy rollback` command needed.
+  No versioning metadata to maintain.
+  Git *is* the versioning system.
 
-### What's Deferred (V2+)
+### What’s Deferred (V2+)
 
 - **Batched multi-file transfer.** V1 uses per-file concurrency with a pool
   (`sync.parallel`). A future optimization could batch multiple files per CLI invocation
@@ -1002,24 +1029,28 @@ Versioning requires zero additional implementation because git does it:
 
 ### Number of `.yref` Files in Large Directories
 
-A directory with 10,000 files creates 10,000 `.yref` files. Questions:
+A directory with 10,000 files creates 10,000 `.yref` files.
+Questions:
 
-- Is this a problem for git performance? (Git handles millions of files routinely.)
-- Is it annoying in file browsers? (The `.yref` files are interspersed with the actual
-  files — but the actual files are gitignored, so `git ls-files` only shows `.yref`s.)
+- Is this a problem for git performance?
+  (Git handles millions of files routinely.)
+- Is it annoying in file browsers?
+  (The `.yref` files are interspersed with the actual files — but the actual files are
+  gitignored, so `git ls-files` only shows `.yref`s.)
 - Should there be an option to store `.yref` files in a parallel directory
   (`data/research.yrefs/`) for cleanliness?
 
 ### `remote_prefix` for Content-Addressable Layout
 
 With content-addressable layout, the remote key is deterministic from the file hash.
-Do we still need `remote_prefix` in the ref? The pull can reconstruct it from
-`sha256/{hash}`.
+Do we still need `remote_prefix` in the ref?
+The pull can reconstruct it from `sha256/{hash}`.
 
 If yes (keep it): the ref is self-contained, works even if the layout config changes.
 If no (omit it): simpler ref format, but pull depends on knowing the layout.
 
-Recommendation: keep it. A ref should be self-contained.
+Recommendation: keep it.
+A ref should be self-contained.
 
 ### Mixed Directories (Some Files in Git, Some in Blobsy)
 
@@ -1042,13 +1073,15 @@ Everything else follows:
 - No remote coordination, no mutable state, no manifests.
 - Post-merge gaps and delete semantics are non-issues.
 
-Explicit per-file gitignore entries avoid negation pattern complexity. A `.blobsy/trash/`
-directory at the repo root holds expired `.yref` files for GC and undo safety.
+Explicit per-file gitignore entries avoid negation pattern complexity.
+A `.blobsy/trash/` directory at the repo root holds expired `.yref` files for GC and
+undo safety.
 
 Layered `.blobsy.yml` configuration adds automatic externalization (by size and type)
 and compression (by type), so `blobsy track <dir>` makes smart per-file decisions with
 no manual intervention.
 
-Because the design externalizes everything, compression (via Node.js built-in `node:zlib`)
-and full file versioning (via git history of `.yref` files) are both V1 features — they
-emerge naturally from the architecture rather than requiring additional systems.
+Because the design externalizes everything, compression (via Node.js built-in
+`node:zlib`) and full file versioning (via git history of `.yref` files) are both V1
+features — they emerge naturally from the architecture rather than requiring additional
+systems.
