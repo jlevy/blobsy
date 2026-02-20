@@ -121,7 +121,7 @@ Custom implementations using a JSON manifest plus S3 objects.
 ### Assessment
 
 No existing tool combines: committed pointer files for git integration, pluggable
-backends, pluggable compression, namespace-based branch isolation, bidirectional sync,
+backends, pluggable compression, namespace-based branch isolation, push/pull sync,
 transparent remote storage layout, and a simple standalone CLI. `lobs` fills this gap as
 a namespace-based sync coordinator that delegates heavy lifting to existing tools.
 
@@ -167,7 +167,8 @@ different remote paths depending on the current branch.
 
 **`branch` mode (default):**
 - Resolves the current Git branch name at runtime.
-- Detached HEAD falls back to `detached/<shortsha>/`.
+- Detached HEAD falls back to `detached/<sha>/` using the first 12 characters of the
+  commit SHA (balances collision resistance with readability).
 - Each branch gets isolated remote storage.
 - Switching branches and running `lobs pull` materializes that branch’s data.
 
@@ -225,6 +226,19 @@ When compression is `none`, files are stored as-is with their original names.
 ### Pointer File Format
 
 Every `.lobs` file starts with a self-documenting comment header, followed by YAML.
+Pointer files use stable key ordering (keys are always written in the order shown below)
+to minimize noise in `git diff`.
+
+**Field types and encoding:**
+- `sha256`: 64-character lowercase hexadecimal string.
+- `size`, `total_size`, `file_count`: integer, in bytes (for sizes).
+- `updated`: ISO 8601 UTC timestamp with `Z` suffix (e.g., `2026-02-18T12:00:00Z`).
+- `compression`: one of `zstd`, `gzip`, `lz4`, `none`.
+
+**Format versioning:** The `format` field uses `<name>/<major>.<minor>` versioning
+(e.g., `lobs/0.1`). Compatibility policy: reject if major version is unsupported; warn
+if minor version is newer than the running lobs version supports.
+The same policy applies to `lobs-manifest/<major>.<minor>` in manifest files.
 
 **Single file pointer:**
 
@@ -290,9 +304,15 @@ is cheap and enables:
   just a timestamp update
 
 **Directories (with manifest):** Per-file SHA-256 hashes stored in the remote manifest.
-Computed during `push` at zero additional I/O cost (files are already being read for
-upload). Enables accurate change detection during push and pull, and `lobs verify` for
+Enables accurate change detection during push and pull, and `lobs verify` for
 directories.
+
+When using the built-in `@aws-sdk` transfer engine, hashes are computed during the
+upload read (single I/O pass).
+When delegating to external tools (aws-cli, rclone), hashing requires a separate read
+pass — the file is read once to hash, then the external tool reads it again to transfer.
+In practice the OS page cache makes the second read nearly free, and the stat cache
+(below) ensures only changed files are hashed at all.
 
 Hashing during push is critical for the core branch-switching workflow: `git checkout`
 resets mtime on every file, so without content hashes, `lobs push` after a branch switch
@@ -358,6 +378,49 @@ This is not needed for V1 — manifests and SHA-256 hashes handle all verificati
 But it would make `lobs status` faster for large deployments where even fetching the
 manifest is expensive compared to a single HEAD request per file.
 
+### Local Stat Cache
+
+Lobs maintains a local stat cache at `.lobs/cache/stat-cache.json` (gitignored) that
+stores the last-known `size`, `mtime_ms`, and `sha256` for each tracked file.
+This follows the same approach as git’s index: use filesystem metadata as a fast-path to
+avoid re-hashing unchanged files.
+
+**How it works:**
+1. On push or verify, lobs calls `stat()` on each local file.
+2. If `size` and `mtime_ms` match the cached entry, the cached `sha256` is trusted (file
+   assumed unchanged — no read or hash needed).
+3. If either differs, lobs reads and hashes the file, then updates the cache.
+
+**Why mtime is safe here but not in the manifest:** The stat cache is local and
+per-machine. It only compares a file’s current mtime against the mtime recorded *on the
+same machine* after the last hash.
+This is a “definitely changed” signal — if mtime changed, something touched the file.
+The remote manifest cannot use mtime because different machines, git checkouts, CI
+runners, and Docker builds all produce different mtimes for the same content.
+
+**High-resolution timestamps:** Node.js `fs.stat()` provides `mtimeMs` (millisecond
+float) on all platforms.
+Millisecond resolution is sufficient for lobs — sub-millisecond file modifications
+between cache writes are unlikely in practice.
+(Git uses nanosecond timestamps with a “racily clean” detection fallback for the
+pathological case; lobs can add this if needed, but milliseconds are adequate for V1.)
+
+**Performance impact:** `stat()` costs ~1-5 microseconds per file.
+For a directory with 1,000 files, the stat pass takes ~~5 ms.
+Without the cache, every push would read and hash all 1,000 files (~~seconds to minutes
+depending on sizes).
+With the cache, only files whose stat data changed are hashed.
+
+| Scenario (1000 files, 10 MB avg) | Without stat cache | With stat cache |
+| --- | --- | --- |
+| First push | Hash all: ~20s | Hash all: ~20s (same) |
+| Second push, 3 files changed | Hash all: ~20s | Stat all + hash 3: ~65ms |
+| After `git checkout` (mtime reset on all) | Hash all: ~20s | Stat all + hash all: ~20s |
+
+**Cache invalidation:** The cache is a pure optimization.
+If missing or corrupted, lobs falls back to hashing all files (correct but slower).
+The cache is never shared across machines — it is gitignored and machine-local.
+
 ### Manifests
 
 Manifests track the contents of directory targets.
@@ -369,20 +432,27 @@ pointer file.
 
 **Format (JSON):**
 
+Manifests use canonical serialization: keys in fixed order, file entries sorted by
+`path` (lexicographic, forward-slash separated), consistent newlines (LF), no trailing
+whitespace. This ensures the same logical manifest always produces the same bytes, which
+is required for stable `manifest_sha256` computation.
+
 ```json
 {
   "format": "lobs-manifest/0.1",
   "updated": "2026-02-18T12:00:00Z",
   "files": [
     {
-      "path": "report.md",
-      "size": 4096,
-      "sha256": "7a3f0e..."
-    },
-    {
       "path": "raw/response.json",
       "size": 1048576,
-      "sha256": "b4c8d2..."
+      "sha256": "b4c8d2...",
+      "stored_as": "raw/response.json.zst"
+    },
+    {
+      "path": "report.md",
+      "size": 4096,
+      "sha256": "7a3f0e...",
+      "stored_as": "report.md.zst"
     }
   ],
   "total_size": 1052672
@@ -410,8 +480,12 @@ When disabled, sync is delegated entirely to the transport tool’s own change d
 
 ### Gitignore Management
 
-When `lobs track` is run, the CLI adds the target path to `.gitignore` in a clearly
-marked section:
+When `lobs track` is run, the CLI adds the target path to the `.gitignore` file in the
+same directory as the tracked path (following the DVC convention).
+This keeps gitignore entries co-located with the things they ignore.
+If no `.gitignore` exists in that directory, one is created.
+
+Entries are placed in a clearly marked section:
 
 ```gitignore
 # >>> lobs-managed (do not edit) >>>
@@ -596,13 +670,24 @@ No cloud account needed.
 
 **`command`:** Arbitrary shell commands for push/pull.
 Escape hatch for unsupported backends.
-Template variables: `{local}`, `{remote}`, `{relative_path}`, `{namespace}`.
+Template variables:
+- `{local}` — absolute path to the local file or directory.
+- `{remote}` — full remote key (e.g., `branches/main/data/prices.parquet.zst`).
+- `{relative_path}` — repo-relative path of the tracked target (e.g.,
+  `data/prices.parquet`).
+- `{namespace}` — resolved namespace prefix (e.g., `branches/main/`).
+- `{bucket}` — the configured bucket name.
+
+The command runs once per file (not once per push operation).
+A non-zero exit code is treated as a transfer failure for that file.
+stdout is discarded; stderr is shown to the user on failure.
 
 ### S3-Compatible Backends
 
 R2, MinIO, Backblaze B2, Tigris, and other S3-compatible stores all use the same
 `type: s3` backend with a custom endpoint.
-The AWS CLI, rclone, and `@aws-sdk/client-s3` all support `--endpoint-url` for this:
+The AWS CLI and rclone support `--endpoint-url` for this.
+`@aws-sdk/client-s3` supports custom endpoints via its client configuration object:
 
 ```bash
 # R2 via AWS CLI (what lobs does internally)
@@ -679,6 +764,10 @@ decompression).
 
 Skip list: Already-compressed formats (JPEG, PNG, PDF, gzip, zip, zstd, MP4) are stored
 as-is. Compressing them wastes CPU for negligible gain.
+The skip list (`compression.skip_extensions`) must be set in repo-level config
+(committed to git), not in global/user config, because it affects remote storage keys.
+If two users have different skip lists, they would produce different remote
+representations of the same directory, breaking sync.
 
 Remote filenames: Compressed files get a `.zst` suffix (or `.gz`, `.lz4` depending on
 algorithm). The pointer file tracks both the original filename and the compressed remote
@@ -723,7 +812,7 @@ SYNC
   lobs push [path...]                Upload local changes to remote namespace
        [--version <id>]              Override namespace for this push
   lobs pull [path...]                Download from remote namespace to local
-  lobs sync [path...]                Bidirectional: pull then push
+       [--force]                     Overwrite local modifications
   lobs status [path...]              Show what's changed locally vs remotely
   lobs diff [path...]                Preview what push/pull would transfer
 
@@ -1617,13 +1706,22 @@ auto-detection. Or configure aws-cli for the target endpoint.
 **Directories (with manifest, default):**
 1. Scan local directory (applying ignore patterns from config, if any).
 2. Fetch remote manifest from namespace.
-3. Hash each local file (SHA-256). This piggybacks on the file reads already needed for
-   upload -- no additional I/O pass.
+3. `stat()` each local file and compare against the local stat cache.
+   Files where `size` + `mtime_ms` match the cache: use cached `sha256` (no read).
+   Files where stat differs or no cache entry: read and hash (SHA-256), update cache.
 4. Compare local hashes and sizes against manifest: identify new, changed, and deleted
    files. Files where the hash matches the manifest are skipped (no re-upload).
 5. Upload changed/new files (compressing if enabled), remove deleted files from remote.
 6. Rewrite remote manifest with updated per-file hashes and sizes.
-7. Update `updated` timestamp in `.lobs` pointer.
+   Manifest is written as a single object PUT (atomic on S3-compatible stores).
+7. Update `updated` timestamp in `.lobs` pointer only after manifest write succeeds.
+
+**Idempotency and partial failure:** If push is interrupted, the remote manifest still
+reflects the last complete push.
+Re-running push is safe: already-uploaded files are detected via hash comparison and
+skipped. If the remote already has the expected object (hash matches), upload is skipped
+even if the pointer was updated — this supports merge/promotion workflows where data
+exists in one namespace but needs to appear in another.
 
 **Directories (without manifest):**
 1. Delegate to transport tool (`aws s3 sync`, `rclone sync`) targeting the namespace
@@ -1635,7 +1733,10 @@ auto-detection. Or configure aws-cli for the target endpoint.
 
 **Single files:**
 1. Check if local file exists and matches pointer hash.
-2. If missing or different: download from remote namespace, decompress (if needed).
+2. If missing or different from pointer: download from remote namespace, decompress (if
+   needed).
+3. If the local file has been modified (hash differs from both pointer and remote), pull
+   fails with exit code 2. Use `--force` to overwrite local modifications.
 
 **Directories (with manifest, default):**
 1. Fetch remote manifest from namespace.
@@ -1644,6 +1745,8 @@ auto-detection. Or configure aws-cli for the target endpoint.
    Files where the hash matches are skipped.
 3. Download missing or changed files (only non-ignored files).
    Decompress if needed.
+4. Pull does not delete local files that are absent from the manifest.
+   Extra local files are left untouched.
 
 **Directories (without manifest):**
 1. Delegate to transport tool (reverse direction).
@@ -1669,18 +1772,16 @@ first to reconcile.
 `aws s3 sync` and `rclone` use size + mtime for change detection; conflicts are unlikely
 in single-writer workflows.
 
-### Bidirectional Sync
+### Bidirectional Sync (Deferred from V1)
 
-`lobs sync` = pull then push.
-Handles the case where some targets changed locally and others changed remotely.
+`lobs sync` (bidirectional: pull then push) is deferred from V1 scope.
+The interaction between pull-delete and push-delete semantics is underspecified and
+potentially dangerous.
+`push` and `pull` cover the common workflows; bidirectional sync will be revisited once
+delete semantics and conflict handling are fully resolved.
 
-Conflict resolution strategies (configurable via `--strategy`):
-
-| Strategy | Behavior |
-| --- | --- |
-| `error` (default) | Fail with exit code 2. User decides. |
-| `local-wins` | Local version overwrites remote. |
-| `remote-wins` | Remote version overwrites local. |
+For reference, the intended design is: `lobs sync` = pull then push, with configurable
+conflict resolution (`--strategy error|local-wins|remote-wins`).
 
 ## Versioning and Branch Lifecycle
 
@@ -1734,17 +1835,21 @@ Done. 2 namespaces removed, 25.3 MB freed.
 ```
 
 `gc` never touches `fixed/` or `versions/` namespaces.
-It only removes `branches/` namespaces that have no corresponding local Git branch.
+It removes `branches/` namespaces that have no corresponding local or remote-tracking
+Git branch. It also removes `detached/` namespaces older than a configurable TTL
+(default: 7 days), since CI and ephemeral checkouts can create many of these.
 
 ## Agent and Automation Integration
 
 ### Machine-Readable Output
 
-All commands support `--json`:
+All commands support `--json`. JSON output includes a `schema_version` field (e.g.,
+`"schema_version": "0.1"`) so automation can detect breaking changes:
 
 ```bash
 $ lobs status --json
 {
+  "schema_version": "0.1",
   "namespace": "branches/main/",
   "namespace_mode": "branch",
   "tracked": 12,
@@ -1805,13 +1910,18 @@ All commands are safe to run repeatedly:
 - `lobs push` when remote matches: no-op.
 - `lobs track` on already-tracked path: updates pointer, no error.
 
-### No Interactive Prompts
+### Non-Interactive by Default
 
-Commands succeed or fail.
-No “are you sure?” prompts.
+All sync operations (`push`, `pull`, `status`, `diff`, `verify`, `gc`) are fully
+non-interactive. They succeed or fail without prompts.
 `--force` for destructive operations.
 `--dry-run` for preview.
 This makes `lobs` safe to call from scripts, CI pipelines, and agent tool loops.
+
+`lobs init` is interactive when run without flags (prompts for backend type, bucket,
+region). For non-interactive usage, pass flags directly:
+`lobs init --bucket my-data --region us-east-1`. All other commands are always
+non-interactive.
 
 ## Implementation Notes
 
@@ -1835,8 +1945,9 @@ TypeScript. Distributed via npm as `lobs`. Usable via:
 
 Pure CLI. Each invocation reads pointer files and config from disk, does work, updates
 pointer files, exits.
-No background processes, no lock files, no state between invocations beyond what’s on
-disk.
+No background processes, no lock files.
+The only persistent local state is the stat cache (`.lobs/cache/`), which is a pure
+optimization — if missing, all operations still work correctly, just slower.
 
 ### Testing
 
@@ -1849,7 +1960,7 @@ No cloud account needed for development.
 What `lobs` does:
 - Track files and directories via `.lobs` pointer files
 - Namespace-based branch isolation (`branch`, `fixed`, `version` modes)
-- Bidirectional sync with pluggable backends
+- Push/pull sync with pluggable backends
 - Remote manifests for directory sync coordination
 - Optional per-file compression with pluggable algorithms
 - SHA-256 integrity verification (pointer hashes for files, manifest hashes for
@@ -1860,6 +1971,7 @@ What `lobs` does:
 - Machine-readable output for agents
 
 What `lobs` does not do (V1):
+- Bidirectional sync (deferred until delete semantics are resolved; use `push`/`pull`)
 - Sub-file delta sync (whole-file granularity only)
 - Cross-repo deduplication
 - Cross-namespace deduplication (branch A and B store separate copies)
@@ -1873,3 +1985,345 @@ What `lobs` does not do (V1):
 - Web UI
 
 These are candidates for future versions if demand warrants.
+
+## Review Issues Tracker
+
+This section tracks all issues raised across three external design reviews:
+
+- [Round 1: General review](lobs-design-review-round1-general.md) (22 issues: C1-C4,
+  S1-S7, M1-M11)
+- [Round 2: Checksum deep-dive](lobs-design-review-round2-checksums.md) (reframes C1 and
+  S3)
+- [Round 3: GPT5Pro architecture review](lobs-design-review-round3-gpt5pro.md) (33
+  actionable items)
+
+All issues are tracked under epic `lobs-0itg` ("Design spec review issues (rounds
+1-3)").
+
+### Addressed Issues
+
+These issues have been resolved in the current spec.
+Listed for traceability; no further action needed.
+
+| Bead | Review IDs | Resolution |
+| --- | --- | --- |
+| *(spec)* | R1 C1, R2 C1, R3 §3 | **Directory integrity model.** Per-file SHA-256 in manifest, two-tier change detection (stat cache + hash), mtime removed from remote manifest. See Integrity Model and Local Stat Cache sections. |
+| `lobs-suqh` | R1 C3, R3 §4.9 | **Interactive init contradiction.** Clarified: `init` is interactive without flags, all sync ops are non-interactive. See Non-Interactive by Default section. |
+| `lobs-br1a` | R1 C4, R3 §5 | **`lobs sync` bidirectional.** Deferred from V1 scope. See Bidirectional Sync section. |
+| *(spec)* | R1 S3, R2 | **mtime unreliability.** Resolved by stat cache design: mtime used only in local cache (per-machine), never in remote manifest. See Local Stat Cache section. |
+| `lobs-r34j` | R1 S2 | **gc safety.** `lobs gc` checks remote tracking branches, not just local. |
+| `lobs-jlcn` | R1 M1, R3 §4.1 | **Pointer field types.** sha256 = 64-char lowercase hex, size = bytes, timestamps = ISO 8601 UTC Z. See Pointer File Format section. |
+| `lobs-n23z` | R1 M2 | **Format versioning.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. See Pointer File Format section. |
+| `lobs-0a9e` | R1 M3, R3 §4.10 | **Command backend template variables.** `{local}`, `{remote}`, `{relative_path}`, `{namespace}`, `{bucket}` specified. Runs once per file. See Backend System section. |
+| `lobs-srme` | R1 M4, R3 §4.8 | **Which .gitignore.** Same directory as tracked path, following DVC convention. See Gitignore Management section. |
+| `lobs-v9py` | R1 M5, R3 §4.3 | **Detached HEAD.** 12-char SHA prefix, gc covers `detached/` namespaces with TTL. See Namespace Modes section. |
+| `lobs-bnku` | R1 M7, R3 §4.4 | **Push idempotency.** Atomic manifest write; re-run is safe. See Sync Semantics section. |
+| `lobs-q6xr` | R3 §4.4 | **Pull behavior on local mods.** Default: error on modified files unless `--force`. See Pull section. |
+| `lobs-p8c4` | R3 §4.2 | **`stored_as` in manifest.** Each file entry includes `stored_as` for remote key reconstruction. See Manifests section. |
+| `lobs-txou` | R3 §4.2 | **Manifest canonicalization.** Fixed key order, sorted file entries, consistent LF, no trailing whitespace. See Manifests section. |
+| `lobs-v6eb` | R3 §4.1 | **Stable pointer key ordering.** Keys written in documented fixed order to minimize git diff noise. See Pointer File Format section. |
+| `lobs-fjqj` | R3 §4.7 | **Compression skip list in repo config.** Must be committed to git (affects remote keys). See Compression System section. |
+| `lobs-mg0y` | R3 §4.9 | **`--json` schema version.** `schema_version` field in all JSON output. See Agent and Automation Integration section. |
+| `lobs-pice` | R3 §4 | **SDK endpoint wording.** `@aws-sdk/client-s3` uses config object, not CLI flags. See S3-Compatible Backends section. |
+| *(spec)* | R2 | **Checksum algorithm simplification.** Dropped md5 and xxhash from V1; `sha256` (default) and `none` only. See Integrity Model section. |
+| *(spec)* | R3 §4.4 | **Pull does not delete local files.** Extra local files not in manifest are left untouched. See Pull section. |
+
+### Open P0 — Must Resolve Before Implementation
+
+These are blocking design decisions.
+Each requires a clear resolution before the corresponding feature can be implemented.
+
+#### Versioning semantics (`lobs-cx82`)
+
+**Review IDs:** R3 §1 (P0-1)
+
+The design must pick a clear V1 product promise:
+
+- **Promise A (simple):** “lobs is a branch-isolated sync layer.
+  Remote holds the latest state per namespace.
+  Use `version` mode or bucket versioning for history.”
+  Matches the current path-mirrored remote layout.
+- **Promise B (stronger):** “lobs makes commits reproducible: pointers reference
+  immutable remote content.”
+  Requires CAS-like storage or snapshot identifiers.
+
+The current spec uses Promise A mechanics but occasionally uses Promise B language
+(e.g., restoring old versions by checking out old pointers).
+Pick one and remove contradictory claims.
+
+Related: Content-addressable storage (CAS) as a future direction.
+CAS enables time-travel, dedup, and reproducibility but breaks remote browsability.
+A hybrid is possible (path-mirrored within a snapshot, immutable snapshot IDs at the top
+level). Out of V1 scope but worth tracking as a design axis for V2.
+
+#### `manifest_sha256` content identifier for directory pointers (`lobs-mlv9`)
+
+**Review IDs:** R3 §3 (P0-3), R3 §4.2
+
+Directory pointers currently have only an `updated` timestamp — git diff and merge are
+meaningless on timestamps alone.
+Add `manifest_sha256` (hash of the canonical manifest JSON), plus optionally
+`file_count` and `total_size`, so that:
+
+- `git diff` shows meaningful changes when directory contents change.
+- Conflict detection can use `manifest_sha256` in the pointer as baseline (avoids
+  needing remote ETag or separate local state for “last seen manifest”).
+- Merge operations on pointers are well-defined.
+
+#### Branch merge/promotion workflow (`lobs-a64l`)
+
+**Review IDs:** R3 §2 (P0-2)
+
+When a feature branch merges into main via PR, the pointer file lands on main but the
+data stays in `branches/feature-x/`. Users on main can’t `lobs pull` — the data doesn’t
+exist in `branches/main/`.
+
+Options:
+
+- Add explicit `lobs promote` or `lobs ns copy` command for post-merge data promotion.
+- Have `lobs push` detect missing remote objects for the current namespace and re-upload
+  from local.
+- Add `lobs check-remote` CI verifier that fails the merge if data isn’t in the target
+  namespace.
+
+#### Delete semantics (`lobs-05j8`)
+
+**Review IDs:** R3 §4.2 (4.2-4)
+
+The spec contains a contradiction: “lobs never deletes remote objects during normal sync
+operations” vs. push step 5 which says “remove deleted files from remote.”
+
+Resolve by choosing one of:
+
+- Push does not delete remote files by default.
+  Explicit `--prune` flag to enable deletion.
+- Push always syncs deletions but warns when files are removed.
+- Tombstones in manifest with separate `lobs gc` for actual deletion.
+
+Related: deletion semantics affect the deferred `lobs sync` bidirectional feature and
+whether old directory states are reconstructible.
+
+#### Single-file conflict detection scope (`lobs-7h13`)
+
+**Review IDs:** R1 C2, R3 §3 (P0-4)
+
+The design references comparing against a “remote hash” but doesn’t specify how to
+obtain it without downloading the file.
+Options:
+
+- Store SHA-256 as S3 object metadata (`x-amz-meta-sha256`) on upload, retrieve via
+  HEAD.
+- Store a sidecar `<file>.sha256` file alongside the remote object.
+- Drop remote conflict detection from V1 entirely.
+  Rely on pointer workflow discipline + optional `lobs check-remote` in CI.
+
+Given the single-writer model and the complexity of portable metadata across aws-cli,
+rclone, and custom backends, the round 3 review recommends deferring this.
+
+#### Compression + transfer mechanics (`lobs-lsu9`)
+
+**Review IDs:** R3 §4.7 (P0-5, 4.7-1)
+
+The design promises per-file compression, delegated transfer, and manifest-driven
+decisions but doesn’t specify how they compose.
+Two approaches:
+
+- **Staging directory:** Compress files into a temp staging area, then delegate to
+  `aws s3 sync` on the staging directory.
+  Clean and simple but doubles disk usage during push.
+- **File-by-file orchestration:** lobs orchestrates individual file transfers (compress
+  → upload → next file).
+  More complex but no staging overhead.
+
+When `manifest: true`, the transport tool is a copy engine, not a sync engine — lobs
+decides what to transfer.
+When `manifest: false`, pure delegation is acceptable (but requires `compression: none`
+since the transport tool can’t decompress).
+
+#### Atomic writes for built-in transport (`lobs-rel2`)
+
+**Review IDs:** R3 §4.5 (4.5-1)
+
+`aws-cli` and `rclone` handle atomic writes internally.
+The built-in `@aws-sdk` engine does not — lobs must implement temp-file-then-rename for:
+
+- Local file writes during pull (avoid partial files on interrupt).
+- Pointer file updates.
+- Stat cache writes.
+
+Also: define `lobs clean` command for cleaning up orphaned temp files (`.lobs-tmp-*`),
+and document expected interrupted-state behavior (partial file set may exist; rerun
+fixes).
+
+#### Security: command execution from repo config (`lobs-vj6p`)
+
+**Review IDs:** R3 §4.10 (4.10-1)
+
+Repo-level config can specify `command` backends and custom `compress_cmd` /
+`decompress_cmd`. Running `lobs pull` on a cloned repo could execute arbitrary commands
+from the repo’s `.lobs/config.yml`.
+
+Recommended approach: disallow `command` backend and custom compression commands from
+repo-level config by default.
+Allow only in user-level config (`~/.config/lobs/`) or via explicit `lobs trust` per
+repo. Warn on first use.
+
+### Open P1 — Should Resolve for V1 Ship Quality
+
+#### Branch name sanitization (`lobs-u4cs`)
+
+**Review IDs:** R1 S1, R3 §4.3 (4.3-1)
+
+Branch names can contain slashes, spaces, special characters.
+Define normalization rules for S3 key safety: preserve `/`, percent-encode characters
+outside `[a-zA-Z0-9/._-]`, specify max length with hash fallback for pathological branch
+names.
+
+#### Auto tool detection robustness (`lobs-y72s`)
+
+**Review IDs:** R1 S7, R3 §4.6 (4.6-1)
+
+`sync.tool: auto` must do a capability check (credentials + reachability), not just
+binary existence. If aws-cli is installed but not configured, fall through to rclone,
+then built-in. Add `lobs doctor` command that prints: detected backend, selected tool +
+why, resolved namespace + prefix.
+
+#### Version namespace mode (`lobs-q2dd`)
+
+**Review IDs:** R1 S4, R3 §4.3 (4.3-3)
+
+Fully specify: push without `--version` when mode is `version` = error.
+Versions accumulate forever by default.
+Provide `lobs ns rm versions/<id>` for explicit cleanup.
+Consider whether `lobs gc` should have a `--include-versions` flag.
+
+#### Multi-namespace output grouping
+
+**Review IDs:** R1 S5, R3 §4.3 (4.3-4)
+
+When per-pointer namespace overrides create mixed namespaces in a single operation,
+`lobs status` and `lobs push` should group output by namespace.
+Each namespace group succeeds or fails independently.
+Decide whether this complexity is justified for V1 or whether per-pointer overrides
+should be deferred.
+
+#### Versioned metadata vs local preferences
+
+**Review IDs:** R3 §4.1 (4.1-2)
+
+Any setting that affects how remote bytes are stored must be in git-tracked state
+(pointer or repo config), not in global/user config.
+Specifically: compression algorithm, whether a file is compressed, checksum algorithm,
+and skip-list all affect remote keys.
+If two users have different local configs, they produce different remote
+representations, breaking sync.
+The skip list is already specified as repo-level; extend the same principle explicitly
+to all remote-affecting settings.
+
+#### `lobs status` offline vs online
+
+**Review IDs:** R3 §4.4 (4.4-3)
+
+Define clearly whether `lobs status` requires fetching the remote manifest (online) or
+operates purely against the pointer and local stat cache (offline).
+Consider providing `status --offline` that compares local files to the pointer (single
+file) or locally cached manifest without network access.
+
+### Deferred Considerations (P2 / V2)
+
+Items below are not blocking V1 but are recorded for future reference.
+
+#### Compression suffix convention
+
+**Review IDs:** R1 S6, R3 §4.7
+
+Three options: (1) accept `.zst` ambiguity, rely on manifest metadata (simplest); (2)
+use `.lobs.zst` suffix; (3) store compression state in manifest only, not filename.
+Round 3 review leans toward option 1 as adequate.
+Decision should be made explicitly.
+
+#### Small-file compression threshold
+
+**Review IDs:** R3 §4.7 (4.7-3)
+
+Compression overhead on tiny files can be counterproductive.
+Consider a default threshold (e.g., skip files < 4 KB) or make configurable.
+Quality-of-life optimization, not correctness.
+
+#### Dictionary compression
+
+**Review IDs:** R1 M8
+
+zstd dictionary training provides 2-5x improvement for small files (< 64 KB) sharing
+structure (common with JSON/YAML datasets).
+Design the compression interface to support this later (e.g., a `dictionary` field in
+config). Deferred to V2.
+
+#### Export/import specification
+
+**Review IDs:** R1 M6
+
+`lobs export` / `lobs import` are underspecified: does the archive include pointer
+files? Does import create pointers and gitignore entries?
+Flat dump or preserved directory structure?
+Seekable zstd for large archives?
+Needs specification before implementation.
+
+#### Integration surface: library vs CLI
+
+**Review IDs:** R1 M10, R3 §7
+
+State explicitly whether lobs is standalone CLI only or also exposes a programmatic API
+via the npm package.
+The current design implies CLI-only.
+
+#### Mixed directories: ignore vs include patterns
+
+**Review IDs:** R3 §4.8 (4.8-2)
+
+The ignore-pattern model requires manual `.gitignore` adjustment for mixed directories
+(known sharp edge). An include-pattern model where lobs tracks only matching files might
+be less error-prone.
+Current approach works; revisit if users find it confusing.
+
+#### `command` backend as integration point
+
+**Review IDs:** R1 M11
+
+The `command` backend could serve as a deliberate integration point for domain-specific
+tools, not just an escape hatch.
+Security restrictions (`lobs-vj6p`) must be resolved first.
+
+#### s5cmd and future transport engines
+
+**Review IDs:** R3 §5
+
+s5cmd is a high-performance batching tool worth considering, especially for
+manifest-driven file-by-file orchestration.
+Track as the transfer architecture solidifies.
+
+#### Team adoption workflow
+
+**Review IDs:** R1 M9
+
+The spec doesn’t address how team members discover they need to run `lobs pull`, CI
+integration patterns, or the “committed pointer with no remote data” failure mode.
+Add a “Team Workflows” section with guidance once core features are stable.
+
+#### `lobs verify` for directories
+
+**Review IDs:** R2
+
+Implement `lobs verify` for directory targets using per-file manifest hashes.
+Not a V1 launch blocker but straightforward once manifest hashes exist.
+Related: a `verify_after_pull` config flag (default false) for users who want post-pull
+integrity checks beyond what the transport layer provides.
+
+#### `ns ls` performance with sizes
+
+**Review IDs:** R3 §5
+
+Listing namespace sizes requires walking all objects in each prefix, which can be slow
+and expensive on large buckets.
+Consider deferring size reporting from `lobs ns ls` or making it opt-in (`--sizes`).
+Ship the basic listing (namespace names + timestamps) first.
