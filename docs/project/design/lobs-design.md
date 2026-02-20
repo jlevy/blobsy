@@ -29,16 +29,15 @@ gitignored paths and remote storage, with committed pointer files for tracking.
 5. **Flexible:** Works with any file types, any directory structures.
    No renaming of files or directories.
    Just gitignore the target and put a `.lobs` file next to it.
-   With or without compression.
    With or without checksumming.
 
 6. **Infrastructure neutral:** Pluggable backend (S3, R2, local, custom command),
-   pluggable sync engine (aws-cli, rclone, built-in), pluggable compression (zstd, gzip,
-   none, custom), pluggable namespace modes.
+   pluggable sync engine (aws-cli, rclone, built-in), template-based namespace prefixes.
+   Compression is a V2 feature (see Future Extensions).
 
 7. **Transparent storage format:** Remote storage mirrors local directory structure,
    organized under namespaces.
-   Files stored as-is or individually compressed.
+   Files stored as-is with their original names.
    Browsable with standard tools (`aws s3 ls`, web console).
    No opaque databases or content-addressed hash stores.
 
@@ -121,9 +120,9 @@ Custom implementations using a JSON manifest plus S3 objects.
 ### Assessment
 
 No existing tool combines: committed pointer files for git integration, pluggable
-backends, pluggable compression, namespace-based branch isolation, push/pull sync,
-transparent remote storage layout, and a simple standalone CLI. `lobs` fills this gap as
-a namespace-based sync coordinator that delegates heavy lifting to existing tools.
+backends, namespace-based branch isolation, push/pull sync, transparent remote storage
+layout, and a simple standalone CLI. `lobs` fills this gap as a namespace-based sync
+coordinator that delegates heavy lifting to existing tools.
 
 ## Core Concepts
 
@@ -144,84 +143,105 @@ The `.lobs` file is committed to git.
 The actual data is gitignored.
 `lobs` manages `.gitignore` entries automatically.
 
-### Namespace Modes
+### Namespace Prefix
 
 The core versioning problem: gitignored files don’t travel with branch checkouts.
 If you push data on `feature-x`, switch to `main`, and push different data, you
 overwrite the remote copy.
-Namespaces solve this by organizing remote storage into isolated segments.
+Namespace prefixes solve this by organizing remote storage into isolated segments.
 
-The namespace mode determines the remote path prefix under which data is stored:
+The `namespace.prefix` config determines the remote path prefix under which data is
+stored. It is a template string that can contain variables (in `{curly_braces}`) which
+are resolved at runtime:
 
-| Mode | Remote prefix | Use case |
+| Prefix | Resolves to | Use case |
 | --- | --- | --- |
-| `branch` (default) | `branches/<branch>/` | Branch-isolated data. Each branch has its own copy. |
-| `fixed` | `fixed/` | One shared namespace. All branches read/write the same data. |
-| `version` | `versions/<id>/` | Explicit versioning. Set via `--version` flag or config. |
+| `branches/{branch}` (default) | `branches/main/`, `branches/feature-x/` | Branch-isolated data. Each branch has its own copy. |
+| `shared` | `shared/` | One shared prefix. All branches read/write the same data. |
+| `versions/v2.1` | `versions/v2.1/` | Explicit versioning. Pin data to a release or experiment. |
+| `team-a/{branch}` | `team-a/branches/main/` | Custom prefix with branch isolation. |
 
-**Namespace mode is set in config and can be overridden per-pointer.** The resolved
-namespace (the actual prefix used) is computed at runtime, not stored in the pointer
-file.
+**V1 variables:**
+
+| Variable | Resolves to | Notes |
+| --- | --- | --- |
+| `{branch}` | Current git branch name | Detached HEAD falls back to `detached/<sha>` using the first 12 characters of the commit SHA. |
+
+Any string without `{variables}` is treated as a literal prefix.
+This means `shared`, `global`, `production`, `versions/v2.1` all work as-is — no special
+mode needed.
+
+**CLI shorthands:** Common prefixes have convenient `--prefix` shortcuts:
+
+```bash
+lobs track data/model.bin                            # uses default: branches/{branch}
+lobs track data/model.bin --prefix shared            # literal shared prefix
+lobs track data/model.bin --prefix "versions/v2.1"   # literal version prefix
+lobs track data/model.bin --prefix "teams/ml/{branch}"  # custom with branch variable
+```
+
+**Namespace prefix is set in config and can be overridden per-pointer.** The resolved
+prefix (the actual path used) is computed at runtime, not stored in the pointer file.
 This keeps pointer files stable across branches — the same `.lobs` file resolves to
 different remote paths depending on the current branch.
 
-**`branch` mode (default):**
+**Branch isolation (default, `branches/{branch}`):**
 - Resolves the current Git branch name at runtime.
 - Detached HEAD falls back to `detached/<sha>/` using the first 12 characters of the
   commit SHA (balances collision resistance with readability).
 - Each branch gets isolated remote storage.
 - Switching branches and running `lobs pull` materializes that branch’s data.
 
-**`fixed` mode:**
+**Shared prefix (e.g., `shared`):**
+- Any literal string (no `{variables}`).
 - Ignores the Git branch entirely.
 - All branches share one remote copy.
 - Appropriate for reference data, shared models, or simple single-branch workflows.
 
-**`version` mode:**
-- Uses an explicit version identifier.
-- Set via `lobs push --version v2.1` or `namespace.version` in config.
+**Explicit version (e.g., `versions/v2.1`):**
+- Just a literal prefix with a version in the path.
 - For pinning data to a release, experiment run, or other explicit identifier.
 
 #### Remote Storage Layout
 
-With `branch` namespace mode (default):
+With `branches/{branch}` prefix (default):
 
 ```
 s3://bucket/prefix/
   branches/main/
-    data/prices.parquet.zst
+    data/prices.parquet
     data/research-batch/
       .lobs-manifest.json
-      report.md.zst
-      raw/response.json.zst
+      report.md
+      raw/response.json
   branches/feature-x/
-    data/prices.parquet.zst
+    data/prices.parquet
     data/research-batch/
       ...
 ```
 
-With `fixed` namespace mode:
+With `shared` prefix:
 
 ```
 s3://bucket/prefix/
-  fixed/
-    data/prices.parquet.zst
+  shared/
+    data/prices.parquet
     data/research-batch/
       ...
 ```
 
-With `version` namespace mode:
+With `versions/v2.1` prefix:
 
 ```
 s3://bucket/prefix/
   versions/v2.1/
-    data/prices.parquet.zst
+    data/prices.parquet
     ...
 ```
 
 Browsable with `aws s3 ls`, web consoles, or any S3 tool.
 No opaque hash-based storage.
-When compression is `none`, files are stored as-is with their original names.
+Files are stored as-is with their original names (compression is a V2 feature).
 
 ### Pointer File Format
 
@@ -233,7 +253,6 @@ to minimize noise in `git diff`.
 - `sha256`: 64-character lowercase hexadecimal string.
 - `size`, `total_size`, `file_count`: integer, in bytes (for sizes).
 - `updated`: ISO 8601 UTC timestamp with `Z` suffix (e.g., `2026-02-18T12:00:00Z`).
-- `compression`: one of `zstd`, `gzip`, `lz4`, `none`.
 
 **Format versioning:** The `format` field uses `<name>/<major>.<minor>` versioning
 (e.g., `lobs/0.1`). Compatibility policy: reject if major version is unsupported; warn
@@ -250,7 +269,6 @@ format: lobs/0.1
 type: file
 sha256: 7a3f0e...
 size: 15728640
-compression: zstd
 updated: 2026-02-18T12:00:00Z
 ```
 
@@ -263,7 +281,6 @@ updated: 2026-02-18T12:00:00Z
 format: lobs/0.1
 type: directory
 manifest: true
-compression: zstd
 updated: 2026-02-18T12:00:00Z
 ```
 
@@ -277,8 +294,7 @@ format: lobs/0.1
 type: file
 sha256: abc123...
 size: 4294967296
-compression: none              # Override: skip compression for this file
-namespace_mode: fixed          # Override: share this file across all branches
+prefix: shared                 # Override: share this file across all branches
 updated: 2026-02-18T12:00:00Z
 ```
 
@@ -445,14 +461,12 @@ is required for stable `manifest_sha256` computation.
     {
       "path": "raw/response.json",
       "size": 1048576,
-      "sha256": "b4c8d2...",
-      "stored_as": "raw/response.json.zst"
+      "sha256": "b4c8d2..."
     },
     {
       "path": "report.md",
       "size": 4096,
-      "sha256": "7a3f0e...",
-      "stored_as": "report.md.zst"
+      "sha256": "7a3f0e..."
     }
   ],
   "total_size": 1052672
@@ -560,23 +574,13 @@ backends:
     pull: "my-download {remote} {local}"
 
 namespace:
-  mode: branch                 # branch (default) | fixed | version
-  # version: "v1.0"           # Required when mode is 'version'
+  prefix: "branches/{branch}"  # Template string. Default: "branches/{branch}"
+                               # Literal examples: "shared", "versions/v2.1"
+                               # Variables: {branch} (V1)
 
-compression:
-  algorithm: zstd              # zstd | gzip | lz4 | none | command
-  level: 3
-  skip_extensions:             # Don't compress already-compressed formats
-    - .jpg
-    - .png
-    - .pdf
-    - .gz
-    - .zip
-    - .zst
-    - .mp4
-  # Custom compression:
-  # compress_cmd: "zstd -3 -o {output} {input}"
-  # decompress_cmd: "zstd -d -o {output} {input}"
+# compression: (V2 feature — not available in V1)
+#   algorithm: zstd            # zstd | gzip | lz4 | none | command
+#   level: 3
 
 sync:
   tool: auto                   # auto | aws-cli | rclone | built-in
@@ -672,10 +676,11 @@ No cloud account needed.
 Escape hatch for unsupported backends.
 Template variables:
 - `{local}` — absolute path to the local file or directory.
-- `{remote}` — full remote key (e.g., `branches/main/data/prices.parquet.zst`).
+- `{remote}` — full remote key (e.g., `branches/main/data/prices.parquet`).
 - `{relative_path}` — repo-relative path of the tracked target (e.g.,
   `data/prices.parquet`).
-- `{namespace}` — resolved namespace prefix (e.g., `branches/main/`).
+- `{namespace}` — resolved namespace prefix (e.g., `branches/main`). (Note: this is the
+  resolved value of `namespace.prefix`, not the template.)
 - `{bucket}` — the configured bucket name.
 
 The command runs once per file (not once per push operation).
@@ -752,36 +757,15 @@ Uses the standard credential chain for the backend:
 - Instance profiles / IAM roles
 - rclone config (when `sync.tool: rclone`)
 
-## Compression System
+## Compression System (V2)
 
-### Per-File Compression
+Compression is deferred from V1. Files are stored as-is with their original names.
+This significantly simplifies V1: no staging directories, no suffix conventions, no
+skip-list logic, no `stored_as` field in manifests.
 
-Files are compressed before upload and decompressed after download.
-The user never sees compressed files locally.
-
-Default: `zstd` at level 3 (fast compression, ~3x ratio on text, 800+ MB/s
-decompression).
-
-Skip list: Already-compressed formats (JPEG, PNG, PDF, gzip, zip, zstd, MP4) are stored
-as-is. Compressing them wastes CPU for negligible gain.
-The skip list (`compression.skip_extensions`) must be set in repo-level config
-(committed to git), not in global/user config, because it affects remote storage keys.
-If two users have different skip lists, they would produce different remote
-representations of the same directory, breaking sync.
-
-Remote filenames: Compressed files get a `.zst` suffix (or `.gz`, `.lz4` depending on
-algorithm). The pointer file tracks both the original filename and the compressed remote
-filename.
-
-### Pluggable Algorithms
-
-| Algorithm | Default Level | Best For |
-| --- | --- | --- |
-| `zstd` | 3 | General purpose (default). Fast, good ratio. |
-| `gzip` | 6 | Maximum compatibility. |
-| `lz4` | - | Speed-critical. Low ratio but extremely fast. |
-| `none` | - | Already-compressed data, or when simplicity matters. |
-| `command` | - | Custom: specify `compress_cmd` and `decompress_cmd`. |
+Users who need smaller remote storage can compress files manually before tracking.
+Compression will be introduced as the first V2 feature.
+See Future Extensions (V2) for the planned design.
 
 ### Archive Export
 
@@ -804,23 +788,24 @@ SETUP
 
 TRACKING
   lobs track <path> [--backend B]    Start tracking a file or directory
+       [--prefix <prefix>]           Override namespace prefix (e.g., "shared")
        [--no-manifest]               Creates .lobs pointer, adds to .gitignore
   lobs untrack <path>                Stop tracking, remove pointer and gitignore entry
   lobs ls [--json]                   List all tracked paths with sync status
 
 SYNC
-  lobs push [path...]                Upload local changes to remote namespace
-       [--version <id>]              Override namespace for this push
-  lobs pull [path...]                Download from remote namespace to local
+  lobs push [path...]                Upload local changes to remote
+       [--prefix <prefix>]           Override namespace prefix for this push
+  lobs pull [path...]                Download from remote to local
        [--force]                     Overwrite local modifications
   lobs status [path...]              Show what's changed locally vs remotely
   lobs diff [path...]                Preview what push/pull would transfer
 
 NAMESPACE MANAGEMENT
-  lobs ns ls                         List all remote namespaces with sizes
-  lobs ns show                       Show current resolved namespace
-  lobs gc [--dry-run]                Remove namespaces with no corresponding local branch
-       [--older-than <duration>]     Only remove namespaces not updated in <duration>
+  lobs ns ls                         List all remote prefixes with sizes
+  lobs ns show                       Show current resolved prefix
+  lobs gc [--dry-run]                Remove prefixes with no corresponding local branch
+       [--older-than <duration>]     Only remove prefixes not updated in <duration>
 
 UTILITIES
   lobs verify [path...]              Verify local files match pointer hashes
@@ -864,7 +849,7 @@ Created .lobs/config.yml
 ? Bucket: my-datasets
 ? Prefix: project-v1/
 ? Region: us-east-1
-Namespace mode: branch (default)
+Namespace prefix: branches/{branch} (default)
 
 # Track a large file
 $ lobs track data/prices.parquet
@@ -876,55 +861,55 @@ $ lobs track data/research-batch/
 Created data/research-batch.lobs (manifest enabled)
 Added data/research-batch/ to .gitignore
 
-# Track shared reference data (fixed namespace, no branch isolation)
-$ lobs track data/shared-models/ --namespace-mode fixed
-Created data/shared-models.lobs (namespace: fixed, manifest enabled)
+# Track shared reference data (shared prefix, no branch isolation)
+$ lobs track data/shared-models/ --prefix shared
+Created data/shared-models.lobs (prefix: shared, manifest enabled)
 Added data/shared-models/ to .gitignore
 
-# Check current namespace
+# Check current prefix
 $ lobs ns show
-Namespace mode: branch
+Namespace prefix: branches/{branch}
 Resolved: branches/main/
 
 # Check status
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/prices.parquet       local-only  15.0 MB
   data/research-batch/      local-only  (directory, manifest)
-  data/shared-models/       local-only  (directory, manifest, namespace: fixed)
+  data/shared-models/       local-only  (directory, manifest, prefix: shared)
 
 # Push to remote
 $ lobs push
-Pushing data/prices.parquet -> branches/main/ (15.0 MB -> 5.2 MB compressed)...
+Pushing data/prices.parquet -> branches/main/ (15.0 MB)...
 Pushing data/research-batch/ -> branches/main/ (syncing directory)...
-Pushing data/shared-models/ -> fixed/ (syncing directory)...
+Pushing data/shared-models/ -> shared/ (syncing directory)...
 Done. 3 targets pushed.
 
 # Switch branches and pull
 $ git checkout feature-x
 $ lobs pull
-Namespace: branches/feature-x/
-Pulling data/prices.parquet (not in namespace, skipping)...
-Pulling data/research-batch/ (not in namespace, skipping)...
-Pulling data/shared-models/ <- fixed/ (already up-to-date)...
+Prefix: branches/feature-x/
+Pulling data/prices.parquet (not in prefix, skipping)...
+Pulling data/research-batch/ (not in prefix, skipping)...
+Pulling data/shared-models/ <- shared/ (already up-to-date)...
 Done.
 
-# Push data on the feature branch (creates new namespace)
+# Push data on the feature branch (creates new prefix)
 $ lobs push
-Pushing data/prices.parquet -> branches/feature-x/ (15.0 MB -> 5.2 MB)...
+Pushing data/prices.parquet -> branches/feature-x/ (15.0 MB)...
 Pushing data/research-batch/ -> branches/feature-x/ (syncing directory)...
-Pushing data/shared-models/ -> fixed/ (already up-to-date)...
+Pushing data/shared-models/ -> shared/ (already up-to-date)...
 Done.
 
 # List all namespaces
 $ lobs ns ls
   branches/main/           3 targets   120.4 MB   updated 2026-02-18
   branches/feature-x/      2 targets    20.2 MB   updated 2026-02-18
-  fixed/                   1 target     45.0 MB   updated 2026-02-18
+  shared/                  1 target     45.0 MB   updated 2026-02-18
 
 # Another machine: pull
 $ lobs pull
-Pulling data/prices.parquet (5.2 MB compressed)...
+Pulling data/prices.parquet (15.0 MB)...
 Pulling data/research-batch/ (syncing directory)...
 Done. 3 targets pulled.
 
@@ -962,7 +947,7 @@ Added data/prices.parquet to .gitignore
 
 # Push the data to remote storage
 $ lobs push
-Pushing data/prices.parquet -> branches/main/ (15.0 MB -> 5.2 MB compressed)...
+Pushing data/prices.parquet -> branches/main/ (15.0 MB)...
 Done. 1 target pushed.
 
 # Commit the pointer file and config to git
@@ -983,12 +968,12 @@ $ git pull
 
 # Check what lobs tracks and what's out of sync
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/prices.parquet       missing     (remote: 15.0 MB)
 
 # Pull the data
 $ lobs pull
-Pulling data/prices.parquet (5.2 MB compressed -> 15.0 MB)...
+Pulling data/prices.parquet (15.0 MB)...
 Done. 1 target pulled.
 
 # The file is now materialized locally
@@ -1001,12 +986,12 @@ $ ls -lh data/prices.parquet
 ```bash
 # After modifying the file locally...
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/prices.parquet       modified    15.0 MB -> 16.1 MB
 
 # Push the updated file
 $ lobs push
-Pushing data/prices.parquet -> branches/main/ (16.1 MB -> 5.5 MB compressed)...
+Pushing data/prices.parquet -> branches/main/ (16.1 MB)...
 Done. 1 target pushed.
 
 # The pointer file was updated by push — commit it
@@ -1024,12 +1009,12 @@ $ git pull
 
 # Status shows local data is stale
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/prices.parquet       stale       (local: 15.0 MB, remote: 16.1 MB)
 
 # Pull when ready
 $ lobs pull
-Pulling data/prices.parquet (5.5 MB compressed -> 16.1 MB)...
+Pulling data/prices.parquet (16.1 MB)...
 Done. 1 target pulled.
 ```
 
@@ -1056,7 +1041,7 @@ Added data/research-batch/ to .gitignore
 # Push all files in the directory
 $ lobs push
 Pushing data/research-batch/ -> branches/main/ (syncing directory)...
-  42 files, 120.4 MB total (78.2 MB compressed)
+  42 files, 120.4 MB total
   Manifest written.
 Done. 1 target pushed.
 
@@ -1071,12 +1056,12 @@ $ git push
 ```bash
 $ git pull
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/research-batch/      missing     (remote: 42 files, 120.4 MB)
 
 $ lobs pull
 Pulling data/research-batch/ (syncing directory)...
-  42 files downloaded (78.2 MB compressed -> 120.4 MB)
+  42 files downloaded (120.4 MB)
 Done. 1 target pulled.
 
 # User 2 adds new files and modifies an existing one
@@ -1084,7 +1069,7 @@ $ cp new-data.json data/research-batch/
 $ vim data/research-batch/report.md
 
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/research-batch/      modified    (1 new, 1 changed, 0 deleted)
 
 $ lobs push
@@ -1155,7 +1140,7 @@ $ vim .gitignore
 # Push — only non-ignored files are synced
 $ lobs push
 Pushing data/analysis/ -> branches/main/ (syncing directory)...
-  2 files (model-weights.bin, embeddings.parquet), 165 MB (54.3 MB compressed)
+  2 files (model-weights.bin, embeddings.parquet), 165 MB
   Manifest written.
 Done. 1 target pushed.
 
@@ -1175,7 +1160,7 @@ $ git pull
 # Does NOT get: model-weights.bin, embeddings.parquet (gitignored, lobs-managed)
 
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/analysis/            missing     (remote: 2 files, 165 MB)
                             ignored: *.py, *.yaml, *.md, scripts/
 
@@ -1201,33 +1186,33 @@ config.yaml  embeddings.parquet  model-weights.bin  process.py  README.md  scrip
   Large files flow through lobs.
   Both live in the same directory.
 
-### Scenario 4: Fixed Namespace (Shared Data)
+### Scenario 4: Shared Prefix (Shared Data)
 
 Shared reference data — a model, a dataset, a set of fixtures — that every branch reads
 and occasionally updates.
-Uses `fixed` namespace mode: one copy in remote storage, no branch isolation, all users
-and branches see the same data.
+Uses a literal prefix (e.g., `shared`): one copy in remote storage, no branch isolation,
+all users and branches see the same data.
 
-**User 1 sets up tracking with fixed namespace:**
+**User 1 sets up tracking with shared prefix:**
 
 ```bash
-# Track a shared model directory with fixed namespace
-$ lobs track models/base-model/ --namespace-mode fixed
-Created models/base-model.lobs (manifest enabled, namespace: fixed)
+# Track a shared model directory with shared prefix
+$ lobs track models/base-model/ --prefix shared
+Created models/base-model.lobs (prefix: shared, manifest enabled)
 Added models/base-model/ to .gitignore
 
 $ lobs ns show
-Namespace mode: fixed
-Resolved: fixed/
+Namespace prefix: shared
+Resolved: shared/
 
 $ lobs push
-Pushing models/base-model/ -> fixed/ (syncing directory)...
-  5 files, 2.3 GB total (1.1 GB compressed)
+Pushing models/base-model/ -> shared/ (syncing directory)...
+  5 files, 2.3 GB total
   Manifest written.
 Done. 1 target pushed.
 
 $ git add models/base-model.lobs .gitignore
-$ git commit -m "Track shared base model with lobs (fixed namespace)"
+$ git commit -m "Track shared base model with lobs (shared prefix)"
 $ git push
 ```
 
@@ -1238,22 +1223,22 @@ $ git checkout feature/experiment-7
 $ git pull origin main  # get the pointer file
 
 $ lobs ns show
-Namespace mode: fixed
-Resolved: fixed/
+Namespace prefix: shared
+Resolved: shared/
 
-# Fixed namespace — same remote location regardless of branch
+# Shared prefix — same remote location regardless of branch
 $ lobs pull
-Pulling models/base-model/ <- fixed/ (syncing directory)...
-  5 files, 2.3 GB (1.1 GB compressed)
+Pulling models/base-model/ <- shared/ (syncing directory)...
+  5 files, 2.3 GB
 Done. 1 target pulled.
 ```
 
 **CI pipeline pulls the same data:**
 
 ```bash
-# CI is on main, but it doesn't matter — fixed namespace ignores the branch
+# CI is on main, but it doesn't matter — shared prefix ignores the branch
 $ lobs pull
-Pulling models/base-model/ <- fixed/ ...
+Pulling models/base-model/ <- shared/ ...
 Done. 1 target pulled.
 ```
 
@@ -1264,11 +1249,11 @@ Done. 1 target pulled.
 $ cp retrained-model.bin models/base-model/model.bin
 
 $ lobs status
-  Namespace: fixed/
+  Prefix: shared/
   models/base-model/        modified    (0 new, 1 changed, 0 deleted)
 
 $ lobs push
-Pushing models/base-model/ -> fixed/ (syncing directory)...
+Pushing models/base-model/ -> shared/ (syncing directory)...
   1 changed (800 MB transferred)
   Manifest updated.
 Done. 1 target pushed.
@@ -1283,26 +1268,26 @@ $ git push
 ```bash
 # Any branch, any user, any environment
 $ lobs status
-  Namespace: fixed/
+  Prefix: shared/
   models/base-model/        stale       (remote has newer version)
 
 $ lobs pull
-Pulling models/base-model/ <- fixed/ ...
+Pulling models/base-model/ <- shared/ ...
   1 changed (800 MB transferred)
 Done. 1 target pulled.
 ```
 
 **Key points:**
-- `fixed` namespace mode means one remote location (`fixed/`) shared by all branches.
-  Switching branches does not change the namespace.
+- A literal prefix like `shared` means one remote location shared by all branches.
+  Switching branches does not change the resolved prefix.
 - Useful for reference data, shared models, common fixtures, or any data that shouldn’t
   diverge across branches.
-- The workflow is simpler than `branch` mode: no per-branch namespaces to manage, no
+- The workflow is simpler than `branches/{branch}`: no per-branch prefixes to manage, no
   `lobs gc` needed for cleanup.
 - The tradeoff is no isolation — a push from any branch updates the shared copy for
   everyone. This is the right choice when all branches should see the same data.
-- Can be mixed with `branch` mode in the same repo: some targets use `fixed`, others use
-  `branch` (configured per-pointer or per-directory).
+- Can be mixed in the same repo: some targets use `shared`, others use
+  `branches/{branch}` (configured per-pointer or per-directory).
 
 ### Scenario 5: Branch Lifecycle
 
@@ -1327,7 +1312,7 @@ $ lobs ns ls
 # On main — update some files
 $ cp updated-report.md data/research-batch/report.md
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/research-batch/      modified    (0 new, 1 changed, 0 deleted)
 
 $ lobs push
@@ -1347,20 +1332,20 @@ $ git push
 $ git checkout -b feature/new-analysis
 $ git push -u origin feature/new-analysis
 
-# Check the namespace — it changed automatically
+# Check the prefix — it changed automatically
 $ lobs ns show
-Namespace mode: branch
+Namespace prefix: branches/{branch}
 Resolved: branches/feature/new-analysis/
 
-# Status: no data in the new namespace yet
+# Status: no data in the new prefix yet
 $ lobs status
-  Namespace: branches/feature/new-analysis/
+  Prefix: branches/feature/new-analysis/
   data/research-batch/      local-only  (directory, 42 files)
 
-# Push to create the new namespace with current data
+# Push to create the new prefix with current data
 $ lobs push
 Pushing data/research-batch/ -> branches/feature/new-analysis/ (syncing directory)...
-  42 files, 120.4 MB total (78.2 MB compressed)
+  42 files, 120.4 MB total
   Manifest written.
 Done. 1 target pushed.
 
@@ -1377,7 +1362,7 @@ $ cp analysis-v2.parquet data/research-batch/
 $ rm data/research-batch/old-draft.md
 
 $ lobs status
-  Namespace: branches/feature/new-analysis/
+  Prefix: branches/feature/new-analysis/
   data/research-batch/      modified    (1 new, 0 changed, 1 deleted)
 
 $ lobs push
@@ -1403,7 +1388,7 @@ $ git fetch
 $ git checkout feature/new-analysis
 
 $ lobs status
-  Namespace: branches/feature/new-analysis/
+  Prefix: branches/feature/new-analysis/
   data/research-batch/      stale       (local: main version, remote: feature version)
 
 # Pull the feature branch's data
@@ -1431,7 +1416,7 @@ $ git push
 ```bash
 # PR is merged on GitHub — CI merges feature/new-analysis into main
 # The merged pointer file now reflects the feature branch's latest state
-# But the remote branches/main/ namespace still has the old data
+# But the remote branches/main/ prefix still has the old data
 ```
 
 **User 1 updates main after merge:**
@@ -1442,16 +1427,16 @@ $ git pull
 # Pointer file updated with feature branch's latest hash
 
 $ lobs ns show
-Namespace mode: branch
+Namespace prefix: branches/{branch}
 Resolved: branches/main/
 
 # Status: local data matches the pointer (User 1 still has the files from
 # working on the feature branch), but remote branches/main/ is stale
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/research-batch/      modified    (local is newer than remote)
 
-# Push to update the main namespace with the merged data
+# Push to update the main prefix with the merged data
 $ lobs push
 Pushing data/research-batch/ -> branches/main/ (syncing directory)...
   2 new, 0 changed, 1 deleted (13.3 MB transferred)
@@ -1470,7 +1455,7 @@ $ git checkout main
 $ git pull
 
 $ lobs status
-  Namespace: branches/main/
+  Prefix: branches/main/
   data/research-batch/      up-to-date
 
 # User 2 already has the data from working on the feature branch,
@@ -1479,7 +1464,7 @@ $ lobs pull
 Already up-to-date. 0 targets pulled.
 ```
 
-**Cleanup — remove the stale feature branch namespace:**
+**Cleanup — remove the stale feature branch prefix:**
 
 ```bash
 $ lobs ns ls
@@ -1491,22 +1476,21 @@ Would remove: branches/feature/new-analysis/  (129.7 MB, no local branch)
 
 $ lobs gc
 Removed: branches/feature/new-analysis/ (129.7 MB)
-Done. 1 namespace removed, 129.7 MB freed.
+Done. 1 prefix removed, 129.7 MB freed.
 ```
 
 **Key points:**
-- Switching branches changes the resolved namespace automatically.
-  `lobs ns show` confirms which namespace is active.
-- The first `lobs push` on a new branch creates a new namespace with a full copy of the
+- Switching branches changes the resolved prefix automatically.
+  `lobs ns show` confirms which prefix is active.
+- The first `lobs push` on a new branch creates a new prefix with a full copy of the
   data. Subsequent pushes are incremental.
-- Namespaces are fully isolated: changes on `feature/new-analysis` don’t affect
+- Prefixes are fully isolated: changes on `feature/new-analysis` don’t affect
   `branches/main/`.
 - After a CI merge, a developer who has the local data must `lobs push` on main to
-  update the `branches/main/` namespace.
+  update the `branches/main/` prefix.
   The pointer file from the merged branch is now on main, but the remote data is still
-  under the old namespace until someone pushes.
-- `lobs gc` cleans up branch namespaces that no longer have a corresponding local
-  branch.
+  under the old prefix until someone pushes.
+- `lobs gc` cleans up branch prefixes that no longer have a corresponding local branch.
 
 ## Corner Cases and Pitfalls
 
@@ -1533,7 +1517,7 @@ This is the most common mistake.
 and `git commit` on the `.lobs` pointer (perhaps manually edited, or from a previous
 `lobs push` that was followed by more local changes before the data was re-pushed).
 Other users pull from git, see the updated pointer, run `lobs pull`, and the remote data
-doesn’t match the pointer hash — or doesn’t exist at all in the namespace.
+doesn’t match the pointer hash — or doesn’t exist at all in the resolved prefix.
 
 Recovery: the original user runs `lobs push` to upload the data that matches the
 committed pointer.
@@ -1546,17 +1530,17 @@ that can’t be resolved remotely.
 branch A, then `git checkout B` without committing the updated pointer.
 The pointer update is lost (unstaged changes discarded by checkout, or left as
 uncommitted modifications).
-The data is in the remote namespace but nothing in git references it.
+The data is in the remote prefix but nothing in git references it.
 
 Recovery: switch back to branch A, the uncommitted pointer changes may still be in the
 working tree. If lost, re-run `lobs push` to regenerate the pointer.
 
-### Post-Merge Namespace Gap
+### Post-Merge Prefix Gap
 
 After a branch merge (especially via CI/GitHub PR), the merged pointer file is on main
-but the `branches/main/` remote namespace still has pre-merge data.
-This is because the pointer doesn’t store the namespace — it’s resolved at runtime from
-the current branch.
+but the `branches/main/` remote prefix still has pre-merge data.
+This is because the pointer doesn’t store the prefix — it’s resolved at runtime from the
+current branch.
 
 The data exists in `branches/feature-x/` but a user on main resolves to
 `branches/main/`.
@@ -1567,23 +1551,23 @@ out main and runs `lobs push`. This uploads the data to `branches/main/`.
 This is the expected workflow, not a bug — but it’s the most surprising behavior for new
 users. Scenario 5 walks through this in detail.
 
-Potential future improvement: `lobs push --from-namespace <ns>` to copy data between
-namespaces without needing the local files.
+Potential future improvement: `lobs push --from-prefix <prefix>` to copy data between
+prefixes without needing the local files.
 
 ### Concurrent Writers
 
-**Two users pushing to the same branch namespace.** With manifests enabled (default),
-the second push fails with exit code 2 if the manifest changed since the user’s last
-pull. The user must `lobs pull` first to get the latest state, then `lobs push` again.
+**Two users pushing to the same branch prefix.** With manifests enabled (default), the
+second push fails with exit code 2 if the manifest changed since the user’s last pull.
+The user must `lobs pull` first to get the latest state, then `lobs push` again.
 
 Without manifests, the transport tool (`aws s3 sync`, `rclone`) handles conflicts via
 last-write-wins semantics.
 Files may be partially overwritten if pushes overlap.
 
-**Two users updating fixed-namespace data simultaneously.** Same conflict detection
+**Two users updating shared-prefix data simultaneously.** Same conflict detection
 applies. With manifests, the second writer gets a conflict error.
 Without manifests, last-write-wins.
-Fixed namespace data that changes frequently should use manifests (the default) and
+Shared-prefix data that changes frequently should use manifests (the default) and
 coordinate writes.
 
 ### Interrupted Transfers
@@ -1598,20 +1582,21 @@ The manifest is written after all uploads succeed.
 Re-running `lobs pull` is safe: already-downloaded files that match the manifest hash
 are skipped. Partially downloaded files (wrong size or hash) are re-downloaded.
 
-### Branch and Namespace Edge Cases
+### Branch and Prefix Edge Cases
 
-**Detached HEAD.** Pushes go to `detached/<shortsha>/`. This works but creates
-namespaces that `lobs gc` does not clean up by default (gc only cleans `branches/`
-namespaces). CI environments that check out specific commits (detached HEAD) can
-accumulate orphaned namespaces.
+**Detached HEAD.** When the prefix contains `{branch}` and HEAD is detached, it falls
+back to `detached/<shortsha>/`. This works but creates prefixes that `lobs gc` does not
+clean up by default (gc only cleans `branches/` prefixes).
+CI environments that check out specific commits (detached HEAD) can accumulate orphaned
+prefixes.
 
-Mitigation: CI should use `--namespace-mode fixed` or explicit `--version` for CI-built
+Mitigation: CI should use `--prefix shared` or an explicit literal prefix for CI-built
 data. For manual detached HEAD work, use `lobs ns ls` to find and manually remove
-orphaned `detached/` namespaces.
+orphaned `detached/` prefixes.
 
-**`lobs gc` deletes a colleague’s branch namespace.** `gc` checks local branches only.
-If a colleague has a remote branch that you haven’t fetched, `gc` considers its
-namespace stale and removes it.
+**`lobs gc` deletes a colleague’s branch prefix.** `gc` checks local branches only.
+If a colleague has a remote branch that you haven’t fetched, `gc` considers its prefix
+stale and removes it.
 
 Mitigation: run `git fetch --all` before `lobs gc` to ensure all remote branches are
 known locally. Or use `lobs gc --dry-run` first to review what would be removed.
@@ -1619,13 +1604,13 @@ The round 1 review (S2) recommends checking remote tracking branches as well —
 be addressed in implementation.
 
 **First push on a new branch is a full copy.** When you create a feature branch and
-`lobs push`, lobs uploads all files to the new `branches/feature-x/` namespace — even
-though the data is identical to `branches/main/`. There is no cross-namespace
-deduplication in V1. For large datasets, this can be slow and expensive.
+`lobs push`, lobs uploads all files to the new `branches/feature-x/` prefix — even
+though the data is identical to `branches/main/`. There is no cross-prefix deduplication
+in V1. For large datasets, this can be slow and expensive.
 
 Mitigation: this is a known V1 limitation (listed in Scope Boundaries).
-For very large datasets where branch copies are impractical, consider `fixed` namespace
-mode or `version` mode instead.
+For very large datasets where branch copies are impractical, consider a shared literal
+prefix instead.
 
 ### Gitignore Misconfiguration
 
@@ -1662,8 +1647,8 @@ the meantime. Run `lobs status` after unstashing to check consistency.
 restores the old hash in the pointer.
 The local data still has the newer content.
 `lobs status` shows “modified” (local doesn’t match pointer).
-`lobs pull` downloads the older version from remote (if it still exists in the namespace
-— lobs does not delete old versions from remote during normal sync).
+`lobs pull` downloads the older version from remote (if it still exists in the prefix —
+lobs does not delete old versions from remote during normal sync).
 
 **`git rebase` / `git cherry-pick` with pointer conflicts.** Pointer files can conflict
 during rebase just like any other file.
@@ -1699,19 +1684,18 @@ auto-detection. Or configure aws-cli for the target endpoint.
 **Single files:**
 1. Hash local file.
 2. Compare against hash recorded in `.lobs` pointer.
-3. If different: compress (if enabled), upload to remote namespace, update `.lobs`
-   pointer.
+3. If different: upload to remote prefix, update `.lobs` pointer.
 4. User commits updated `.lobs` files to git.
 
 **Directories (with manifest, default):**
 1. Scan local directory (applying ignore patterns from config, if any).
-2. Fetch remote manifest from namespace.
+2. Fetch remote manifest from resolved prefix.
 3. `stat()` each local file and compare against the local stat cache.
    Files where `size` + `mtime_ms` match the cache: use cached `sha256` (no read).
    Files where stat differs or no cache entry: read and hash (SHA-256), update cache.
 4. Compare local hashes and sizes against manifest: identify new, changed, and deleted
    files. Files where the hash matches the manifest are skipped (no re-upload).
-5. Upload changed/new files (compressing if enabled), remove deleted files from remote.
+5. Upload changed/new files, remove deleted files from remote.
 6. Rewrite remote manifest with updated per-file hashes and sizes.
    Manifest is written as a single object PUT (atomic on S3-compatible stores).
 7. Update `updated` timestamp in `.lobs` pointer only after manifest write succeeds.
@@ -1721,10 +1705,10 @@ reflects the last complete push.
 Re-running push is safe: already-uploaded files are detected via hash comparison and
 skipped. If the remote already has the expected object (hash matches), upload is skipped
 even if the pointer was updated — this supports merge/promotion workflows where data
-exists in one namespace but needs to appear in another.
+exists in one prefix but needs to appear in another.
 
 **Directories (without manifest):**
-1. Delegate to transport tool (`aws s3 sync`, `rclone sync`) targeting the namespace
+1. Delegate to transport tool (`aws s3 sync`, `rclone sync`) targeting the resolved
    prefix.
 2. Transport tool handles change detection and incremental transfer.
 3. Update `updated` timestamp in `.lobs` pointer.
@@ -1733,18 +1717,16 @@ exists in one namespace but needs to appear in another.
 
 **Single files:**
 1. Check if local file exists and matches pointer hash.
-2. If missing or different from pointer: download from remote namespace, decompress (if
-   needed).
+2. If missing or different from pointer: download from resolved prefix.
 3. If the local file has been modified (hash differs from both pointer and remote), pull
    fails with exit code 2. Use `--force` to overwrite local modifications.
 
 **Directories (with manifest, default):**
-1. Fetch remote manifest from namespace.
+1. Fetch remote manifest from resolved prefix.
 2. Compare local files against manifest using size and hash (applying ignore patterns
    from config, if any).
    Files where the hash matches are skipped.
 3. Download missing or changed files (only non-ignored files).
-   Decompress if needed.
 4. Pull does not delete local files that are absent from the manifest.
    Extra local files are left untouched.
 
@@ -1754,7 +1736,7 @@ exists in one namespace but needs to appear in another.
 
 ### Conflict Detection
 
-**Single-writer model (V1):** lobs assumes one writer per namespace at a time.
+**Single-writer model (V1):** lobs assumes one writer per prefix at a time.
 This is the common case for branch-based workflows where each developer works on their
 own branch.
 
@@ -1792,26 +1774,26 @@ Git provides it. Namespaces provide branch isolation.
 
 When you `lobs push`, the pointer file’s hash and timestamp update.
 You commit those changes to git.
-`git log data/prices.parquet.lobs` shows the version history.
+`git log data/prices.parquet.lobs` shows the version history of pointer changes.
 
-To restore an old version of data within the current namespace:
+**Important:** Remote prefixes hold the latest pushed state only.
+Checking out an old pointer and running `lobs pull` will only succeed if the prefix
+hasn’t been overwritten by a subsequent push.
+This is not a design guarantee — it depends on whether the remote data happens to still
+match the old pointer.
+For reliable file-level history, enable S3 bucket versioning or use an explicit version
+prefix (e.g., `versions/v2.1`).
 
-```bash
-git checkout HEAD~5 -- data/prices.parquet.lobs
-lobs pull data/prices.parquet
-```
-
-This works because the current namespace still contains the data (namespaces are not
-garbage collected automatically), and `lobs` never deletes remote objects during normal
-sync operations.
+A future V2 opt-in mode (commit-prefixed versioned storage) will enable full
+reproducibility. See the Future Extensions (V2) section.
 
 ### Branch Merge and Cleanup
 
-When a feature branch is merged and deleted locally, its remote namespace
+When a feature branch is merged and deleted locally, its remote prefix
 (`branches/feature-x/`) remains.
 This is by design — remote data is never deleted implicitly.
 
-Use `lobs gc` to clean up stale namespaces:
+Use `lobs gc` to clean up stale prefixes:
 
 ```bash
 # Preview what would be removed
@@ -1819,25 +1801,25 @@ $ lobs gc --dry-run
 Would remove: branches/feature-x/  (20.2 MB, no local branch, last updated 14d ago)
 Would remove: branches/old-exp/    (5.1 MB, no local branch, last updated 45d ago)
 Skipping:     branches/main/       (local branch exists)
-Skipping:     fixed/               (not a branch namespace)
+Skipping:     shared/              (literal prefix, not a branch prefix)
 
-# Remove namespaces older than 30 days with no local branch
+# Remove prefixes older than 30 days with no local branch
 $ lobs gc --older-than 30d
 Removed: branches/old-exp/ (5.1 MB)
 Skipping: branches/feature-x/ (last updated 14d ago, newer than 30d)
-Done. 1 namespace removed, 5.1 MB freed.
+Done. 1 prefix removed, 5.1 MB freed.
 
-# Force remove all stale namespaces
+# Force remove all stale prefixes
 $ lobs gc --force
 Removed: branches/feature-x/ (20.2 MB)
 Removed: branches/old-exp/ (5.1 MB)
-Done. 2 namespaces removed, 25.3 MB freed.
+Done. 2 prefixes removed, 25.3 MB freed.
 ```
 
-`gc` never touches `fixed/` or `versions/` namespaces.
-It removes `branches/` namespaces that have no corresponding local or remote-tracking
-Git branch. It also removes `detached/` namespaces older than a configurable TTL
+`gc` only removes prefixes under `branches/` that have no corresponding local or
+remote-tracking Git branch, and `detached/` prefixes older than a configurable TTL
 (default: 7 days), since CI and ephemeral checkouts can create many of these.
+Literal prefixes (e.g., `shared/`, `versions/v2.1/`) are never touched by gc.
 
 ## Agent and Automation Integration
 
@@ -1850,8 +1832,8 @@ All commands support `--json`. JSON output includes a `schema_version` field (e.
 $ lobs status --json
 {
   "schema_version": "0.1",
-  "namespace": "branches/main/",
-  "namespace_mode": "branch",
+  "prefix_template": "branches/{branch}",
+  "resolved_prefix": "branches/main/",
   "tracked": 12,
   "modified": 2,
   "missing_local": 1,
@@ -1862,7 +1844,7 @@ $ lobs status --json
       "local_sha256": "abc...",
       "pointer_sha256": "def...",
       "size": 15728640,
-      "namespace_mode": "branch"
+      "prefix": "branches/{branch}"
     }
   ]
 }
@@ -1871,18 +1853,18 @@ $ lobs status --json
 ```bash
 $ lobs ns ls --json
 {
-  "namespaces": [
+  "prefixes": [
     {
       "prefix": "branches/main/",
-      "mode": "branch",
+      "template": "branches/{branch}",
       "targets": 3,
       "total_size": 120400000,
       "updated": "2026-02-18T12:00:00Z",
       "has_local_branch": true
     },
     {
-      "prefix": "fixed/",
-      "mode": "fixed",
+      "prefix": "shared/",
+      "template": "shared",
       "targets": 1,
       "total_size": 45000000,
       "updated": "2026-02-18T12:00:00Z"
@@ -1959,22 +1941,25 @@ No cloud account needed for development.
 
 What `lobs` does:
 - Track files and directories via `.lobs` pointer files
-- Namespace-based branch isolation (`branch`, `fixed`, `version` modes)
+- Template-based namespace prefixes (`branches/{branch}`, literal prefixes like
+  `shared`)
 - Push/pull sync with pluggable backends
 - Remote manifests for directory sync coordination
-- Optional per-file compression with pluggable algorithms
 - SHA-256 integrity verification (pointer hashes for files, manifest hashes for
   directories)
-- Namespace garbage collection
+- Prefix garbage collection
 - Hierarchical configuration with per-pointer overrides
 - Gitignore management
 - Machine-readable output for agents
 
 What `lobs` does not do (V1):
+- Compression (files stored as-is; see Future Extensions for V2 plans)
+- Versioned/reproducible storage (remote holds latest state per prefix only; see Future
+  Extensions for V2 commit-prefixed blob storage)
 - Bidirectional sync (deferred until delete semantics are resolved; use `push`/`pull`)
 - Sub-file delta sync (whole-file granularity only)
 - Cross-repo deduplication
-- Cross-namespace deduplication (branch A and B store separate copies)
+- Cross-prefix deduplication (branch A and B store separate copies)
 - Access control (relies on backend IAM)
 - Lazy materialization (pull downloads everything)
 - Content-addressable storage (path-mirrored only)
@@ -1985,6 +1970,150 @@ What `lobs` does not do (V1):
 - Web UI
 
 These are candidates for future versions if demand warrants.
+
+## Future Extensions (V2)
+
+This section outlines planned V2 features that are explicitly out of V1 scope.
+They are documented here to ensure V1’s design is forward-compatible and to provide a
+roadmap for future development.
+
+### V2 Phase 1: Compression
+
+**Motivation:** Files stored as-is in V1 means larger remote storage and slower
+transfers for compressible data.
+Compression is the highest-value V2 feature and should be the first addition after V1
+ships.
+
+**Planned design:**
+
+Per-file compression before upload, decompression after download.
+The user never sees compressed files locally.
+
+- Default algorithm: `zstd` at level 3 (fast compression, ~3x ratio on text, 800+ MB/s
+  decompression).
+- Pluggable algorithms: `zstd`, `gzip`, `lz4`, `none`, `command` (custom).
+- Skip list: Already-compressed formats (JPEG, PNG, MP4, etc.)
+  stored as-is. Must be in repo-level config (affects remote keys).
+- Remote filenames: Compressed files get a `.zst` suffix (or `.gz`, `.lz4`). The
+  manifest tracks `stored_as` for each file entry.
+- Staging approach: file-by-file orchestration (compress → upload → next file) avoids
+  doubling disk usage.
+
+**V1 compatibility:** V1 manifests and pointers have no compression fields.
+Adding compression in V2 means the pointer format gains a `compression` field and
+manifests gain `stored_as` entries.
+V1 pointers without these fields are implicitly `compression: none`, so the transition
+is backward-compatible.
+
+### V2 Phase 2: Commit-Prefixed Versioned Storage
+
+**Motivation:** V1’s path-mirrored layout (Promise A) means remote prefixes hold only
+the latest pushed state.
+Old versions are lost when overwritten by a subsequent push.
+For teams that need reproducibility — the ability to reconstruct exact data states from
+old commits — a versioned storage layer is needed.
+
+**Design: commit-hash-prefixed blobs.**
+
+This approach extends V1’s branch prefix model naturally.
+Instead of storing files at `branches/main/data/prices.parquet` (overwritten on each
+push), files are stored under the git commit hash that was HEAD at push time:
+
+```
+s3://bucket/prefix/
+  blobs/
+    a1b2c3d4/data/prices.parquet        <- pushed at commit a1b2c3d4
+    a1b2c3d4/data/research-batch/
+      report.md
+      raw/response.json
+    e5f6a7b8/data/prices.parquet        <- modified at commit e5f6a7b8
+  manifests/
+    branches/main/current.json          <- maps paths to blob prefixes
+```
+
+**How it works:**
+
+1. On `lobs push`, lobs records `git rev-parse HEAD` as the blob prefix.
+2. Only changed files get new blobs under the new commit prefix.
+   Unchanged files retain their existing blob prefix from a prior push.
+3. The manifest maps each path to its blob prefix:
+
+```json
+{
+  "format": "lobs-manifest/0.2",
+  "updated": "2026-02-18T12:00:00Z",
+  "storage": "versioned",
+  "files": [
+    {
+      "path": "data/prices.parquet",
+      "blob_prefix": "e5f6a7b8",
+      "size": 16100000,
+      "sha256": "..."
+    },
+    {
+      "path": "data/research-batch/report.md",
+      "blob_prefix": "a1b2c3d4",
+      "size": 4096,
+      "sha256": "..."
+    }
+  ]
+}
+```
+
+4. On `lobs pull`, the manifest resolves each path to its blob location.
+5. Historical manifests are preserved (keyed by commit hash), enabling reconstruction of
+   any past state.
+
+**Key properties:**
+
+- **Natural dedup:** Only changed files get new blobs.
+  Unchanged files across commits (and across branches forked from the same commit) share
+  the same blob. This also solves the V1 pain point where the first push on a new branch
+  re-uploads everything.
+- **Browsable:** Files are stored by path under a commit prefix, so
+  `aws s3 ls s3://bucket/prefix/blobs/a1b2c3d4/` shows real files with real names.
+  Pipelines need the manifest to find the right blob prefix, but the manifest is a
+  simple JSON file any system can read.
+- **Fully reproducible:** Any historical manifest reconstructs the exact data state.
+  Checking out an old pointer and pulling actually works reliably (unlike V1 where it
+  depends on the prefix not having been overwritten).
+- **Incremental:** Push only uploads blobs that changed.
+  The manifest is the only thing rewritten per push.
+- **Clean extension of V1:** V1’s `branches/main/data/prices.parquet` layout is a
+  special case where every file has the same blob prefix (the resolved namespace
+  prefix). V2 generalizes this to per-file prefixes based on last-modified commit.
+
+**Opt-in:** Versioned storage is enabled via config (`storage: versioned`). V1-style
+path-mirrored storage remains the default for simplicity.
+
+**Garbage collection:** With versioned blobs, GC needs to walk all manifests to find
+which blobs are still referenced.
+Unreferenced blobs (from old commits whose manifests have been pruned) can be deleted.
+More complex than V1’s prefix-based deletion but well-understood (similar to git’s
+object GC).
+
+**Compression interaction:** When both compression and versioned storage are enabled,
+compressed blobs get the `.zst` suffix under their commit prefix (e.g.,
+`blobs/a1b2c3d4/data/prices.parquet.zst`). The manifest’s `stored_as` field resolves the
+full remote key.
+
+### V2: Other Candidates
+
+These are additional V2 candidates recorded from design reviews.
+They are independent of the phased compression and versioned storage features above.
+
+- **Cross-prefix dedup:** In V1, creating a new branch re-uploads all data.
+  Versioned storage (above) solves this naturally.
+- **Remote staleness detection via provider hashes:** Store ETag/CRC from upload
+  responses for cheap `HeadObject`-based checks.
+  See Integrity Model section.
+- **Bidirectional sync (`lobs sync`):** Pull-then-push with configurable conflict
+  resolution. Blocked on delete semantics resolution.
+- **Lazy materialization:** Pull specific files from a directory without downloading
+  everything.
+- **Dictionary compression:** zstd dictionary training for 2-5x improvement on small
+  files sharing structure.
+- **Sub-file delta sync:** Transfer only changed portions of large files.
 
 ## Review Issues Tracker
 
@@ -2016,45 +2145,32 @@ Listed for traceability; no further action needed.
 | `lobs-n23z` | R1 M2 | **Format versioning.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. See Pointer File Format section. |
 | `lobs-0a9e` | R1 M3, R3 §4.10 | **Command backend template variables.** `{local}`, `{remote}`, `{relative_path}`, `{namespace}`, `{bucket}` specified. Runs once per file. See Backend System section. |
 | `lobs-srme` | R1 M4, R3 §4.8 | **Which .gitignore.** Same directory as tracked path, following DVC convention. See Gitignore Management section. |
-| `lobs-v9py` | R1 M5, R3 §4.3 | **Detached HEAD.** 12-char SHA prefix, gc covers `detached/` namespaces with TTL. See Namespace Modes section. |
+| `lobs-v9py` | R1 M5, R3 §4.3 | **Detached HEAD.** 12-char SHA prefix, gc covers `detached/` prefixes with TTL. See Namespace Prefix section. |
 | `lobs-bnku` | R1 M7, R3 §4.4 | **Push idempotency.** Atomic manifest write; re-run is safe. See Sync Semantics section. |
 | `lobs-q6xr` | R3 §4.4 | **Pull behavior on local mods.** Default: error on modified files unless `--force`. See Pull section. |
-| `lobs-p8c4` | R3 §4.2 | **`stored_as` in manifest.** Each file entry includes `stored_as` for remote key reconstruction. See Manifests section. |
+| `lobs-p8c4` | R3 §4.2 | **`stored_as` in manifest.** Deferred to V2 (no compression in V1 means remote key = path). Will be needed when compression adds `.zst` suffixes. |
 | `lobs-txou` | R3 §4.2 | **Manifest canonicalization.** Fixed key order, sorted file entries, consistent LF, no trailing whitespace. See Manifests section. |
 | `lobs-v6eb` | R3 §4.1 | **Stable pointer key ordering.** Keys written in documented fixed order to minimize git diff noise. See Pointer File Format section. |
-| `lobs-fjqj` | R3 §4.7 | **Compression skip list in repo config.** Must be committed to git (affects remote keys). See Compression System section. |
+| `lobs-fjqj` | R3 §4.7 | **Compression skip list in repo config.** Deferred to V2 with compression. |
 | `lobs-mg0y` | R3 §4.9 | **`--json` schema version.** `schema_version` field in all JSON output. See Agent and Automation Integration section. |
 | `lobs-pice` | R3 §4 | **SDK endpoint wording.** `@aws-sdk/client-s3` uses config object, not CLI flags. See S3-Compatible Backends section. |
 | *(spec)* | R2 | **Checksum algorithm simplification.** Dropped md5 and xxhash from V1; `sha256` (default) and `none` only. See Integrity Model section. |
 | *(spec)* | R3 §4.4 | **Pull does not delete local files.** Extra local files not in manifest are left untouched. See Pull section. |
+| `lobs-cx82` | R3 §1 | **Versioning semantics.** Promise A for V1 (branch-isolated sync, latest state per namespace). Promise B language removed. Bucket versioning recommended for history. V2 commit-prefixed blobs planned for full reproducibility. See Versioning and Branch Lifecycle and Future Extensions sections. |
 
 ### Open P0 — Must Resolve Before Implementation
 
 These are blocking design decisions.
 Each requires a clear resolution before the corresponding feature can be implemented.
 
-#### Versioning semantics (`lobs-cx82`)
+#### Versioning semantics (`lobs-cx82`) — RESOLVED
 
 **Review IDs:** R3 §1 (P0-1)
 
-The design must pick a clear V1 product promise:
-
-- **Promise A (simple):** “lobs is a branch-isolated sync layer.
-  Remote holds the latest state per namespace.
-  Use `version` mode or bucket versioning for history.”
-  Matches the current path-mirrored remote layout.
-- **Promise B (stronger):** “lobs makes commits reproducible: pointers reference
-  immutable remote content.”
-  Requires CAS-like storage or snapshot identifiers.
-
-The current spec uses Promise A mechanics but occasionally uses Promise B language
-(e.g., restoring old versions by checking out old pointers).
-Pick one and remove contradictory claims.
-
-Related: Content-addressable storage (CAS) as a future direction.
-CAS enables time-travel, dedup, and reproducibility but breaks remote browsability.
-A hybrid is possible (path-mirrored within a snapshot, immutable snapshot IDs at the top
-level). Out of V1 scope but worth tracking as a design axis for V2.
+**Decision: Promise A for V1.** See Addressed Issues table above for full resolution.
+Promise B language removed from spec.
+V2 commit-prefixed versioned storage planned for full reproducibility (see Future
+Extensions).
 
 #### `manifest_sha256` content identifier for directory pointers (`lobs-mlv9`)
 
@@ -2081,10 +2197,10 @@ exist in `branches/main/`.
 Options:
 
 - Add explicit `lobs promote` or `lobs ns copy` command for post-merge data promotion.
-- Have `lobs push` detect missing remote objects for the current namespace and re-upload
+- Have `lobs push` detect missing remote objects for the current prefix and re-upload
   from local.
 - Add `lobs check-remote` CI verifier that fails the merge if data isn’t in the target
-  namespace.
+  prefix.
 
 #### Delete semantics (`lobs-05j8`)
 
@@ -2120,25 +2236,13 @@ Options:
 Given the single-writer model and the complexity of portable metadata across aws-cli,
 rclone, and custom backends, the round 3 review recommends deferring this.
 
-#### Compression + transfer mechanics (`lobs-lsu9`)
+#### Compression + transfer mechanics (`lobs-lsu9`) — DEFERRED TO V2
 
 **Review IDs:** R3 §4.7 (P0-5, 4.7-1)
 
-The design promises per-file compression, delegated transfer, and manifest-driven
-decisions but doesn’t specify how they compose.
-Two approaches:
-
-- **Staging directory:** Compress files into a temp staging area, then delegate to
-  `aws s3 sync` on the staging directory.
-  Clean and simple but doubles disk usage during push.
-- **File-by-file orchestration:** lobs orchestrates individual file transfers (compress
-  → upload → next file).
-  More complex but no staging overhead.
-
-When `manifest: true`, the transport tool is a copy engine, not a sync engine — lobs
-decides what to transfer.
-When `manifest: false`, pure delegation is acceptable (but requires `compression: none`
-since the transport tool can’t decompress).
+Compression is deferred from V1 (files stored as-is).
+This issue becomes relevant when compression is introduced in V2. See Future Extensions
+(V2) for planned compression design.
 
 #### Atomic writes for built-in transport (`lobs-rel2`)
 
@@ -2159,12 +2263,11 @@ fixes).
 
 **Review IDs:** R3 §4.10 (4.10-1)
 
-Repo-level config can specify `command` backends and custom `compress_cmd` /
-`decompress_cmd`. Running `lobs pull` on a cloned repo could execute arbitrary commands
-from the repo’s `.lobs/config.yml`.
+Repo-level config can specify `command` backends.
+Running `lobs pull` on a cloned repo could execute arbitrary commands from the repo’s
+`.lobs/config.yml`. (In V2, custom compression commands will also be a concern.)
 
-Recommended approach: disallow `command` backend and custom compression commands from
-repo-level config by default.
+Recommended approach: disallow `command` backend from repo-level config by default.
 Allow only in user-level config (`~/.config/lobs/`) or via explicit `lobs trust` per
 repo. Warn on first use.
 
@@ -2186,26 +2289,26 @@ names.
 `sync.tool: auto` must do a capability check (credentials + reachability), not just
 binary existence. If aws-cli is installed but not configured, fall through to rclone,
 then built-in. Add `lobs doctor` command that prints: detected backend, selected tool +
-why, resolved namespace + prefix.
+why, resolved prefix.
 
-#### Version namespace mode (`lobs-q2dd`)
+#### Explicit version prefix usage (`lobs-q2dd`)
 
 **Review IDs:** R1 S4, R3 §4.3 (4.3-3)
 
-Fully specify: push without `--version` when mode is `version` = error.
-Versions accumulate forever by default.
+When using a literal version prefix (e.g., `versions/v2.1`), the prefix must be set
+explicitly in config or via `--prefix`. Version prefixes accumulate forever by default.
 Provide `lobs ns rm versions/<id>` for explicit cleanup.
 Consider whether `lobs gc` should have a `--include-versions` flag.
 
-#### Multi-namespace output grouping
+#### Multi-prefix output grouping
 
 **Review IDs:** R1 S5, R3 §4.3 (4.3-4)
 
-When per-pointer namespace overrides create mixed namespaces in a single operation,
-`lobs status` and `lobs push` should group output by namespace.
-Each namespace group succeeds or fails independently.
-Decide whether this complexity is justified for V1 or whether per-pointer overrides
-should be deferred.
+When per-pointer prefix overrides create mixed prefixes in a single operation,
+`lobs status` and `lobs push` should group output by resolved prefix.
+Each prefix group succeeds or fails independently.
+Decide whether this complexity is justified for V1 or whether per-pointer prefix
+overrides should be deferred.
 
 #### Versioned metadata vs local preferences
 
@@ -2213,12 +2316,11 @@ should be deferred.
 
 Any setting that affects how remote bytes are stored must be in git-tracked state
 (pointer or repo config), not in global/user config.
-Specifically: compression algorithm, whether a file is compressed, checksum algorithm,
-and skip-list all affect remote keys.
+Specifically: checksum algorithm and namespace prefix affect remote keys.
 If two users have different local configs, they produce different remote
 representations, breaking sync.
-The skip list is already specified as repo-level; extend the same principle explicitly
-to all remote-affecting settings.
+(In V2, compression algorithm and skip-list will also be remote-affecting settings that
+must be in git-tracked config.)
 
 #### `lobs status` offline vs online
 
@@ -2323,7 +2425,7 @@ integrity checks beyond what the transport layer provides.
 
 **Review IDs:** R3 §5
 
-Listing namespace sizes requires walking all objects in each prefix, which can be slow
-and expensive on large buckets.
+Listing prefix sizes requires walking all objects in each prefix, which can be slow and
+expensive on large buckets.
 Consider deferring size reporting from `lobs ns ls` or making it opt-in (`--sizes`).
-Ship the basic listing (namespace names + timestamps) first.
+Ship the basic listing (prefix names + timestamps) first.
