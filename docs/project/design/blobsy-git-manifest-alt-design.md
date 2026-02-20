@@ -244,8 +244,25 @@ Algorithm for each `.yref`:
    Run `blobsy track` to update the ref first. Sync does not overwrite local
    modifications.
 
-Each file is independent. Sync handles them all in parallel (up to `sync.parallel`
-concurrent transfers).
+**Transfer mechanics:**
+
+Each file is an independent transfer. Unlike `aws s3 sync` (which operates on
+directories), blobsy sync issues one CLI invocation per file, running up to
+`sync.parallel` (default: 8) concurrently:
+
+```
+                       ┌─ aws s3 cp data/file1 s3://...
+blobsy sync ──────────┼─ aws s3 cp data/file2 s3://...
+  (orchestrator)       ├─ aws s3 cp data/file3 s3://...
+                       └─ ... (up to sync.parallel)
+```
+
+This is simple and works well for typical workloads (tens to hundreds of files).
+The transfer tool (`aws-cli`, `s5cmd`, `rclone`) handles each individual upload/download.
+
+For V1, this is sufficient. A future optimization could batch multiple files per CLI
+invocation (e.g., `s5cmd` supports multi-file operations), but per-file concurrency
+with a reasonable pool size covers the common case.
 
 ### `blobsy push` / `blobsy pull`
 
