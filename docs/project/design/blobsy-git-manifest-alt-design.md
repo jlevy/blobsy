@@ -286,20 +286,27 @@ Stop tracking a file or directory.
 ```bash
 $ blobsy untrack data/bigfile.zip
 Untracked data/bigfile.zip
-Removed data/bigfile.zip.yref
+Moved data/bigfile.zip.yref → .blobsy/trash/data/bigfile.zip.yref
 Removed data/bigfile.zip from .gitignore
 (Local file preserved)
 
 # Directory (recursive)
 $ blobsy untrack data/research/
 Untracked 2 files in data/research/
-Removed data/research/model.bin.yref
-Removed data/research/raw/data.parquet.yref
+Moved data/research/model.bin.yref → .blobsy/trash/data/research/model.bin.yref
+Moved data/research/raw/data.parquet.yref → .blobsy/trash/data/research/raw/data.parquet.yref
+Removed 2 entries from .gitignore
 (Local files preserved)
 ```
 
-Removes the `.yref` and `.gitignore` entry. Does not delete local files or remote blobs.
-The user then `git add` + `git commit` to finalize the untracking.
+What it does:
+
+1. Move each `.yref` to `.blobsy/trash/` (preserving the path structure).
+2. Remove the gitignore entry.
+3. Leave local files and remote blobs untouched.
+
+The user then `git add` + `git commit` to finalize. The trash gives `blobsy gc` a record
+of which remote blobs were once referenced — see [The `.blobsy/` Directory](#the-blobsy-directory).
 
 ## Per-File State Model
 
@@ -486,6 +493,56 @@ After merge, the `.yref` files on main point to the same blobs.
 
 This completely eliminates the P0 issue from the main design (`blobsy-a64l`).
 
+## The `.blobsy/` Directory
+
+Every repo with blobsy tracking has a `.blobsy/` directory at the repo root. It is
+committed to git.
+
+```
+.blobsy/
+  trash/                          # expired .yref files from blobsy untrack
+    data/bigfile.zip.yref         # preserves path structure
+    data/research/old-model.bin.yref
+```
+
+### Purpose
+
+When you `blobsy untrack` a file, the `.yref` is moved here instead of deleted. This
+serves two purposes:
+
+1. **GC paper trail.** `blobsy gc` can scan `.blobsy/trash/` to find remote blobs that
+   were once tracked but are no longer referenced by any live `.yref`. Without the trash,
+   GC would have to walk the entire git history to discover orphaned blobs.
+
+2. **Undo safety net.** If you untrack something by mistake, the `.yref` is still in
+   `.blobsy/trash/` (and in git history). You can recover it.
+
+### GC Cleans the Trash
+
+`blobsy gc` removes trash entries whose remote blobs have been cleaned up:
+
+```bash
+$ blobsy gc
+Scanning live .yref files across all branches...
+Scanning .blobsy/trash/...
+  data/bigfile.zip.yref → sha256 not referenced elsewhere → blob removed from remote
+  data/research/old-model.bin.yref → sha256 still referenced by feature/x → kept
+Cleaned 1 trash entry, 1 remote blob removed (500 MB).
+```
+
+After GC, the trash entry is deleted (both the file and its remote blob are gone).
+Trash entries whose blobs are still referenced by other live `.yref` files on other
+branches are kept until those references are also gone.
+
+### What `.blobsy/` Does Not Contain
+
+- **No config.** Config lives in `.blobsy.yml` files (hierarchical, placed anywhere).
+- **No cache.** Caches (stat cache, hash cache) live outside git, e.g.,
+  `~/.cache/blobsy/` or a local-only `.blobsy-cache/` that's gitignored.
+- **No manifests.** There are no manifests.
+
+The `.blobsy/` directory is small and focused: just the trash.
+
 ## Garbage Collection
 
 With content-addressable layout (default), GC removes blobs not referenced by any
@@ -523,66 +580,26 @@ With timestamp-hash layout, GC removes entire prefixes whose git commit is unrea
 
 ## Gitignore Management
 
-`blobsy track` manages `.gitignore` entries, same as the main design:
+`blobsy track` manages `.gitignore` with explicit per-file entries. No wildcards, no
+negation patterns. Every tracked file gets its own gitignore line:
 
 ```gitignore
 # >>> blobsy-managed (do not edit) >>>
 data/bigfile.zip
-data/research/
+data/research/model.bin
+data/research/raw/data.parquet
 # <<< blobsy-managed <<<
 ```
 
-For directories, the entire directory is gitignored and the `.yref` files live alongside
-the actual files *inside* the gitignored directory.
+`blobsy track` adds a line. `blobsy untrack` removes it. That's it.
 
-Wait — this is a problem. If `data/research/` is gitignored, then
-`data/research/report.md.yref` is also gitignored. Git won't track it.
+This is simpler than directory-level patterns or negation rules. For a directory with
+1,000 tracked files, `.gitignore` gets 1,000 lines in the blobsy-managed block. This is
+fine — `.gitignore` files can be large, and the lines are sorted and predictable.
 
-### Solving the Gitignore Problem
-
-**Option A: Negation patterns.** Gitignore the directory but un-ignore `.yref` files:
-
-```gitignore
-# >>> blobsy-managed (do not edit) >>>
-data/research/
-!data/research/**/*.yref
-# <<< blobsy-managed <<<
-```
-
-This works in git. The `.yref` files are tracked, everything else is ignored.
-But it requires gitignore negation patterns, which can be confusing.
-
-**Option B: `.yref` files live outside the tracked directory.** Instead of putting `.yref`
-files inside the directory, put them in a parallel structure:
-
-```
-data/research/              ← actual files (gitignored)
-  report.md
-  raw/response.json
-data/research.yrefs/         ← ref files (committed)
-  report.md.yref
-  raw/response.json.yref
-```
-
-Clean separation. The `.yrefs/` directory is committed, the data directory is gitignored.
-But the parallel structure can be confusing and fragile.
-
-**Option C: Single `.yref` file per directory with inline list (previous design).**
-Falls back to the inline manifest for directories.
-
-**Option D (recommended): `.yref` files inside the directory, with gitignore negation.**
-Option A is the most natural. The `.yref` files live where the files are. Negation
-patterns are a standard git feature, just less commonly used:
-
-```gitignore
-data/research/**
-!data/research/**/*.yref
-!data/research/**/
-```
-
-(The `!**/` line is needed so git traverses subdirectories to find `.yref` files.)
-
-`blobsy track` generates these patterns automatically. Users don't write them by hand.
+The `.yref` files live adjacent to their data files. Since only the data files are
+gitignored (not the directory), git sees the `.yref` files normally. No negation patterns
+needed.
 
 ## Configuration: `.blobsy.yml`
 
@@ -860,7 +877,7 @@ rules means:
 | Delete semantics | Complex (P0 issue) | Trivial | Trivial |
 | Remote coordination | Manifest is shared mutable state | None (immutable prefixes) | None (content-addressed or immutable prefixes) |
 | Repo clutter | 1 file per tracked path | 1 file per tracked path | 1 `.yref` per tracked file |
-| Gitignore complexity | Simple | Simple | Needs negation patterns for directories |
+| Gitignore complexity | Simple | Simple | Simple (explicit per-file entries) |
 | Scaling | Unlimited (manifest is remote) | ~10K files per pointer | Unlimited (one .yref per file, git handles it) |
 
 ## What This Design Eliminates
@@ -880,15 +897,6 @@ From the main design, the following concepts are no longer needed:
 - **Delete semantics debate** — old blobs exist until GC, new pushes don't overwrite
 
 ## Open Design Questions
-
-### Gitignore Negation Robustness
-
-The `!**/*.yref` negation pattern is standard git, but less commonly used. Questions:
-
-- Do all git clients handle this correctly? (Git CLI does. GitHub Desktop, VS Code,
-  etc. should — it's part of the gitignore spec.)
-- Does `.gitignore` interaction with nested `.gitignore` files cause surprises?
-- Should `blobsy doctor` validate that `.yref` files are actually tracked by git?
 
 ### Number of `.yref` Files in Large Directories
 
@@ -913,12 +921,9 @@ Recommendation: keep it. A ref should be self-contained.
 
 ### Mixed Directories (Some Files in Git, Some in Blobsy)
 
-Resolved by externalization rules. `blobsy track <dir>` uses `min_size`, `always`, and
-`never` patterns to decide per-file. Small text files stay in git; large binaries get
-`.yref` files. No manual decisions needed.
-
-For mixed directories, gitignore entries are per-file (not per-directory), since only
-some files are externalized. `blobsy track` manages these automatically.
+Resolved. Externalization rules decide per-file, and gitignore entries are per-file.
+A directory can freely mix git-committed small files with blobsy-tracked large files.
+`blobsy track <dir>` handles this automatically.
 
 ## Summary
 
@@ -935,7 +940,8 @@ Everything else follows:
 - No remote coordination, no mutable state, no manifests.
 - Post-merge gaps and delete semantics are non-issues.
 
-The main tradeoff is gitignore complexity for tracked directories (negation patterns).
+Explicit per-file gitignore entries avoid negation pattern complexity. A `.blobsy/trash/`
+directory at the repo root holds expired `.yref` files for GC and undo safety.
 
 Layered `.blobsy.yml` configuration adds automatic externalization (by size and type)
 and compression (by type), so `blobsy track <dir>` makes smart per-file decisions with
