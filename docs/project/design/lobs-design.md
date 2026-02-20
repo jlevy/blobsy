@@ -1761,116 +1761,301 @@ What `lobs` does not do (V1):
 
 These are candidates for future versions if demand warrants.
 
-## Open Considerations and Critique
+## Review Issues Tracker
 
-Items below are drawn from
-[round 3 external review](lobs-design-review-round3-gpt5pro.md) (and earlier rounds)
-where the right answer is not yet clear or involves a significant strategic trade-off.
-They are recorded here so the discussion is not lost, and to inform future design
-decisions.
+This section tracks all issues raised across three external design reviews:
 
-### 1. V1 Product Promise: "Latest Mirror" vs "Immutable Snapshots"
+- [Round 1: General review](lobs-design-review-round1-general.md) (22 issues: C1-C4,
+  S1-S7, M1-M11)
+- [Round 2: Checksum deep-dive](lobs-design-review-round2-checksums.md) (reframes C1 and
+  S3)
+- [Round 3: GPT5Pro architecture review](lobs-design-review-round3-gpt5pro.md) (33
+  actionable items)
 
-The round 3 review identifies a tension at the heart of the design:
+All issues are tracked under epic `lobs-0itg` ("Design spec review issues (rounds 1-3)").
 
-- **Promise A (simple):** "LOBS is a branch-isolated sync layer. Remote holds the latest
-  state per namespace. Use `version` mode or bucket versioning for history." This matches
-  the current path-mirrored remote layout.
-- **Promise B (stronger):** "LOBS makes commits reproducible: pointers reference immutable
-  remote content." This requires CAS-like storage or snapshot identifiers.
+### Addressed Issues
 
-The current design uses Promise A mechanics but occasionally uses Promise B language
-(e.g., restoring old versions by checking out old pointers). The design spec needs to
-pick one and be consistent. The versioning semantics bead (`lobs-cx82`) addresses the
-immediate contradictions, but the broader strategic question of whether lobs should ever
-move toward Promise B (and what that would look like) remains open.
+These issues have been resolved in the current spec. Listed for traceability; no further
+action needed.
 
-### 2. Content-Addressable Storage (CAS) as a Future Direction
+| Bead | Review IDs | Resolution |
+| --- | --- | --- |
+| *(spec)* | R1 C1, R2 C1, R3 §3 | **Directory integrity model.** Per-file SHA-256 in manifest, two-tier change detection (stat cache + hash), mtime removed from remote manifest. See Integrity Model and Local Stat Cache sections. |
+| `lobs-suqh` | R1 C3, R3 §4.9 | **Interactive init contradiction.** Clarified: `init` is interactive without flags, all sync ops are non-interactive. See Non-Interactive by Default section. |
+| `lobs-br1a` | R1 C4, R3 §5 | **`lobs sync` bidirectional.** Deferred from V1 scope. See Bidirectional Sync section. |
+| *(spec)* | R1 S3, R2 | **mtime unreliability.** Resolved by stat cache design: mtime used only in local cache (per-machine), never in remote manifest. See Local Stat Cache section. |
+| `lobs-r34j` | R1 S2 | **gc safety.** `lobs gc` checks remote tracking branches, not just local. |
+| `lobs-jlcn` | R1 M1, R3 §4.1 | **Pointer field types.** sha256 = 64-char lowercase hex, size = bytes, timestamps = ISO 8601 UTC Z. See Pointer File Format section. |
+| `lobs-n23z` | R1 M2 | **Format versioning.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. See Pointer File Format section. |
+| `lobs-0a9e` | R1 M3, R3 §4.10 | **Command backend template variables.** `{local}`, `{remote}`, `{relative_path}`, `{namespace}`, `{bucket}` specified. Runs once per file. See Backend System section. |
+| `lobs-srme` | R1 M4, R3 §4.8 | **Which .gitignore.** Same directory as tracked path, following DVC convention. See Gitignore Management section. |
+| `lobs-v9py` | R1 M5, R3 §4.3 | **Detached HEAD.** 12-char SHA prefix, gc covers `detached/` namespaces with TTL. See Namespace Modes section. |
+| `lobs-bnku` | R1 M7, R3 §4.4 | **Push idempotency.** Atomic manifest write; re-run is safe. See Sync Semantics section. |
+| `lobs-q6xr` | R3 §4.4 | **Pull behavior on local mods.** Default: error on modified files unless `--force`. See Pull section. |
+| `lobs-p8c4` | R3 §4.2 | **`stored_as` in manifest.** Each file entry includes `stored_as` for remote key reconstruction. See Manifests section. |
+| `lobs-txou` | R3 §4.2 | **Manifest canonicalization.** Fixed key order, sorted file entries, consistent LF, no trailing whitespace. See Manifests section. |
+| `lobs-v6eb` | R3 §4.1 | **Stable pointer key ordering.** Keys written in documented fixed order to minimize git diff noise. See Pointer File Format section. |
+| `lobs-fjqj` | R3 §4.7 | **Compression skip list in repo config.** Must be committed to git (affects remote keys). See Compression System section. |
+| `lobs-mg0y` | R3 §4.9 | **`--json` schema version.** `schema_version` field in all JSON output. See Agent and Automation Integration section. |
+| `lobs-pice` | R3 §4 | **SDK endpoint wording.** `@aws-sdk/client-s3` uses config object, not CLI flags. See S3-Compatible Backends section. |
 
-The round 3 review suggests that if lobs wants "git checkout old commit -> get the right
-data" to work reliably, it needs immutable object keys (e.g.,
-`objects/<sha256>/<hash>`). This is a fundamental architecture decision:
+### Open P0 — Must Resolve Before Implementation
 
-- CAS enables time-travel, dedup, and reproducibility.
-- CAS breaks remote browsability (the current design's explicit strength).
-- A hybrid is possible: path-mirrored within a snapshot, with immutable snapshot IDs at
-  the top level.
+These are blocking design decisions. Each requires a clear resolution before the
+corresponding feature can be implemented.
 
-This is explicitly out of V1 scope but worth tracking as a design axis for V2.
+#### Versioning semantics (`lobs-cx82`)
 
-### 3. Compression Suffix Convention
+**Review IDs:** R3 §1 (P0-1)
 
-Three options were raised across reviews:
+The design must pick a clear V1 product promise:
 
-1. Accept `.zst` ambiguity and rely on manifest/pointer metadata to distinguish
-   lobs-compressed from natively `.zst` files (simplest, current implicit approach).
-2. Use `.lobs.zst` suffix for lobs-compressed files (clearer remotely, but longer names).
-3. Store compression state only in manifest metadata, not in filename at all.
+- **Promise A (simple):** "lobs is a branch-isolated sync layer. Remote holds the latest
+  state per namespace. Use `version` mode or bucket versioning for history." Matches the
+  current path-mirrored remote layout.
+- **Promise B (stronger):** "lobs makes commits reproducible: pointers reference immutable
+  remote content." Requires CAS-like storage or snapshot identifiers.
 
-The round 3 review leans toward option 1 as adequate. The decision should be made
-explicitly and documented.
+The current spec uses Promise A mechanics but occasionally uses Promise B language (e.g.,
+restoring old versions by checking out old pointers). Pick one and remove contradictory
+claims.
 
-### 4. Small-File Compression Threshold
+Related: Content-addressable storage (CAS) as a future direction. CAS enables
+time-travel, dedup, and reproducibility but breaks remote browsability. A hybrid is
+possible (path-mirrored within a snapshot, immutable snapshot IDs at the top level). Out
+of V1 scope but worth tracking as a design axis for V2.
 
-The round 3 review suggests a default threshold (e.g., skip compressing files < 4 KB)
-since compression overhead on tiny files can be counterproductive. This is a
-quality-of-life optimization, not a correctness issue. Worth considering but not blocking.
+#### `manifest_sha256` content identifier for directory pointers (`lobs-mlv9`)
 
-### 5. Dictionary Compression (V2)
+**Review IDs:** R3 §3 (P0-3), R3 §4.2
 
-Round 1 notes that zstd dictionary training provides 2-5x improvement for small files
-(< 64 KB) sharing structure (common with JSON/YAML datasets). The compression interface
-should be designed to support this later (e.g., a `dictionary` field in config). Deferred.
+Directory pointers currently have only an `updated` timestamp — git diff and merge are
+meaningless on timestamps alone. Add `manifest_sha256` (hash of the canonical manifest
+JSON), plus optionally `file_count` and `total_size`, so that:
 
-### 6. Export/Import Specification
+- `git diff` shows meaningful changes when directory contents change.
+- Conflict detection can use `manifest_sha256` in the pointer as baseline (avoids needing
+  remote ETag or separate local state for "last seen manifest").
+- Merge operations on pointers are well-defined.
 
-The `lobs export` / `lobs import` commands are mentioned but underspecified:
+#### Branch merge/promotion workflow (`lobs-a64l`)
 
-- Does the archive include pointer files?
-- Does `import` create pointer files and gitignore entries?
-- Flat dump or preserved directory structure?
-- Seekable zstd for large archives?
+**Review IDs:** R3 §2 (P0-2)
 
-These need specification before implementation but are not blocking other work.
+When a feature branch merges into main via PR, the pointer file lands on main but the
+data stays in `branches/feature-x/`. Users on main can't `lobs pull` — the data doesn't
+exist in `branches/main/`.
 
-### 7. Integration Surface: Library vs CLI Only
+Options:
 
-Round 1 asks whether lobs is intended to be used as a library by other tools, as a
-subprocess, or purely as a standalone CLI. The design should state this explicitly. The
-current design implies CLI-only, but the npm package could also expose a programmatic API.
+- Add explicit `lobs promote` or `lobs ns copy` command for post-merge data promotion.
+- Have `lobs push` detect missing remote objects for the current namespace and re-upload
+  from local.
+- Add `lobs check-remote` CI verifier that fails the merge if data isn't in the target
+  namespace.
 
-### 8. Mixed Directories: Ignore Patterns vs Include Patterns
+#### Delete semantics (`lobs-05j8`)
 
-The round 3 review notes that the current model (ignore patterns to exclude small files
-from lobs management) means `.gitignore` must be manually adjusted for mixed directories.
-An alternative is flipping to an "include patterns" model where lobs tracks only matching
-files and generates ignore entries for them. This changes the mental model but may be less
-error-prone. The current approach works but is a known sharp edge.
+**Review IDs:** R3 §4.2 (4.2-4)
 
-### 9. Per-Pointer Namespace Override Complexity
+The spec contains a contradiction: "lobs never deletes remote objects during normal sync
+operations" vs. push step 5 which says "remove deleted files from remote."
 
-Per-pointer namespace overrides are powerful but complicate output grouping, partial
-failure handling, and concurrency. The round 3 review agrees with the round 1
-recommendation to group operations by resolved namespace and treat each group
-independently. The question is whether this complexity is justified for V1 or whether it
-should be deferred to keep the initial implementation simpler.
+Resolve by choosing one of:
 
-### 10. `lobs sync` Bidirectional Semantics
+- Push does not delete remote files by default. Explicit `--prune` flag to enable
+  deletion.
+- Push always syncs deletions but warns when files are removed.
+- Tombstones in manifest with separate `lobs gc` for actual deletion.
 
-All three reviews flag `lobs sync` (bidirectional: pull then push) as underspecified and
-potentially dangerous, especially around deletion semantics. The round 3 review
-recommends deferring it from V1 entirely. If kept, the interaction between pull-delete and
-push-delete needs careful specification. A bead (`lobs-br1a`) tracks this.
+Related: deletion semantics affect the deferred `lobs sync` bidirectional feature and
+whether old directory states are reconstructible.
 
-### 11. s5cmd and Future Transport Engines
+#### Single-file conflict detection scope (`lobs-7h13`)
 
-The round 3 review mentions s5cmd as a high-performance batching tool worth considering,
-especially if lobs moves to manifest-driven file-by-file orchestration. Not blocking but
-worth tracking as the transfer architecture solidifies.
+**Review IDs:** R1 C2, R3 §3 (P0-4)
 
-### 12. `command` Backend as Integration Point
+The design references comparing against a "remote hash" but doesn't specify how to obtain
+it without downloading the file. Options:
 
-Round 1 notes the `command` backend could serve as a deliberate integration point for
-domain-specific tools, not just an "escape hatch." This reframing has implications for how
-well-specified the template variables and execution model need to be. The security
-restrictions (bead `lobs-vj6p`) must be resolved first.
+- Store SHA-256 as S3 object metadata (`x-amz-meta-sha256`) on upload, retrieve via HEAD.
+- Store a sidecar `<file>.sha256` file alongside the remote object.
+- Drop remote conflict detection from V1 entirely. Rely on pointer workflow discipline +
+  optional `lobs check-remote` in CI.
+
+Given the single-writer model and the complexity of portable metadata across aws-cli,
+rclone, and custom backends, the round 3 review recommends deferring this.
+
+#### Compression + transfer mechanics (`lobs-lsu9`)
+
+**Review IDs:** R3 §4.7 (P0-5, 4.7-1)
+
+The design promises per-file compression, delegated transfer, and manifest-driven
+decisions but doesn't specify how they compose. Two approaches:
+
+- **Staging directory:** Compress files into a temp staging area, then delegate to `aws s3
+  sync` on the staging directory. Clean and simple but doubles disk usage during push.
+- **File-by-file orchestration:** lobs orchestrates individual file transfers (compress →
+  upload → next file). More complex but no staging overhead.
+
+When `manifest: true`, the transport tool is a copy engine, not a sync engine — lobs
+decides what to transfer. When `manifest: false`, pure delegation is acceptable (but
+requires `compression: none` since the transport tool can't decompress).
+
+#### Atomic writes for built-in transport (`lobs-rel2`)
+
+**Review IDs:** R3 §4.5 (4.5-1)
+
+`aws-cli` and `rclone` handle atomic writes internally. The built-in `@aws-sdk` engine
+does not — lobs must implement temp-file-then-rename for:
+
+- Local file writes during pull (avoid partial files on interrupt).
+- Pointer file updates.
+- Stat cache writes.
+
+Also: define `lobs clean` command for cleaning up orphaned temp files
+(`.lobs-tmp-*`), and document expected interrupted-state behavior (partial file set may
+exist; rerun fixes).
+
+#### Security: command execution from repo config (`lobs-vj6p`)
+
+**Review IDs:** R3 §4.10 (4.10-1)
+
+Repo-level config can specify `command` backends and custom `compress_cmd` /
+`decompress_cmd`. Running `lobs pull` on a cloned repo could execute arbitrary commands
+from the repo's `.lobs/config.yml`.
+
+Recommended approach: disallow `command` backend and custom compression commands from
+repo-level config by default. Allow only in user-level config (`~/.config/lobs/`) or via
+explicit `lobs trust` per repo. Warn on first use.
+
+### Open P1 — Should Resolve for V1 Ship Quality
+
+#### Branch name sanitization (`lobs-u4cs`)
+
+**Review IDs:** R1 S1, R3 §4.3 (4.3-1)
+
+Branch names can contain slashes, spaces, special characters. Define normalization rules
+for S3 key safety: preserve `/`, percent-encode characters outside `[a-zA-Z0-9/._-]`,
+specify max length with hash fallback for pathological branch names.
+
+#### Auto tool detection robustness (`lobs-y72s`)
+
+**Review IDs:** R1 S7, R3 §4.6 (4.6-1)
+
+`sync.tool: auto` must do a capability check (credentials + reachability), not just binary
+existence. If aws-cli is installed but not configured, fall through to rclone, then
+built-in. Add `lobs doctor` command that prints: detected backend, selected tool + why,
+resolved namespace + prefix.
+
+#### Version namespace mode (`lobs-q2dd`)
+
+**Review IDs:** R1 S4, R3 §4.3 (4.3-3)
+
+Fully specify: push without `--version` when mode is `version` = error. Versions
+accumulate forever by default. Provide `lobs ns rm versions/<id>` for explicit cleanup.
+Consider whether `lobs gc` should have a `--include-versions` flag.
+
+#### Multi-namespace output grouping
+
+**Review IDs:** R1 S5, R3 §4.3 (4.3-4)
+
+When per-pointer namespace overrides create mixed namespaces in a single operation,
+`lobs status` and `lobs push` should group output by namespace. Each namespace group
+succeeds or fails independently. Decide whether this complexity is justified for V1 or
+whether per-pointer overrides should be deferred.
+
+#### Versioned metadata vs local preferences
+
+**Review IDs:** R3 §4.1 (4.1-2)
+
+Any setting that affects how remote bytes are stored must be in git-tracked state (pointer
+or repo config), not in global/user config. Specifically: compression algorithm, whether a
+file is compressed, checksum algorithm, and skip-list all affect remote keys. If two users
+have different local configs, they produce different remote representations, breaking sync.
+The skip list is already specified as repo-level; extend the same principle explicitly to
+all remote-affecting settings.
+
+#### `lobs status` offline vs online
+
+**Review IDs:** R3 §4.4 (4.4-3)
+
+Define clearly whether `lobs status` requires fetching the remote manifest (online) or
+operates purely against the pointer and local stat cache (offline). Consider providing
+`status --offline` that compares local files to the pointer (single file) or locally
+cached manifest without network access.
+
+### Deferred Considerations (P2 / V2)
+
+Items below are not blocking V1 but are recorded for future reference.
+
+#### Compression suffix convention
+
+**Review IDs:** R1 S6, R3 §4.7
+
+Three options: (1) accept `.zst` ambiguity, rely on manifest metadata (simplest);
+(2) use `.lobs.zst` suffix; (3) store compression state in manifest only, not filename.
+Round 3 review leans toward option 1 as adequate. Decision should be made explicitly.
+
+#### Small-file compression threshold
+
+**Review IDs:** R3 §4.7 (4.7-3)
+
+Compression overhead on tiny files can be counterproductive. Consider a default threshold
+(e.g., skip files < 4 KB) or make configurable. Quality-of-life optimization, not
+correctness.
+
+#### Dictionary compression
+
+**Review IDs:** R1 M8
+
+zstd dictionary training provides 2-5x improvement for small files (< 64 KB) sharing
+structure (common with JSON/YAML datasets). Design the compression interface to support
+this later (e.g., a `dictionary` field in config). Deferred to V2.
+
+#### Export/import specification
+
+**Review IDs:** R1 M6
+
+`lobs export` / `lobs import` are underspecified: does the archive include pointer files?
+Does import create pointers and gitignore entries? Flat dump or preserved directory
+structure? Seekable zstd for large archives? Needs specification before implementation.
+
+#### Integration surface: library vs CLI
+
+**Review IDs:** R1 M10, R3 §7
+
+State explicitly whether lobs is standalone CLI only or also exposes a programmatic API
+via the npm package. The current design implies CLI-only.
+
+#### Mixed directories: ignore vs include patterns
+
+**Review IDs:** R3 §4.8 (4.8-2)
+
+The ignore-pattern model requires manual `.gitignore` adjustment for mixed directories
+(known sharp edge). An include-pattern model where lobs tracks only matching files might
+be less error-prone. Current approach works; revisit if users find it confusing.
+
+#### `command` backend as integration point
+
+**Review IDs:** R1 M11
+
+The `command` backend could serve as a deliberate integration point for domain-specific
+tools, not just an escape hatch. Security restrictions (`lobs-vj6p`) must be resolved
+first.
+
+#### s5cmd and future transport engines
+
+**Review IDs:** R3 §5
+
+s5cmd is a high-performance batching tool worth considering, especially for manifest-driven
+file-by-file orchestration. Track as the transfer architecture solidifies.
+
+#### Team adoption workflow
+
+**Review IDs:** R1 M9
+
+The spec doesn't address how team members discover they need to run `lobs pull`, CI
+integration patterns, or the "committed pointer with no remote data" failure mode. Add a
+"Team Workflows" section with guidance once core features are stable.
