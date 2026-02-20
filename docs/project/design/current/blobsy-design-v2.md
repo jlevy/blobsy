@@ -182,65 +182,229 @@ externalization rules, recursively.
 Each `.yref` is independent.
 Git diffs, merges, and conflicts work per-file, naturally.
 
-### Content-Addressable Remote Storage
+### Remote Storage Layouts
 
-The remote stores files by their content hash.
-The key is `sha256/{hash}/{repo-relative-path}`:
+Blobsy uses **configurable key templates** to determine where blobs are stored in the
+remote. The template is evaluated for each file to compute its remote key, which is then
+stored in the `.yref` file.
 
+**Full remote key structure:**
 ```
-s3://bucket/project/
-  sha256/7a3f0e.../data/bigfile.zip
-  sha256/b4c8d2.../data/research/report.md
-  sha256/a1b2c3.../data/research/raw/response.json
+{bucket}/{global_prefix}/{evaluated_template}
 ```
 
-The path suffix is for human browsability -- you can see what the file is.
+The `global_prefix` is configured per backend (e.g., `project-alpha/`), and the template
+is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 
-Properties:
+#### Template Variables
 
-- **Automatic dedup.** Same content = same hash = same remote key.
-  Never re-uploaded.
-- **Immutable.** A key is never overwritten (same hash = same content).
-- **No coordination.** Two people pushing the same file write the same key.
-  S3 PUT is idempotent on identical content.
-- **Browsable.** `aws s3 ls s3://bucket/project/sha256/7a3f0e.../` shows the file with
-  its real name.
-- **No post-merge gap.** Blobs are content-addressed, not prefix-addressed.
-  After a branch merge, the `.yref` files on main point to the same blobs that were
-  pushed from the feature branch.
-  Nothing to promote or republish.
+| Variable | Description | Example |
+| --- | --- | --- |
+| `{content_sha256}` | Full SHA-256 hash (64 chars) | `7a3f0e9b2c1d4e5f...` |
+| `{content_sha256_short}` | Short hash (12 chars) | `7a3f0e9b2c1d` |
+| `{repo_path}` | Repository-relative path | `data/research/model.bin` |
+| `{filename}` | Filename only | `model.bin` |
+| `{dirname}` | Directory path only | `data/research/` |
+| `{git_branch}` | Current git branch | `main`, `feature/x` |
 
-### Alternative: Timestamp-Hash Layout
+Any text outside `{...}` is kept as-is (literal prefix/suffix).
 
-For teams that want chronologically browsable remote storage:
+#### Common Layout Patterns
+
+Blobsy supports three common patterns out of the box.
+Each optimizes for different needs.
+
+##### Pattern 1: Content-Addressable (Default - Recommended)
+
+**Maximum deduplication across all branches and paths.**
 
 ```yaml
 # .blobsy.yml
+backends:
+  default:
+    type: s3
+    bucket: my-datasets
+    prefix: project-alpha/
+    region: us-east-1
+
 remote:
-  layout: timestamp   # default: content-addressable
+  key_template: "sha256/{content_sha256}"  # default
 ```
 
+**Example remote keys:**
 ```
-s3://bucket/project/
-  20260220T140322Z-a3f2b1c/
-    data/bigfile.zip
-    data/research/report.md
-    data/research/raw/response.json
-  20260220T151745Z-7d4e9f2/
-    data/research/report.md     <- only this file changed
+s3://my-datasets/project-alpha/
+  sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+  sha256/b4c8d2a1e3f5b7c9d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6
+  sha256/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 ```
 
-This layout creates a snapshot prefix per push.
-Unchanged files are re-uploaded (no dedup).
-Simple and browsable, but uses more storage.
+**Properties:**
+- ✅ **Maximum dedup:** Same content anywhere (any path, any branch) = single copy
+- ✅ **Immutable:** Hash = identity, blobs never overwritten
+- ✅ **Fast renames/moves:** No re-upload needed (hash doesn’t change)
+- ✅ **Simple GC:** Delete blobs whose hash not referenced by any `.yref`
+- ✅ **No post-merge gap:** Feature branch blob = same key as main
+- ⚠️ **Not path-browsable:** Remote shows hashes, not paths
 
-|  | Content-addressable (default) | Timestamp-hash |
-| --- | --- | --- |
-| Dedup | Automatic | None |
-| Storage | Minimal | Grows per push |
-| Browsability | By hash, then path | Chronological |
-| Push speed | Only new content uploaded | All files every time |
-| GC | Remove unreferenced hashes | Remove unreachable prefixes |
+**Browsability options:**
+- Store filename in S3 object metadata (`x-amz-meta-original-filename`)
+- Add cosmetic filename suffix: `sha256/{content_sha256}---{filename}`
+- Use `.yref` files in git to map hashes to paths
+
+**Use when:** You want minimal storage usage and maximum deduplication.
+Best for production use, cost-sensitive teams, and ML model/dataset versioning.
+
+##### Pattern 2: Branch-Isolated Storage
+
+**Separate namespaces per branch, with dedup within each branch.**
+
+```yaml
+# .blobsy.yml
+backends:
+  default:
+    type: s3
+    bucket: my-datasets
+    prefix: project-alpha/
+    region: us-east-1
+
+remote:
+  key_template: "{git_branch}/sha256/{content_sha256}"
+```
+
+**Example remote keys:**
+```
+s3://my-datasets/project-alpha/
+  main/
+    sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+    sha256/b4c8d2a1e3f5b7c9d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6
+  feature/new-model/
+    sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+    sha256/c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+```
+
+**Properties:**
+- ✅ **Branch isolation:** Each branch has its own namespace
+- ✅ **Dedup within branch:** Same content in same branch = one copy
+- ✅ **Browse by branch:** Easy to see what’s on each branch
+- ✅ **Safe experimentation:** Feature branches don’t clutter main’s storage
+- ⚠️ **Cross-branch duplication:** Same content on different branches = duplicated
+- ⚠️ **Post-merge cleanup:** After merging, feature branch blobs can be GC’d
+
+**Post-merge behavior:** After `git merge feature/new-model` into `main`:
+- Feature branch `.yref` files are now on main
+- They still point to `feature/new-model/sha256/...` keys (stored in `.yref`)
+- Those blobs remain accessible until GC runs
+- Optional: Re-push on main to migrate blobs to `main/sha256/...` namespace
+
+**Use when:** You want clear separation between branches, or are working with
+experimental/temporary branches that should be cleanly removed.
+
+##### Pattern 3: Global Shared Backing Store
+
+**Single flat namespace, last-write-wins semantics (like rsync or network drives).**
+
+```yaml
+# .blobsy.yml
+backends:
+  default:
+    type: s3
+    bucket: my-datasets
+    prefix: project-alpha/
+    region: us-east-1
+
+remote:
+  key_template: "shared/{repo_path}"
+```
+
+**Example remote keys:**
+```
+s3://my-datasets/project-alpha/
+  shared/
+    data/research/model.bin
+    data/research/results.parquet
+    data/raw/dataset.csv
+```
+
+**Properties:**
+- ✅ **Path-browsable:** Remote mirrors local directory structure
+- ✅ **Simple mental model:** What you see is what you get
+- ✅ **Last-write-wins:** Latest push overwrites previous content
+- ✅ **Works with external tools:** Any S3 tool can browse/download
+- ❌ **No dedup:** Each file path is unique (ignores content)
+- ❌ **No versioning:** Overwriting loses history
+- ❌ **Renames require re-upload:** Path is the key
+- ⚠️ **Concurrent pushes can conflict:** Two users pushing same path, last push wins
+
+**Use when:** You want a simple synchronized directory, versioning is handled by git,
+and you don’t need content dedup.
+Good for teams familiar with rsync/network drive workflows.
+
+**Warning:** This mode has no built-in conflict resolution.
+If two users push different content to the same path, last push wins.
+Use branch-isolated storage if multiple users push concurrently.
+
+#### Comparison Table
+
+|  | Content-Addressable | Branch-Isolated | Global Shared |
+| --- | --- | --- | --- |
+| **Template** | `sha256/{content_sha256}` | `{git_branch}/sha256/{content_sha256}` | `shared/{repo_path}` |
+| **Dedup** | Maximum (global) | Per-branch | None |
+| **Browsability** | By hash only | By branch, then hash | By path |
+| **Rename cost** | Free (no re-upload) | Free (no re-upload) | Re-upload required |
+| **Branch merges** | Blobs already shared | Blobs in feature namespace | N/A |
+| **Storage growth** | Minimal | Moderate | High (no dedup) |
+| **GC complexity** | Simple (hash-based) | Moderate (branch-aware) | Simple (path-based) |
+| **Best for** | Production, cost-sensitive | Multi-branch workflows | Simple sync, external tools |
+
+#### Advanced: Custom Templates
+
+You can combine template variables for custom layouts:
+
+**Content-addressed with filename suffix for debugging:**
+```yaml
+key_template: "sha256/{content_sha256}---{filename}"
+# Result: sha256/7a3f0e9b...---model.bin
+# Still deduplicates, but easier to identify in S3 console
+```
+
+**Branch-isolated with paths:**
+```yaml
+key_template: "{git_branch}/{repo_path}"
+# Result: main/data/model.bin
+# Path-browsable per branch, no dedup
+```
+
+**Hybrid: content-addressed with branch prefix:**
+```yaml
+key_template: "{git_branch}/cas/{content_sha256}"
+# Result: main/cas/7a3f0e9b...
+# Dedup within branch, isolated across branches
+```
+
+#### How Templates Work
+
+1. **On `blobsy track`:** Compute hash, create `.yref` with `sha256` and `size` (no
+   remote key yet)
+2. **On `blobsy push`:**
+   - Evaluate `key_template` for each file with current context (branch, path, hash,
+     etc.)
+   - Compute full key: `{bucket}/{prefix}/{evaluated_template}`
+   - Upload to the computed key
+   - Store the **actual evaluated key** in `.yref`’s `remote_key` field
+   - User commits `.yref` to git
+3. **On `blobsy pull`:**
+   - Read `remote_key` from `.yref`
+   - Fetch from that exact key
+4. **On `blobsy gc`:**
+   - Collect all `remote_key` values from all `.yref` files in all reachable
+     branches/tags
+   - List remote objects
+   - Delete objects whose key isn’t in the referenced set
+
+**Important:** The `key_template` must be consistent across all users (set in the
+committed `.blobsy.yml`). If users have different templates, they’ll push to different
+keys and break sync.
 
 ## Ref File Format
 
