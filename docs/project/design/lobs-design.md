@@ -300,14 +300,20 @@ Lobs does not re-implement transfer verification.
 **Single files:** The pointer always includes `sha256` and `size`. One hash for one file
 is cheap and enables:
 - Local integrity verification without network access (`lobs verify`)
-- Change detection independent of mtime (which git checkout doesn’t preserve)
+- Change detection independent of mtime (which git checkout doesn't preserve)
 - Clear signal in `git diff` when data actually changed vs.
   just a timestamp update
 
 **Directories (with manifest):** Per-file SHA-256 hashes stored in the remote manifest.
-Computed during `push` at zero additional I/O cost (files are already being read for
-upload). Enables accurate change detection during push and pull, and `lobs verify` for
+Enables accurate change detection during push and pull, and `lobs verify` for
 directories.
+
+When using the built-in `@aws-sdk` transfer engine, hashes are computed during the upload
+read (single I/O pass).
+When delegating to external tools (aws-cli, rclone), hashing requires a separate read
+pass — the file is read once to hash, then the external tool reads it again to transfer.
+In practice the OS page cache makes the second read nearly free, and the stat cache
+(below) ensures only changed files are hashed at all.
 
 Hashing during push is critical for the core branch-switching workflow: `git checkout`
 resets mtime on every file, so without content hashes, `lobs push` after a branch switch
@@ -318,10 +324,10 @@ With manifest hashes, push correctly identifies unchanged files and skips them.
 tool. `lobs verify` is not available.
 
 Configurable via `checksum.algorithm`: `sha256` (default), `none` (skip hashing, rely
-entirely on transport tool’s own change detection).
+entirely on transport tool's own change detection).
 
 When checksum is `none`, lobs trusts the sync tool entirely.
-The `.lobs` file becomes just a marker that says “this path is externally synced.”
+The `.lobs` file becomes just a marker that says "this path is externally synced."
 Manifest files will store `size` only, and change detection falls back to size
 comparison.
 
@@ -329,6 +335,50 @@ For independent verification outside of lobs, SHA-256 is available everywhere:
 - macOS: `shasum -a 256 <file>`
 - Linux: `sha256sum <file>`
 - Windows: `Get-FileHash <file> -Algorithm SHA256`
+
+### Local Stat Cache
+
+Lobs maintains a local stat cache at `.lobs/cache/stat-cache.json` (gitignored) that
+stores the last-known `size`, `mtime_ms`, and `sha256` for each tracked file.
+This follows the same approach as git's index: use filesystem metadata as a fast-path to
+avoid re-hashing unchanged files.
+
+**How it works:**
+1. On push or verify, lobs calls `stat()` on each local file.
+2. If `size` and `mtime_ms` match the cached entry, the cached `sha256` is trusted
+   (file assumed unchanged — no read or hash needed).
+3. If either differs, lobs reads and hashes the file, then updates the cache.
+
+**Why mtime is safe here but not in the manifest:** The stat cache is local and
+per-machine.
+It only compares a file's current mtime against the mtime recorded *on the same machine*
+after the last hash.
+This is a "definitely changed" signal — if mtime changed, something touched the file.
+The remote manifest cannot use mtime because different machines, git checkouts, CI
+runners, and Docker builds all produce different mtimes for the same content.
+
+**High-resolution timestamps:** Node.js `fs.stat()` provides `mtimeMs` (millisecond
+float) on all platforms.
+Millisecond resolution is sufficient for lobs — sub-millisecond file modifications
+between cache writes are unlikely in practice.
+(Git uses nanosecond timestamps with a "racily clean" detection fallback for the
+pathological case; lobs can add this if needed, but milliseconds are adequate for V1.)
+
+**Performance impact:** `stat()` costs ~1-5 microseconds per file.
+For a directory with 1,000 files, the stat pass takes ~5 ms.
+Without the cache, every push would read and hash all 1,000 files
+(~seconds to minutes depending on sizes).
+With the cache, only files whose stat data changed are hashed.
+
+| Scenario (1000 files, 10 MB avg) | Without stat cache | With stat cache |
+| --- | --- | --- |
+| First push | Hash all: ~20s | Hash all: ~20s (same) |
+| Second push, 3 files changed | Hash all: ~20s | Stat all + hash 3: ~65ms |
+| After `git checkout` (mtime reset on all) | Hash all: ~20s | Stat all + hash all: ~20s |
+
+**Cache invalidation:** The cache is a pure optimization.
+If missing or corrupted, lobs falls back to hashing all files (correct but slower).
+The cache is never shared across machines — it is gitignored and machine-local.
 
 ### Manifests
 
@@ -1431,8 +1481,9 @@ Done. 1 namespace removed, 129.7 MB freed.
 **Directories (with manifest, default):**
 1. Scan local directory (applying ignore patterns from config, if any).
 2. Fetch remote manifest from namespace.
-3. Hash each local file (SHA-256). This piggybacks on the file reads already needed for
-   upload -- no additional I/O pass.
+3. `stat()` each local file and compare against the local stat cache.
+   Files where `size` + `mtime_ms` match the cache: use cached `sha256` (no read).
+   Files where stat differs or no cache entry: read and hash (SHA-256), update cache.
 4. Compare local hashes and sizes against manifest: identify new, changed, and deleted
    files. Files where the hash matches the manifest are skipped (no re-upload).
 5. Upload changed/new files (compressing if enabled), remove deleted files from remote.
@@ -1671,8 +1722,9 @@ TypeScript. Distributed via npm as `lobs`. Usable via:
 
 Pure CLI. Each invocation reads pointer files and config from disk, does work, updates
 pointer files, exits.
-No background processes, no lock files, no state between invocations beyond what’s on
-disk.
+No background processes, no lock files.
+The only persistent local state is the stat cache (`.lobs/cache/`), which is a pure
+optimization — if missing, all operations still work correctly, just slower.
 
 ### Testing
 
