@@ -587,7 +587,10 @@ Configuration lives in `.blobsy.yml` files, placed anywhere — like `.gitignore
 
 ### Hierarchy
 
+Five levels, each overriding the one above:
+
 ```
+(blobsy built-in defaults)           Hardcoded in blobsy itself
 ~/.blobsy.yml                        User-global defaults
 <repo>/.blobsy.yml                   Repo root
 <repo>/data/.blobsy.yml              Subdirectory override
@@ -596,6 +599,79 @@ Configuration lives in `.blobsy.yml` files, placed anywhere — like `.gitignore
 
 Resolution is bottom-up: the most specific `.blobsy.yml` wins.
 Settings merge — a subdirectory file only needs to specify what it overrides.
+If no `.blobsy.yml` exists anywhere, the built-in defaults apply.
+
+### Built-in Defaults
+
+These are compiled into blobsy and form the implicit base of every hierarchy.
+Any `.blobsy.yml` at any level can override any part of this:
+
+```yaml
+# blobsy built-in defaults (not a file — hardcoded in blobsy)
+
+externalize:
+  min_size: 1mb
+  always:
+    - "*.parquet"
+    - "*.bin"
+    - "*.weights"
+    - "*.onnx"
+    - "*.safetensors"
+    - "*.pkl"
+    - "*.pt"
+    - "*.h5"
+    - "*.arrow"
+    - "*.sqlite"
+    - "*.db"
+  never: []
+
+compress:
+  min_size: 100kb
+  algorithm: zstd
+  always:
+    - "*.json"
+    - "*.csv"
+    - "*.tsv"
+    - "*.txt"
+    - "*.jsonl"
+    - "*.xml"
+    - "*.sql"
+  never:
+    - "*.gz"
+    - "*.zst"
+    - "*.zip"
+    - "*.tar.*"
+    - "*.parquet"
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.mp4"
+    - "*.webp"
+    - "*.avif"
+
+ignore:
+  - "__pycache__/"
+  - "*.pyc"
+  - ".DS_Store"
+  - "node_modules/"
+  - ".git/"
+  - ".blobsy.yml"
+
+remote:
+  layout: content-addressable
+
+sync:
+  tool: auto
+  parallel: 8
+
+checksum:
+  algorithm: sha256
+```
+
+This means blobsy works out of the box with zero configuration.
+`blobsy add data/` uses sensible rules even if no `.blobsy.yml` exists.
+The only thing that *must* be configured is the backend (bucket, region, etc.) —
+everything else has a working default.
 
 ### Externalization Rules
 
@@ -633,26 +709,6 @@ $ blobsy add data/research/
 This eliminates the "mixed directory" problem entirely. `blobsy add` on a directory
 is smart by default — small text files stay in git, large binaries get `.yref` files.
 No manual per-file decisions needed.
-
-**Default rules** (built into blobsy, overridden by any `.blobsy.yml`):
-
-```yaml
-externalize:
-  min_size: 1mb
-  always:
-    - "*.parquet"
-    - "*.bin"
-    - "*.weights"
-    - "*.onnx"
-    - "*.safetensors"
-    - "*.pkl"
-    - "*.pt"
-    - "*.h5"
-    - "*.arrow"
-    - "*.sqlite"
-    - "*.db"
-  never: []
-```
 
 ### Compression Rules
 
@@ -704,17 +760,9 @@ integrity by hashing the local file without decompressing anything.
 
 ### Ignore Patterns
 
-Same as the main design, now in `.blobsy.yml`:
-
-```yaml
-# .blobsy.yml
-ignore:
-  - "__pycache__/"
-  - "*.pyc"
-  - ".DS_Store"
-  - "node_modules/"
-  - ".git/"
-```
+Same as the main design, now in `.blobsy.yml`. The built-in defaults cover common
+patterns (`__pycache__/`, `.DS_Store`, `node_modules/`, `.git/`). Repos and
+subdirectories can add their own.
 
 ### Backend and Sync Settings
 
