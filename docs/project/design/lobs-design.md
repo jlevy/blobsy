@@ -1799,6 +1799,8 @@ action needed.
 | `lobs-fjqj` | R3 §4.7 | **Compression skip list in repo config.** Must be committed to git (affects remote keys). See Compression System section. |
 | `lobs-mg0y` | R3 §4.9 | **`--json` schema version.** `schema_version` field in all JSON output. See Agent and Automation Integration section. |
 | `lobs-pice` | R3 §4 | **SDK endpoint wording.** `@aws-sdk/client-s3` uses config object, not CLI flags. See S3-Compatible Backends section. |
+| *(spec)* | R2 | **Checksum algorithm simplification.** Dropped md5 and xxhash from V1; `sha256` (default) and `none` only. See Integrity Model section. |
+| *(spec)* | R3 §4.4 | **Pull does not delete local files.** Extra local files not in manifest are left untouched. See Pull section. |
 
 ### Open P0 — Must Resolve Before Implementation
 
@@ -2059,3 +2061,20 @@ file-by-file orchestration. Track as the transfer architecture solidifies.
 The spec doesn't address how team members discover they need to run `lobs pull`, CI
 integration patterns, or the "committed pointer with no remote data" failure mode. Add a
 "Team Workflows" section with guidance once core features are stable.
+
+#### `lobs verify` for directories
+
+**Review IDs:** R2
+
+Implement `lobs verify` for directory targets using per-file manifest hashes. Not a V1
+launch blocker but straightforward once manifest hashes exist. Related: a
+`verify_after_pull` config flag (default false) for users who want post-pull integrity
+checks beyond what the transport layer provides.
+
+#### `ns ls` performance with sizes
+
+**Review IDs:** R3 §5
+
+Listing namespace sizes requires walking all objects in each prefix, which can be slow and
+expensive on large buckets. Consider deferring size reporting from `lobs ns ls` or making
+it opt-in (`--sizes`). Ship the basic listing (namespace names + timestamps) first.
