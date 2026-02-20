@@ -1,8 +1,6 @@
-# Research: Cloud Storage Backing Store Features
+# Research: Cloud Storage Backing Store Features and Selection Guide
 
-**Date:** 2026-02-19
-
-**Status:** Reference
+**Date:** 2026-02-19 **Updated:** 2026-02-20 **Status:** Reference
 
 **Related:**
 
@@ -12,13 +10,22 @@
 
 ## Overview
 
-This research investigates the **backing store layer** for blobsy: cloud object storage
-providers and their features relevant to syncing large files.
-The key questions are whether any provider offers transparent compression, how sync
-tools interact with each provider, and how providers compare on pricing, features, and
-compatibility.
+This document provides **comprehensive research on cloud storage backing stores** for
+blobsy, covering both detailed provider capabilities and a rigorous selection framework.
 
-## Questions to Answer
+**Part I (Research)** investigates provider features, pricing, compression support,
+checksums, and integration requirements.
+
+**Part II (Selection)** provides a decision framework for choosing the right backing
+store based on constraints, volume, egress patterns, and team requirements.
+
+**Note:** This document is written to inform the design and implementation of blobsy.
+Where it discusses “blobsy’s approach” or “for blobsy users,” these are design
+recommendations for the planned implementation, not references to an existing tool.
+
+### Questions Answered
+
+**Feature Research:**
 
 1. Which storage providers offer transparent compression (compress on write, decompress
    on read)?
@@ -30,12 +37,21 @@ compatibility.
 6. What automatic hashes/checksums does each provider compute, and can blobsy use them
    to verify if a local file matches a remote file without downloading it?
 
-## Scope
+**Selection Guidance:**
+
+7. How do I choose a backing store given my constraints, volume, and egress patterns?
+8. When do credits matter, and when should I ignore them?
+9. What are the cost breakpoints where provider choice becomes decisive?
+10. How does S3 API compatibility affect my options?
+
+### Scope
 
 - **Included:** AWS S3, Google Cloud Storage, Cloudflare R2, Azure Blob Storage,
   Backblaze B2, Tigris, DigitalOcean Spaces, Wasabi, MinIO (self-hosted)
 - **Excluded:** Specialized ML platforms (HF Hub, Weights & Biases), databases, CDN-only
   services
+
+# Part I: Provider Features and Capabilities
 
 ## Part 1: Storage-Layer Compression
 
@@ -192,7 +208,8 @@ decompressive transcoding edge cases.
 The skip_extensions list for already-compressed formats is essential.
 
 For users running MinIO, they can enable server-side compression AND set
-`compression: none` in blobsy config for the best of both worlds.
+`compression: none` in the blobsy configuration (when implemented) for the best of both
+worlds.
 
 ## Part 2: Provider Feature Comparison
 
@@ -591,11 +608,6 @@ tool. With compression enabled, blobsy must mediate every file transfer (compres
 upload, decompress after download), and the “transparent storage format” goal is
 partially compromised (remote has `.zst` files).
 
-**Design recommendation:** Default to `compression: none` for maximum simplicity and
-sync delegation compatibility.
-Make compression opt-in for users who prioritize storage/egress cost savings and accept
-the added complexity.
-
 ## Part 5: Automatic Hashes and Remote Verification
 
 A key question for blobsy: can you check if a local file matches a remote file **without
@@ -860,7 +872,497 @@ or `azcopy` respectively.
 rclone is the universal fallback -- it supports all providers natively, making it the
 lowest-effort path to multi-cloud support.
 
-## Recommendations
+# Part II: Selection Framework
+
+## Part 7: Choosing a Backing Store
+
+### 7.1 Cost Hierarchy and Key Insights
+
+The research reveals a clear cost hierarchy:
+
+- **Storage costs are tightly clustered:** $0.005-$0.026/GB/month (5x spread)
+- **Egress costs vary wildly:** $0-$0.12/GB (100x+ spread, unlimited upside)
+- **Operations costs:** Negligible except at massive scale
+
+**Key insight:** For any dataset pulled more than a few times, **egress dwarfs all other
+costs**. The decision tree must therefore be volume-gated: small datasets make provider
+choice irrelevant; large datasets make egress patterns decisive.
+
+### 7.2 Decision Framework
+
+#### Stage 1: Hard Constraints (Eliminates Options)
+
+Check these **before** considering costs or convenience.
+Any “no” removes providers from consideration.
+
+| Constraint | Eliminates | Why |
+| --- | --- | --- |
+| **Compliance/data residency** | Various | HIPAA/SOC2 (rules out some smaller providers), EU-only (requires region selection), FedRAMP (only S3 GovCloud, Azure Gov) |
+| **Frequent updates (daily+)** | Wasabi | 90-day minimum retention means every version incurs 90 days of storage charges |
+| **Versioning required** | Tigris (no versioning) | Cannot retrieve historical object versions |
+| **High operation rate (>800 ops/sec)** | DigitalOcean Spaces | Rate limit: 800 ops/sec per bucket |
+| **Minimum spend acceptable?** | Wasabi ($6.99/mo = 1TB min), DO Spaces ($5/mo base) | Fixed monthly minimums regardless of usage |
+
+**If any constraint eliminates all providers, you need a specialized solution or must
+relax requirements.**
+
+#### Stage 2: Existing Infrastructure + Credits (Usually Decisive)
+
+This stage resolves ~80% of real-world decisions because **opportunity cost and
+integration friction dominate small cost differences**.
+
+##### Question 2.1: Are you already on AWS, GCP, or Azure for compute?
+
+**YES → Use that cloud’s storage (S3, GCS, Azure Blob) unless you have a strong reason
+not to.**
+
+Why this dominates:
+
+- **Same-region data transfer is free** — If compute and storage are in the same cloud
+  region, egress = $0. This eliminates the largest cost variable.
+- **Auth is already configured** — IAM roles, service accounts, managed identity.
+  No new credential management or security review.
+- **Team knows the tooling** — `aws s3`, `gcloud storage`, `azcopy`. No learning curve.
+- **Credits usually apply** — Cloud credits are typically platform-wide.
+
+**Strong reasons to override:**
+
+- Heavy external egress to non-cloud consumers (see Stage 3)
+- Significant credits on a *different* platform (see 2.2)
+- Multi-cloud strategy with explicit portability requirements
+- Provider lock-in concerns (team policy)
+
+##### Question 2.2: Do you have significant credits on a specific platform?
+
+**“Significant” = credits likely to cover >80% of your storage costs for the next 6-12
+months.**
+
+Estimating whether credits are significant:
+
+| Your Dataset + Usage | Monthly Cost (rough) | Credits Threshold |
+| --- | --- | --- |
+| 10 GB, rarely pulled | ~$0.50/mo | $10+ credits = “significant” |
+| 100 GB, pulled 3x/mo | ~$5-10/mo | $100+ credits = “significant” |
+| 1 TB, pulled 5x/mo | ~$50-100/mo | $1,000+ credits = “significant” |
+| 10 TB, pulled 10x/mo | ~$1,000+/mo | $10,000+ credits = “significant” |
+
+**If you have significant credits → Use that platform.** Storage pricing differences
+($0.005-$0.026/GB/month) are noise compared to free.
+
+**If you have modest credits (<20% of costs) → Ignore credits; proceed to Stage 3.**
+
+**If you have significant credits on multiple platforms → Pick the one with:**
+
+1. Better auth/tooling integration for your stack (ADC for GCP-native apps, IAM roles
+   for AWS)
+2. Team preference or existing expertise
+
+#### Stage 3: Data Volume + Egress Pattern (Cost Optimization)
+
+If you’ve reached this stage:
+
+- No hard constraints eliminate providers
+- Either (a) no existing cloud infrastructure, or (b) strong reason to use different
+  storage
+- No significant credits, or willing to optimize beyond free tier
+
+**The decision now depends on volume and access pattern.**
+
+##### Volume Tier 1: < 10 GB (Micro-scale)
+
+**Recommendation: Use your preferred cloud provider’s free tier.
+Choice is irrelevant.**
+
+- All major providers have 5-10 GB free tier
+- Even without free tier, costs are < $1/month
+- Optimization effort costs more than any savings
+
+**Pick based on:** Team familiarity, fewest new credentials, simplest setup.
+
+##### Volume Tier 2: 10-100 GB (Small-scale)
+
+**Cost estimate:** ~$2-10/month depending on egress
+
+**Recommendation: Use your primary cloud provider OR R2 if read-heavy.**
+
+At this scale:
+
+- Storage cost: $0.05-2.60/month (noise)
+- Egress cost: $0.90-108/month for 100 GB pulled 10x (THIS matters, but total is still
+  small)
+- **Total cost is low enough that convenience dominates**
+
+Decision tree:
+
+```
+If already on a cloud platform → Use that platform (same-region = free egress)
+If no existing cloud + read-heavy (pulled 5x+ per month) → R2 (zero egress)
+If no existing cloud + write-heavy → Your future primary cloud OR R2 (simplicity)
+```
+
+##### Volume Tier 3: 100 GB - 1 TB (Medium-scale)
+
+**Cost estimate:** ~$20-200/month depending on egress multiplier
+
+**Now egress patterns become the dominant factor.**
+
+###### Egress Multiplier: How many times is data read vs written?
+
+Calculate: `(total GB downloaded per month) / (dataset size in GB)`
+
+Example: 500 GB dataset, pulled by 10 people/month → 5 TB egress → 10x multiplier
+
+| Egress Multiplier | Pattern | Monthly Cost Example (500 GB dataset) |
+| --- | --- | --- |
+| < 1x | Write-heavy: archives, one-way pipelines | ~$10-15/mo (storage-dominated) |
+| 1-3x | Balanced: shared datasets, moderate collaboration | ~$30-80/mo |
+| 5-10x | Read-heavy: many consumers, CI/CD pulling frequently | ~$150-300/mo (egress-dominated) |
+| 10x+ | Very read-heavy: public datasets, large teams | ~$500+/mo (egress completely dominates) |
+
+**Decision by egress pattern:**
+
+**Low egress (< 1x multiplier):**
+
+- Storage cost dominates
+- **Best:** Backblaze B2 ($5/TB storage)
+- **Alt:** Your primary cloud (if same-region egress keeps multiplier low)
+
+**Moderate egress (1-5x multiplier):**
+
+- Balanced costs
+- **Best:** Your primary cloud (especially if same-region egress reduces multiplier)
+- **Alt:** R2 if external egress is significant
+
+**High egress (5x+ multiplier):**
+
+- Egress completely dominates
+- **Best:** Cloudflare R2 ($0 egress) or Backblaze B2 (free up to 3x storage, then
+  $0.01/GB)
+- **Math:** For 500 GB pulled 10x/month:
+  - S3: ~$10 storage + ~$450 egress = **$460/mo**
+  - R2: ~$7.50 storage + $0 egress = **$7.50/mo**
+  - **Savings: $452/mo = $5,424/year**
+
+**Special case: CI/CD pulling datasets**
+
+If your CI runs on AWS/GCP/Azure → Use storage on the **same cloud and region as CI**.
+Cross-cloud egress from CI to storage adds latency AND cost (you pay twice: CI egress +
+storage egress).
+
+##### Volume Tier 4: 1-10 TB (Large-scale)
+
+**Cost estimate:** ~$200-2,000/month depending on egress
+
+**Compression becomes financially significant** (see Part 4):
+
+- zstd level 3 typically achieves ~3x compression on text/JSON/logs
+- Storage savings: ~$15/month per TB
+- **Egress savings: ~$600/month per TB** (for 10x egress multiplier on S3)
+
+**Recommendation:**
+
+1. **Enable compression** (client-side zstd, when blobsy supports it)
+2. **Choose provider by egress pattern:**
+   - **High egress (5x+):** R2 (zero egress) or B2 (3x free egress rule)
+   - **Low egress (< 2x):** B2 (cheapest storage: $5/TB)
+   - **Balanced:** Your primary cloud (if same-region egress keeps costs down)
+
+##### Volume Tier 5: 10+ TB (Enterprise-scale)
+
+**Cost estimate:** $1,000+/month
+
+**Recommendations:**
+
+1. **Compression is essential** — Savings compound at scale
+2. **Negotiate enterprise pricing** — All providers offer volume discounts
+3. **Consider architecture changes:**
+   - Regional caching layers (reduce egress multiplier)
+   - CDN for public distribution (Cloudflare CDN + R2 integration)
+   - Tiered storage (hot data on fast storage, archives on B2/Glacier)
+
+**Provider choice:**
+
+- **If egress-heavy:** R2 or B2 (egress cost elimination worth any complexity)
+- **If archival/cold storage:** B2 ($5/TB) or S3 Glacier Deep Archive ($1/TB, but
+  retrieval costs)
+- **If enterprise with existing cloud commitment:** Negotiate better egress rates with
+  your primary cloud
+
+#### Stage 4: S3 API Compatibility + Tooling
+
+**Only relevant if Stages 2-3 left multiple viable options.**
+
+##### Question: Does S3 API compatibility matter for your ecosystem?
+
+S3 compatibility means:
+
+- `aws-cli` works with `--endpoint-url`
+- `rclone` has native or S3-compatible backend
+- Most SDK/libraries work with endpoint configuration
+- Vast ecosystem of tools (DVC, LakeFS, data pipelines) work out-of-box
+
+**Providers with good S3 compatibility:** S3 (native), GCS (via HMAC + XML API), R2, B2,
+Wasabi, Tigris, DO Spaces
+
+**Providers requiring dedicated support:** Azure Blob (completely different API)
+
+**For blobsy (design):**
+
+- V1 design uses `type: s3` backend → All S3-compatible providers work immediately
+- Azure Blob requires `type: azure-blob` backend (future) or `sync.tool: rclone`
+  (delegate to rclone’s azureblob backend)
+- **Planned built-in sync engine (`@aws-sdk/client-s3`) reduces CLI dependency** →
+  Tooling ecosystem slightly less critical than for manual workflows
+
+**Decision:**
+
+- **If multiple S3-compatible options are equivalent** → Prefer S3 itself (largest
+  ecosystem, best documentation, most checksum features)
+- **If Azure is viable but requires extra integration work** → Only choose if already on
+  Azure (Stage 2 override)
+
+##### Tooling Quality Considerations
+
+From Part 3 (Provider Comparison):
+
+| Provider | Native CLI | S3 CLI Support | rclone Support | Checksum Features |
+| --- | --- | --- | --- | --- |
+| **AWS S3** | `aws s3 sync` (mature) | Native | Excellent | Best (CRC64NVME auto, SHA-256/CRC32C opt-in, full-object even for multipart) |
+| **GCS** | `gcloud storage rsync` (checksum-based) | Via endpoint (HMAC) | Native backend | Good (CRC32C auto, MD5 for non-composite) |
+| **Azure Blob** | `azcopy sync` | **No** | Native backend | Weak (MD5 only for simple uploads, large files need client-provided hash) |
+| **R2** | Via S3 CLI | Yes | Named provider | Good (MD5 auto for non-multipart, SHA-256/CRC64NVME opt-in) |
+| **B2** | B2 CLI + S3 CLI | Yes | Both native and S3 | Medium (SHA-1 auto for small files, large files optional client hash) |
+| **Others** | Via S3 CLI | Yes | Generic S3 or named | Varies (typically MD5 for non-multipart only) |
+
+**For blobsy (design), this matters minimally because:**
+
+- The planned built-in sync engine will handle uploads/downloads directly
+- The design computes SHA-256 independently (doesn’t rely on provider checksums for
+  change detection)
+- `sync.tool: auto` fallback to rclone provides universal compatibility
+
+**Minor factor:** If you frequently use CLI tools manually for debugging/operations
+outside blobsy:
+
+- **S3** has the most mature CLI (`aws s3 sync`, `s5cmd` for performance)
+- **GCS** has excellent CLI (`gcloud storage rsync` with checksum-based sync)
+- **Others** work but are less polished
+
+**Recommendation:** Consider tooling quality as a **tiebreaker only** if Stages 1-3
+leave multiple equivalent options.
+
+### 7.3 Special Cases
+
+#### Multi-cloud / Avoiding Lock-in
+
+**Goal:** Maximize portability, minimize vendor-specific dependencies
+
+**Recommendation:**
+
+1. **Use S3-compatible providers** (not Azure Blob) → Switching is configuration change
+   only
+2. **Prefer R2, B2, or Tigris** (independent vendors) over AWS/GCP/Azure → No
+   cloud-platform lock-in
+3. **For maximum portability:**
+   - R2 (Cloudflare, S3-compatible, zero egress)
+   - B2 (Backblaze, S3-compatible, cheapest storage)
+   - Wasabi (S3-compatible, “100% bit-compatible” claim, but watch minimum retention)
+
+**If already on GCP but want S3 ecosystem:**
+
+- Use **GCS via HMAC keys + S3 API endpoint** (`https://storage.googleapis.com`)
+- Get: GCP billing/credits + S3-compatible tooling
+- Lose: ADC auth convenience, parallel composite uploads (GCS-native features)
+- Trade-off: Worthwhile if S3 ecosystem compatibility is strategically important
+
+#### Self-hosted / On-premise
+
+**Use MinIO:**
+
+- Only provider with **true transparent compression** (S2 algorithm, compress on write,
+  decompress on read)
+- S3-compatible API
+- **Recommended for blobsy: Set `compression: none`** → Let MinIO handle compression at
+  storage layer, avoid double compression
+
+**Caveat:** MinIO compression changes ETags (not MD5 of uncompressed content) → Some
+sync tools break. `aws s3 sync` works (uses size+mtime, not ETag).
+
+#### Cost-Sensitive Recommendations by Use Case
+
+| Use Case | Recommended Provider | Why |
+| --- | --- | --- |
+| **ML model versioning (large, read-heavy)** | R2 or B2 | Zero/low egress, S3-compatible (works with ML tools) |
+| **Data pipeline outputs (write-heavy, archival)** | B2 | Cheapest storage ($5/TB), free uploads |
+| **Shared datasets (many collaborators)** | R2 | Zero egress eliminates per-user cost |
+| **CI/CD artifacts** | Same cloud as CI | Same-region = free egress, lowest latency |
+| **Public dataset distribution** | R2 + Cloudflare CDN | Zero egress, global CDN, infinite scale |
+| **Compliance-heavy (HIPAA/SOC2)** | S3, GCS, or Azure | Established BAAs, audit logs, compliance certifications |
+| **Startup with cloud credits** | Match credits platform | Free > cheap |
+
+### 7.4 Tiebreakers: When Multiple Providers Are Equivalent
+
+If after Stages 1-4 you have multiple viable options, use these tiebreakers in order:
+
+#### 1. Team Expertise / Hiring Market
+
+**Lean S3** — “Everyone knows S3” is a real advantage for onboarding and hiring.
+
+#### 2. Ecosystem Breadth
+
+**S3 wins:**
+
+- Largest number of integrations (every data tool speaks S3 natively)
+- Most Stack Overflow answers, tutorials, examples
+- Advanced features (S3 Select, Object Lock, Express One Zone, Batch Operations)
+
+**GCS advantages:**
+
+- HTTP/2 (vs S3’s HTTP/1.1) → Better performance for many small files
+- Autoclass (auto-tiering between storage classes based on access patterns)
+- Checksum-based sync (`gcloud storage rsync --checksums-only`) → More reliable than
+  size+mtime
+
+#### 3. Future-Proofing
+
+**S3 (AWS) is the safest long-term bet:**
+
+- Industry default, unlikely to be discontinued
+- Largest R&D investment in new features
+- Most battle-tested at extreme scale
+
+**R2 (Cloudflare) is the “new disruptor” bet:**
+
+- Zero egress is strategically differentiated
+- Growing ecosystem (Workers, CDN, D1, R2)
+- VC-backed with clear business model
+
+**B2 (Backblaze) is the “niche specialist” bet:**
+
+- Focused on storage as core business
+- Pricing stability (transparent, no surprises)
+- Bandwidth Alliance (free egress to Cloudflare) = poor-man’s CDN
+
+#### 4. Default Recommendation When Truly Indifferent
+
+**AWS S3** — Not because it’s the cheapest (it isn’t), but because:
+
+- Lowest friction for most teams (familiarity, hiring, documentation)
+- Best checksum support (CRC64NVME full-object checksums, SHA-256 opt-in)
+- Switching cost is low (blobsy abstracts the backend anyway)
+
+### 7.5 Summary Flowchart
+
+```
+START: Choosing a backing store for blobsy
+
+1. Any hard constraints?
+   YES → [Compliance/residency/retention/versioning/rate limits/minimums]
+         → Eliminates some providers → Proceed with remaining options
+   NO → Proceed to Step 2
+
+2. Already on AWS/GCP/Azure for compute?
+   YES → Use that cloud's storage (S3/GCS/Azure Blob)
+         UNLESS: Heavy external egress (→ Step 3) OR significant credits elsewhere (→ Step 2b)
+   NO → Proceed to Step 2b
+
+2b. Significant credits on a platform? (Credits cover >80% of 6-12mo storage costs)
+    YES → Use that platform
+    NO → Proceed to Step 3
+
+3. What's your data volume?
+   < 10 GB → Use any provider's free tier (choice irrelevant)
+
+   10-100 GB → Calculate egress multiplier (times pulled per month)
+               < 5x → Primary cloud OR R2 (convenience dominates at this scale)
+               5x+ → R2 (zero egress savings start to justify setup effort)
+
+   100 GB - 1 TB → Egress pattern is DECISIVE
+                   < 1x (write-heavy) → B2 ($5/TB storage)
+                   1-5x (balanced) → Primary cloud (if same-region) OR R2
+                   5x+ (read-heavy) → R2 or B2 (egress dominates; $450+/mo savings at 500GB/10x)
+
+   1-10 TB → ENABLE COMPRESSION (zstd in blobsy)
+             High egress (5x+) → R2 or B2
+             Low egress (< 2x) → B2 (cheapest storage)
+             Balanced → Primary cloud with compression
+
+   10+ TB → NEGOTIATE ENTERPRISE PRICING
+            Egress-heavy → R2 or B2 (cost elimination essential)
+            Archival → B2 or S3 Glacier
+            Existing cloud commitment → Negotiate better rates
+
+4. S3 compatibility required by your ecosystem?
+   YES → Eliminates Azure Blob (unless already on Azure from Step 2)
+   NO → All providers viable
+
+5. Still multiple equivalent options?
+   → Tiebreaker: S3 (ecosystem breadth, hiring, documentation)
+```
+
+### 7.6 Cost Calculation Examples
+
+#### Example 1: Small ML Team (500 GB dataset, 10 users pulling monthly)
+
+**Usage:**
+
+- Dataset: 500 GB
+- Egress: 5 TB/month (10x multiplier)
+
+**Cost comparison (no compression):**
+
+| Provider | Storage | Egress | Ops | Total/mo |
+| --- | --- | --- | --- | --- |
+| S3 | $11.50 | $450 | ~$0 | **$461.50** |
+| GCS | $10 | $600 | ~$0 | **$610** |
+| R2 | $7.50 | $0 | ~$0 | **$7.50** |
+| B2 | $2.50 | $50* | ~$0 | **$52.50** |
+
+*B2: 1.5 TB free (3x storage), then $0.01/GB for remaining 3.5 TB*
+
+**Recommendation:** R2 saves **$454/month = $5,448/year** vs S3. Clear winner.
+
+#### Example 2: Archival Pipeline (5 TB, written once, rarely read)
+
+**Usage:**
+
+- Dataset: 5 TB
+- Egress: 0.5 TB/month (0.1x multiplier)
+
+**Cost comparison:**
+
+| Provider | Storage | Egress | Total/mo |
+| --- | --- | --- | --- |
+| S3 | $115 | $45 | **$160** |
+| R2 | $75 | $0 | **$75** |
+| B2 | $25 | $5 | **$30** |
+
+**Recommendation:** B2 saves **$130/month vs S3**, **$45/month vs R2**. For write-heavy
+archival, B2’s cheap storage dominates.
+
+#### Example 3: CI/CD on AWS (100 GB artifacts, pulled 20x/month)
+
+**Usage:**
+
+- Dataset: 100 GB
+- Egress: 2 TB/month (20x multiplier)
+- CI runs in `us-east-1`
+
+**Cost comparison:**
+
+| Provider | Storage | Egress | Latency | Total/mo |
+| --- | --- | --- | --- | --- |
+| S3 (us-east-1) | $2.30 | **$0*** | Low | **$2.30** |
+| R2 | $1.50 | $0 | Medium | **$1.50** |
+
+*Same-region data transfer from S3 to EC2 is free*
+
+**Recommendation:** S3 (same region as CI) is cheapest AND fastest due to free
+same-region egress. R2 saves $0.80/month but adds latency.
+
+## Part 8: Recommendations
+
+### 8.1 Compression Strategy
 
 1. **Client-side compression is the only portable approach.** No hosted provider offers
    transparent compression.
@@ -868,27 +1370,52 @@ lowest-effort path to multi-cloud support.
 
 2. **Consider `compression: none` as default.** Maximum simplicity, full sync delegation
    to transport tools, transparent remote storage.
-   Make compression opt-in.
+   Make compression opt-in for users who need the cost savings.
 
 3. **Avoid `Content-Encoding: gzip` for storage.** GCS decompressive transcoding and
    R2’s similar behavior create too many edge cases.
    Blobsy should store `.zst` files as opaque blobs with
    `Content-Type: application/octet-stream`.
 
-4. **SHA-256 in pointer files is the right choice for change detection.** ETags are
+4. **For users running MinIO:** Enable server-side compression AND set
+   `compression: none` in blobsy config for the best of both worlds.
+
+### 8.2 Change Detection and Checksums
+
+5. **SHA-256 in pointer files is the right choice for change detection.** ETags are
    unreliable across providers (MinIO compression changes them, GCS transcoding
    invalidates them, multipart uploads produce non-MD5 ETags).
    Blobsy’s independent SHA-256 hashing sidesteps all of this.
 
-5. **`type: s3` covers most providers in V1.** GCS, R2, B2, Wasabi, Tigris, DO Spaces
+6. **Provide checksums during upload for transfer integrity:**
+   - SHA-256 for S3 (via `x-amz-checksum-sha256`)
+   - CRC32C for GCS
+   - Always compute and set for all providers
+
+7. **Store SHA-256 in pointer files/manifests as the canonical hash**
+   (provider-independent)
+
+8. **Optionally store the provider ETag in the manifest** for cheap remote staleness
+   checks without download
+
+### 8.3 Backend Integration
+
+9. **`type: s3` covers most providers in V1.** GCS, R2, B2, Wasabi, Tigris, DO Spaces
    all work via S3-compatible endpoint.
    Only Azure Blob requires a dedicated backend type.
 
-6. **rclone is the universal sync fallback.** It supports all providers natively and
-   provides the easiest path to multi-cloud support.
+10. **rclone is the universal sync fallback.** It supports all providers natively and
+    provides the easiest path to multi-cloud support.
 
-7. **For cost-sensitive users:** B2 ($5/TB storage) + Cloudflare CDN (free egress via
-   Bandwidth Alliance) or R2 ($15/TB, zero egress) are the most cost-effective options.
+### 8.4 Cost-Optimized Recommendations
+
+11. **For cost-sensitive users:**
+    - **High egress:** R2 ($15/TB, zero egress)
+    - **Archival/low egress:** B2 ($5/TB storage)
+    - **B2 + Cloudflare CDN:** Free egress via Bandwidth Alliance = powerful combination
+
+12. **Enable compression for datasets >1 TB** — Egress savings (~~$600/TB/mo for 10x
+    multiplier) far exceed storage savings (~~$15/TB/mo)
 
 ## References
 

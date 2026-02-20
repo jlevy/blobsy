@@ -53,13 +53,13 @@ Git is the manifest.
 | --- | --- | --- |
 | Manifest / file tracking | Git (`.yref` files are git-versioned) | Creates and updates `.yref` files |
 | Conflict resolution | Git (standard merge on `.yref` files) | Nothing -- git handles it |
-| File transfer | External CLI tools (`aws-cli`, `s5cmd`, `rclone`) | Orchestrates concurrency |
+| File transfer | External CLI tools (`aws-cli`, `rclone`) or template commands | Orchestrates concurrency |
 | Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
 | Compression | Node.js built-in `node:zlib` (`zstd`, `gzip`, `brotli`) | Decides what to compress, applies rules |
 | History / versioning | Git (commit history of `.yref` files) | Nothing -- git handles it |
 
 8. **Infrastructure neutral:** Pluggable backend (S3, R2, local, custom command),
-   pluggable transfer engine (aws-cli, s5cmd, rclone, built-in).
+   configurable transfer tools (aws-cli, rclone, or arbitrary template commands).
    Compression via Node.js built-in zstd (V1).
 
 9. **One primitive:** The entire system reduces to: one file, one `.yref`, one blob.
@@ -350,11 +350,11 @@ Computing SHA-256 during that read adds negligible overhead:
 - A directory with 1,000 files totaling 1 GB: ~2 seconds of hashing
 - The upload itself takes orders of magnitude longer
 
-When using the built-in `@aws-sdk` transfer engine, hashes are computed during the
-upload read (single I/O pass).
-When delegating to external tools (aws-cli, rclone), hashing requires a separate read
-pass -- the file is read once to hash, then the external tool reads it again to
-transfer. In practice the OS page cache makes the second read nearly free.
+When using the built-in `@aws-sdk` fallback, hashes are computed during the upload read
+(single I/O pass). When delegating to external tools (aws-cli, rclone, or template
+commands), hashing requires a separate read pass -- the file is read once to hash, then
+the external tool reads it again to transfer.
+In practice the OS page cache makes the second read nearly free.
 
 ### Local Stat Cache
 
@@ -443,7 +443,7 @@ Scanning data/research/...
   data/research/report.md          (12 KB, .md)    -> kept in git
   data/research/config.yaml        (800 B, .yaml)  -> kept in git
   data/research/model.bin          (500 MB, .bin)   -> externalized (.yref)
-  data/research/raw/response.json  (2 MB, .json)    -> kept in git (never list)
+  data/research/raw/metadata.txt   (500 B, .txt)   -> kept in git
   data/research/raw/data.parquet   (50 MB, .parquet) -> externalized (.yref)
 2 files tracked, 3 kept in git.
 ```
@@ -566,7 +566,7 @@ blobsy sync -----------+-- aws s3 cp data/file2 s3://...
 ```
 
 This is simple and works well for typical workloads (tens to hundreds of files).
-The transfer tool (`aws-cli`, `s5cmd`, `rclone`) handles each individual
+The transfer tool (`aws-cli`, `rclone`, or a template command) handles each individual
 upload/download.
 
 ### `blobsy push` / `blobsy pull`
@@ -717,10 +717,6 @@ VERIFICATION
 MAINTENANCE
   blobsy gc [--dry-run]                Remove unreferenced remote blobs
        [--older-than <duration>]     Only remove blobs older than <duration>
-
-UTILITIES
-  blobsy export [path...] -o FILE      Export tracked files as tar.zst archive
-  blobsy import FILE                   Import from archive
 ```
 
 ### Flags (Global)
@@ -769,7 +765,7 @@ not in global/user config.
 If two users have different local configs that affect remote representation, they
 produce different remote blobs, breaking sync.
 User-global config should only contain preferences that don’t affect remote storage
-(e.g., `sync.tool`, `sync.parallel`).
+(e.g., `sync.tools`, `sync.parallel`).
 
 ### Built-in Defaults
 
@@ -831,7 +827,7 @@ remote:
   layout: content-addressable
 
 sync:
-  tool: auto
+  tools: [aws-cli, rclone]        # ordered preference list; first available is used
   parallel: 8
 
 checksum:
@@ -920,7 +916,7 @@ remote:
   layout: content-addressable    # default | timestamp
 
 sync:
-  tool: auto                     # auto | aws-cli | s5cmd | rclone | built-in
+  tools: [aws-cli, rclone]      # ordered preference list; first available is used
   parallel: 8
 ```
 
@@ -976,8 +972,12 @@ For development and testing.
 No cloud account needed.
 
 **`command`:** Arbitrary shell commands for push/pull.
-Escape hatch for unsupported backends, and a deliberate integration point for
-domain-specific tools that want to hook into blobsy with custom upload/download logic.
+This serves two purposes:
+
+1. **Escape hatch** for unsupported backends (SCP, rsync, custom APIs).
+2. **Template-based transfer layer** -- a powerful alternative to named tools.
+   Because each command template runs once per file with variable expansion, a `command`
+   backend is functionally equivalent to a custom transfer tool.
 
 Template variables:
 
@@ -987,9 +987,52 @@ Template variables:
   `data/prices.parquet`).
 - `{bucket}` -- the configured bucket name.
 
-The command runs once per file (not once per push operation).
+The command runs once per file (not once per push operation), with up to `sync.parallel`
+invocations running concurrently.
 A non-zero exit code is treated as a transfer failure for that file.
 stdout is discarded; stderr is shown to the user on failure.
+
+**Examples:**
+
+```yaml
+backends:
+  # SCP to a remote server
+  ssh-server:
+    type: command
+    push_command: scp {local} myhost:/data/{remote}
+    pull_command: scp myhost:/data/{remote} {local}
+
+  # rsync with compression
+  rsync-remote:
+    type: command
+    push_command: rsync -az {local} myhost:/data/{remote}
+    pull_command: rsync -az myhost:/data/{remote} {local}
+
+  # curl to a custom HTTP API
+  custom-api:
+    type: command
+    push_command: >-
+      curl -sf -X PUT -T {local}
+      https://api.example.com/blobs/{remote}
+    pull_command: >-
+      curl -sf -o {local}
+      https://api.example.com/blobs/{remote}
+
+  # aws-cli with custom flags (e.g., specific profile, storage class)
+  s3-archive:
+    type: command
+    push_command: >-
+      aws s3 cp {local} s3://my-archive-bucket/{remote}
+      --profile archive --storage-class GLACIER_IR
+    pull_command: >-
+      aws s3 cp s3://my-archive-bucket/{remote} {local}
+      --profile archive
+```
+
+This design means that even without first-class support for a given transfer tool or
+storage backend, a user can integrate it in minutes with a template command.
+The `command` backend is sufficient for any tool that can copy a single file given a
+source and destination path.
 
 **Security restriction:** `command` backends from repo-level config require explicit
 trust. See [Security and Trust Model](#security-and-trust-model).
@@ -1017,25 +1060,45 @@ The AWS CLI and rclone support `--endpoint-url` for S3-compatible stores.
 ### Transfer Delegation
 
 `blobsy` does not implement high-performance transfers.
-It delegates:
+It delegates to external CLI tools, trying each in the configured preference order:
 
-| `sync.tool` | How transfers work |
+| Tool | How transfers work |
 | --- | --- |
 | `aws-cli` | Shells out to `aws s3 cp` per file |
-| `s5cmd` | Shells out to `s5cmd cp` per file (or batched) |
-| `rclone` | Shells out to `rclone copy` per file |
-| `built-in` | Uses `@aws-sdk/client-s3` directly (slower, but zero external deps) |
-| `auto` | Tries aws-cli, then s5cmd, then rclone, then built-in |
+| `rclone` | Shells out to `rclone copyto` per file |
+
+The `sync.tools` setting is an ordered list (default: `[aws-cli, rclone]`). Blobsy tries
+each tool in order, using the first one that passes a capability check.
+To force a specific tool, set a single-element list: `sync.tools: [rclone]`. This
+setting follows the standard hierarchical config override (user-global < repo <
+directory), so a user who prefers rclone can set it globally while repos can override if
+needed.
 
 Because blobsy uses content-addressable storage and per-file `.yref` refs, it always
 knows exactly which files to transfer.
 It uses transfer tools as **copy engines** (per-file `cp`/`copy`), not diff engines.
 Blobsy owns the diffing via `.yref` hashes; the transfer tool only moves bytes.
 
-**Auto tool detection:** `sync.tool: auto` performs a lightweight capability check
-(credentials + endpoint reachability), not just binary existence.
+**Tool detection:** Blobsy performs a lightweight capability check (binary exists +
+credentials configured + endpoint reachable), not just binary existence.
 If aws-cli is installed but not configured for the target endpoint, it falls through to
-the next tool. `blobsy doctor` shows which tool was selected and why.
+the next tool in the list.
+`blobsy doctor` shows which tool was selected and why.
+
+**Template commands as transfer layer:** For backends that are not S3-compatible, or for
+advanced use cases (SCP, custom APIs, proprietary tools), the `command` backend type
+doubles as a fully custom transfer layer.
+Because the command template runs once per file with `{local}` and `{remote}` variable
+expansion, it is functionally equivalent to a transfer tool -- just specified as a
+template rather than a named preset.
+See [Backend Types](#backend-types) for details.
+
+This means blobsy supports three transfer modes in V1:
+1. **Named tools** (`aws-cli`, `rclone`) -- zero-config for S3-compatible backends.
+2. **Template commands** (`command` backend) -- arbitrary CLI commands, one per file.
+   Works with SCP, rsync, curl, or any tool that can copy a file.
+3. **Built-in SDK** (`@aws-sdk/client-s3`) -- fallback when no external tool is
+   available. Slower, but zero external dependencies.
 
 ### Compression and Transfer Interaction
 
@@ -1068,7 +1131,7 @@ Uses the standard credential chain for the backend:
 - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 - Shared credentials file (`~/.aws/credentials`)
 - Instance profiles / IAM roles
-- rclone config (when `sync.tool: rclone`)
+- rclone config (when rclone is selected from `sync.tools`)
 
 ### Atomic Writes
 
@@ -1183,9 +1246,16 @@ Every tracked file gets its own gitignore line.
 
 ```gitignore
 # >>> blobsy-managed (do not edit) >>>
-data/bigfile.zip
-data/research/model.bin
-data/research/raw/data.parquet
+bigfile.zip
+# <<< blobsy-managed <<<
+```
+
+In `data/research/.gitignore`:
+
+```gitignore
+# >>> blobsy-managed (do not edit) >>>
+model.bin
+raw/data.parquet
 # <<< blobsy-managed <<<
 ```
 
@@ -1193,8 +1263,8 @@ data/research/raw/data.parquet
 `blobsy untrack` removes it.
 
 Entries are placed in a clearly marked section in the `.gitignore` file in the same
-directory as the tracked path (following the DVC convention).
-If no `.gitignore` exists in that directory, one is created.
+directory as the tracked path (following the DVC convention), using paths relative to
+that directory. If no `.gitignore` exists in that directory, one is created.
 This keeps gitignore entries co-located with the things they ignore.
 
 The `.yref` files live adjacent to their data files.
@@ -1533,10 +1603,11 @@ The error message comes from the transport layer, not from blobsy.
 
 Recovery: configure credentials via the standard mechanism for the backend.
 
-**`sync.tool: auto` selects the wrong tool.** A user has aws-cli installed for other
-purposes, but it’s not configured for the blobsy backend’s endpoint or region.
-Auto-detection performs a capability check and falls through to the next tool.
-If auto-detection still fails, set `sync.tool` explicitly in config.
+**Wrong transfer tool selected.** A user has aws-cli installed for other purposes, but
+it’s not configured for the blobsy backend’s endpoint or region.
+Tool detection performs a capability check and falls through to the next tool in the
+`sync.tools` list. If detection still fails, override `sync.tools` to a single-element
+list (e.g., `sync.tools: [rclone]`) in config.
 
 ### Large Directories
 
@@ -1649,11 +1720,15 @@ No cloud account needed for development.
 
 ## V1 Scope
 
+**Note:** This document describes the V2 design architecture.
+“V1 Scope” refers to the initial shipping scope implementing this V2 architecture (not
+the older V1 manifest-based design).
+
 ### What blobsy does (V1)
 
 - Track files via per-file `.yref` ref files committed to git
 - Content-addressable remote storage with automatic dedup
-- Push/pull/sync with pluggable backends and transfer tools
+- Push/pull/sync with pluggable backends and configurable transfer tools
 - Per-file compression via Node.js built-in zstd/gzip/brotli
 - SHA-256 integrity verification
 - Content-addressable garbage collection
@@ -1676,24 +1751,56 @@ No cloud account needed for development.
 - Remote staleness detection via provider hashes
 - Web UI
 - Parallel `.yref` directory option (`.yref` files always adjacent to data files)
-- Batched multi-file transfer (V1 uses per-file concurrency with a pool)
+- Batched multi-file transfer / transfer engine abstraction (V1 uses per-file
+  concurrency with a pool; V2 adds pluggable `TransferEngine` with batch support)
 
 These are candidates for future versions if demand warrants.
 
 ### What’s Deferred (V2+)
 
-- **Batched multi-file transfer.** V1 uses per-file concurrency with a pool
-  (`sync.parallel`). A future optimization could batch multiple files per CLI invocation
-  (e.g., `s5cmd` supports multi-file operations).
+- **Transfer engine abstraction.** V1 uses per-file CLI spawning with a concurrency
+  pool. V2 introduces a pluggable `TransferEngine` interface that supports both per-file
+  and batched transfer modes:
+
+  ```typescript
+  interface TransferEngine {
+    // Per-file transfer (V1 model, always supported)
+    transferFile(src: string, dest: string): Promise<void>
+
+    // Batch transfer (V2 optimization, optional)
+    transferBatch?(files: Array<{src: string, dest: string}>): Promise<void>
+  }
+  ```
+
+  When `transferBatch` is available, blobsy passes all files in a single call, letting
+  the engine manage its own concurrency (connection pooling, worker threads, etc.). This
+  eliminates per-file process spawn overhead and enables tools like `s5cmd` (batch mode
+  via `run` command) and `rclone` (`--files-from` flag) to operate at peak throughput.
+
+- **Additional transfer tool presets.** V1 supports `aws-cli` and `rclone`. V2 adds
+  first-class presets for:
+  - `s5cmd` -- Go-based, fastest for many-file workloads via batch mode.
+  - `gcloud` -- native GCS transfers with ADC auth (no HMAC keys).
+  - `azcopy` -- native Azure Blob transfers.
+
+  Each preset implements `TransferEngine` with tool-specific optimizations (e.g., s5cmd
+  batch file, rclone `--files-from`, gcloud parallel composite uploads).
+
 - **Parallel `.yref` directory option.** Storing `.yref` files in a parallel directory
   (e.g., `data/research.yrefs/`) instead of adjacent to data files.
+
 - **Advanced GC strategies.** Branch-aware retention policies, age-based remote cleanup.
+
 - **Multi-backend routing.** Routing different directories to different backends.
+
 - **Dictionary compression.** zstd dictionary training for 2-5x improvement on small
   files sharing structure.
+
 - **Sub-file delta sync.** Transfer only changed portions of large files.
+
 - **Remote staleness detection via provider hashes.** Store ETag/CRC from upload
   responses for cheap `HeadObject`-based checks.
+
 - **Export/import specification.** `blobsy export` / `blobsy import` for tar.zst
   archives (offline sharing, backup, migration).
 
@@ -1771,7 +1878,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 | --- | --- | --- | --- |
 | `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for built-in SDK. See Atomic Writes section. |
 | `blobsy-vj6p` | R3 4.10 | Security: command execution from repo config | **Addressed.** `command` backends disallowed from repo config by default. See Security and Trust Model. |
-| `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Capability check + fallthrough + `blobsy doctor`. See Transfer Delegation. |
+| `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Ordered `sync.tools` list with capability check + fallthrough + `blobsy doctor`. See Transfer Delegation. |
 
 ### Eliminated by Architecture Change
 
@@ -1792,6 +1899,6 @@ These issues were resolved in the original spec and remain resolved in this desi
 | R1 M10, R3 7 | Integration surface (library vs CLI) | Stated: standalone CLI + npm package. |
 | R3 4.8 | Mixed directories: ignore vs include patterns | Resolved by externalization rules. |
 | R1 M11 | `command` backend as integration point | Noted in Backend Types description. |
-| R3 5 | s5cmd as future transport engine | Listed in sync.tool options. |
+| R3 5 | s5cmd as future transport engine | Deferred to V2. V1 ships with aws-cli + rclone + template commands. |
 | R1 S6, R3 4.7 | Compression suffix convention | Accepted: `.zst` suffix in remote; compression state in `.yref`. |
 | R3 4.7 | Small-file compression threshold | Built in: `compress.min_size: 100kb` default. |

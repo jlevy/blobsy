@@ -572,20 +572,20 @@ These are the ones I would file as “doc correctness” tickets:
    need and how “Git is manifest” really works.
    Clarify expected workflow.
 
-5. **Gitignore examples likely use incorrect path form for per-directory `.gitignore`**
-   If `.gitignore` is in the same directory as the tracked file, entries should be
-   relative to that directory, not repo-root-prefixed.
+5. ✅ **Gitignore examples likely use incorrect path form for per-directory
+   `.gitignore`** If `.gitignore` is in the same directory as the tracked file, entries
+   should be relative to that directory, not repo-root-prefixed.
 
-6. **Directory tracking example appears inconsistent with default externalize rules**
+6. ✅ **Directory tracking example appears inconsistent with default externalize rules**
    The example keeps a 2MB `.json` “in git (never list)” but the shown defaults would
    externalize by `min_size: 1mb` unless `.json` is in `externalize.never`. Either
    update defaults, or update the example to match.
 
-7. **Command list includes `export/import` but later says export/import is deferred**
+7. ✅ **Command list includes `export/import` but later says export/import is deferred**
    Pick one for V1 and keep it consistent.
 
-8. **Minor terminology confusion: “v2 design doc” but section titled “V1 scope”** This
-   is likely just naming (“v2 architecture, V1 shipping scope”), but it should be
+8. ✅ **Minor terminology confusion: “v2 design doc” but section titled “V1 scope”** This
+   is likely just naming ("v2 architecture, V1 shipping scope"), but it should be
    explicit so implementers don’t misread priorities.
 
 * * *
