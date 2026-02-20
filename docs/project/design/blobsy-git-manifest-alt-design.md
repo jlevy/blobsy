@@ -580,12 +580,149 @@ data/research/**
 
 `blobsy add` generates these patterns automatically. Users don't write them by hand.
 
-## Configuration
+## Configuration: `.blobsy.yml`
 
-Minimal changes from the main design:
+Configuration lives in `.blobsy.yml` files, placed anywhere — like `.gitignore` or
+`.editorconfig`. Each file applies to its directory and all descendants.
+
+### Hierarchy
+
+```
+~/.blobsy.yml                        User-global defaults
+<repo>/.blobsy.yml                   Repo root
+<repo>/data/.blobsy.yml              Subdirectory override
+<repo>/data/research/.blobsy.yml     Deeper override
+```
+
+Resolution is bottom-up: the most specific `.blobsy.yml` wins.
+Settings merge — a subdirectory file only needs to specify what it overrides.
+
+### Externalization Rules
+
+When `blobsy add <dir>` runs, it decides which files get externalized (`.yref` +
+gitignored) vs. left alone (committed directly to git). The decision is based on
+**size** and **file type**:
 
 ```yaml
-# .blobsy/config.yml
+# .blobsy.yml
+externalize:
+  min_size: 1mb                    # files below this stay in git (default: 1mb)
+  always:                          # always externalize these, regardless of size
+    - "*.parquet"
+    - "*.bin"
+    - "*.weights"
+    - "*.onnx"
+  never:                           # never externalize these, regardless of size
+    - "*.md"
+    - "*.yaml"
+    - "*.json"
+```
+
+**How it works with `blobsy add`:**
+
+```bash
+$ blobsy add data/research/
+  data/research/report.md          (12 KB, .md)    → kept in git
+  data/research/config.yaml        (800 B, .yaml)  → kept in git
+  data/research/model.bin          (500 MB, .bin)   → externalized (.yref)
+  data/research/raw/response.json  (2 MB, .json)    → kept in git (never list)
+  data/research/raw/data.parquet   (50 MB, .parquet) → externalized (.yref)
+3 files kept in git, 2 externalized.
+```
+
+This eliminates the "mixed directory" problem entirely. `blobsy add` on a directory
+is smart by default — small text files stay in git, large binaries get `.yref` files.
+No manual per-file decisions needed.
+
+**Default rules** (built into blobsy, overridden by any `.blobsy.yml`):
+
+```yaml
+externalize:
+  min_size: 1mb
+  always:
+    - "*.parquet"
+    - "*.bin"
+    - "*.weights"
+    - "*.onnx"
+    - "*.safetensors"
+    - "*.pkl"
+    - "*.pt"
+    - "*.h5"
+    - "*.arrow"
+    - "*.sqlite"
+    - "*.db"
+  never: []
+```
+
+### Compression Rules
+
+Blobsy can compress files before uploading to the remote, and decompress on pull.
+Compression is controlled by **file type** and **size**:
+
+```yaml
+# .blobsy.yml
+compress:
+  min_size: 100kb                  # don't bother compressing tiny files
+  algorithm: zstd                  # zstd (default) | gzip | none
+  always:                          # always compress these
+    - "*.json"
+    - "*.csv"
+    - "*.tsv"
+    - "*.txt"
+    - "*.jsonl"
+    - "*.xml"
+    - "*.sql"
+  never:                           # never compress these (already compressed)
+    - "*.gz"
+    - "*.zst"
+    - "*.zip"
+    - "*.tar.*"
+    - "*.parquet"
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.mp4"
+    - "*.webp"
+    - "*.avif"
+```
+
+When a file is compressed, the `.yref` records this:
+
+```yaml
+# blobsy — https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+sha256: 7a3f0e...          # hash of the ORIGINAL file (not the compressed blob)
+size: 15728640             # size of the ORIGINAL file
+remote_prefix: sha256/7a3f0e...
+compressed: zstd           # compression used for the remote blob
+compressed_size: 4194304   # size of the compressed blob in remote
+```
+
+The hash is always of the original file — this ensures that `blobsy status` can verify
+integrity by hashing the local file without decompressing anything.
+
+### Ignore Patterns
+
+Same as the main design, now in `.blobsy.yml`:
+
+```yaml
+# .blobsy.yml
+ignore:
+  - "__pycache__/"
+  - "*.pyc"
+  - ".DS_Store"
+  - "node_modules/"
+  - ".git/"
+```
+
+### Backend and Sync Settings
+
+Backend and sync settings live in the repo-root `.blobsy.yml` (or user-global).
+These don't cascade per-directory — a file is pushed to one backend.
+
+```yaml
+# .blobsy.yml (repo root)
 backend: default
 
 backends:
@@ -599,21 +736,60 @@ remote:
   layout: content-addressable    # default | timestamp
 
 sync:
-  tool: auto
+  tool: auto                     # auto | aws-cli | s5cmd | rclone
   parallel: 8
+```
 
-checksum:
-  algorithm: sha256
+### Full Example
+
+A repo with sensible defaults at the root and an override for a data-heavy subdirectory:
+
+```yaml
+# <repo>/.blobsy.yml — repo root
+backend: default
+backends:
+  default:
+    type: s3
+    bucket: my-datasets
+    prefix: my-project/
+    region: us-east-1
+
+externalize:
+  min_size: 1mb
+
+compress:
+  algorithm: zstd
 
 ignore:
   - "__pycache__/"
-  - "*.pyc"
   - ".DS_Store"
 ```
 
-The `namespace.prefix` template concept from the main design is replaced by
-`remote.layout`. There are no branch-based namespaces — the content hash or
-timestamp-commit prefix handles isolation.
+```yaml
+# <repo>/data/raw/.blobsy.yml — override for raw data dir
+externalize:
+  min_size: 0                     # externalize everything here, even small files
+  never: []                       # no exceptions
+
+compress:
+  never:                          # raw data is already compressed
+    - "*.parquet"
+    - "*.gz"
+```
+
+### What This Enables
+
+The combination of per-directory `.blobsy.yml`, externalization rules, and compression
+rules means:
+
+- **`blobsy add <dir>` just works.** No manual per-file decisions. The rules decide
+  what's externalized and what stays in git.
+- **Compression is automatic.** Text-like formats get compressed. Already-compressed
+  formats are left alone. Users don't think about it.
+- **Overrides are local.** A `data/raw/.blobsy.yml` can say "externalize everything,
+  compress nothing" without affecting the rest of the repo.
+- **User defaults travel.** `~/.blobsy.yml` sets your preferred compression algorithm,
+  default ignore patterns, etc. across all repos.
 
 ## Comparison with Main Design and Inline Manifest Alternative
 
@@ -685,17 +861,12 @@ Recommendation: keep it. A ref should be self-contained.
 
 ### Mixed Directories (Some Files in Git, Some in Blobsy)
 
-A directory where some files are small (committed to git) and others are large (tracked
-by blobsy). With per-file refs, this is natural — only the large files get `.yref` files
-and gitignore entries. But:
+Resolved by externalization rules. `blobsy add <dir>` uses `min_size`, `always`, and
+`never` patterns to decide per-file. Small text files stay in git; large binaries get
+`.yref` files. No manual decisions needed.
 
-- The gitignore patterns need to be per-file (not per-directory).
-- `blobsy add` with ignore patterns handles this: files matching ignore patterns are
-  skipped.
-- The user may need to adjust `.gitignore` manually for fine-grained control.
-
-This is essentially the same tradeoff as the main design's Scenario 3, but slightly
-simpler because there's no directory-level pointer to worry about.
+For mixed directories, gitignore entries are per-file (not per-directory), since only
+some files are externalized. `blobsy add` manages these automatically.
 
 ## Summary
 
@@ -713,3 +884,7 @@ Everything else follows:
 - Post-merge gaps and delete semantics are non-issues.
 
 The main tradeoff is gitignore complexity for tracked directories (negation patterns).
+
+Layered `.blobsy.yml` configuration adds automatic externalization (by size and type)
+and compression (by type), so `blobsy add <dir>` makes smart per-file decisions with
+no manual intervention.
