@@ -4,9 +4,9 @@
 
 **Status:** Draft
 
-**Context:** Extracted from [blobsy-design-v3.md](blobsy-design-v3.md) to keep the main
-design focused on the frontend contract (ref files, state model, CLI commands) while
-this document covers how blobs are stored, transferred, and validated on the backend.
+This document covers how blobs are stored, transferred, and validated on the backend.
+See also [blobsy-design.md](blobsy-design.md) for the overall design (ref files, state
+model, CLI commands).
 
 **Contract with the frontend:** The frontend (CLI commands, stat cache, conflict
 detection) interacts with the backend through a simple interface: push a blob by local
@@ -99,7 +99,7 @@ source and destination path.
 
 **Security restriction:** `command` backends from repo-level config require explicit
 trust. See the Security and Trust Model section in the
-[main design](blobsy-design-v3.md#security-and-trust-model).
+[main design](blobsy-design.md#security-and-trust-model).
 
 **Cross-platform limitations:** Command backends run through Node.js `child_process`,
 which uses different shells on different platforms (cmd.exe on Windows, /bin/sh on
@@ -167,7 +167,7 @@ expansion, it is functionally equivalent to a transfer tool -- just specified as
 template rather than a named preset.
 See [Backend Types](#backend-types) for details.
 
-This means blobsy supports three transfer modes in V1:
+This means blobsy supports three transfer modes in the initial release:
 1. **Named tools** (`aws-cli`, `rclone`) -- zero-config for S3-compatible backends.
 2. **Template commands** (`command` backend) -- arbitrary CLI commands, one per file.
    Works with SCP, rsync, curl, or any tool that can copy a file.
@@ -375,7 +375,7 @@ In `--json` mode, the output includes both successful and failed transfers:
 ### Common Error Scenarios
 
 These scenarios must be tested (see the Testing section in the
-[main design](blobsy-design-v3.md#testing)) and should produce helpful error messages:
+[main design](blobsy-design.md#testing)) and should produce helpful error messages:
 
 #### Missing AWS Credentials
 
@@ -591,10 +591,11 @@ With `--json`:
 **Integration with `blobsy doctor`:**
 
 `blobsy doctor` includes health check results in its comprehensive diagnostics (see
-`blobsy doctor` command documentation in the [main design](blobsy-design-v3.md)).
+`blobsy doctor` command documentation in the [main design](blobsy-design.md)).
 
-**V1 implementation note:**
+**Implementation note:**
 
-Health checks are implemented in V1 for S3 and local backends.
-Command backends skip health checks in V1 (deferred to V2) since arbitrary commands may
-not have a safe, side-effect-free health check operation.
+Health checks are implemented in the initial release for S3 and local backends.
+Command backends skip health checks in the initial release (deferred to a future
+version) since arbitrary commands may not have a safe, side-effect-free health check
+operation.

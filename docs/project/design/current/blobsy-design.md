@@ -1,22 +1,15 @@
-# blobsy: Large Object Storage for Git Repos (V3 Consolidated Design)
+# blobsy: Large Object Storage for Git Repos
 
 **Status:** Draft
 
 **Date:** 2026-02-21
 
-**Supersedes:** [blobsy-design-v2.md](blobsy-design-v2.md),
-[blobsy-design.md](blobsy-design.md) (original comprehensive design), and
-[blobsy-git-manifest-alt-design.md](blobsy-git-manifest-alt-design.md) (per-file ref
-architecture). Those documents remain in place for reference.
-
 **Companion documents:**
 
-- [backend-and-transport-design.md](backend-and-transport-design.md) -- backend types,
-  transfer delegation, atomic writes, error handling, health checks
-- [stat-cache-design.md](stat-cache-design.md) -- stat cache entry format, storage
-  layout, three-way merge algorithm, cache update rules, and recovery
-- [conflict-detection-and-resolution.md](conflict-detection-and-resolution.md) --
-  three-layer defense: pre-commit hook, stat cache detection, attribution
+- [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) --
+  backend types, transfer delegation, atomic writes, error handling, health checks
+- [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) -- stat cache entry format,
+  storage layout, three-way merge algorithm, cache update rules, and recovery
 
 A standalone CLI for per-file sync of large files between local gitignored paths and
 remote storage, with committed `.yref` pointer files for tracking.
@@ -62,7 +55,7 @@ Git is the manifest.
 | Concern | Delegated to | Blobsy’s role |
 | --- | --- | --- |
 | Manifest / file tracking | Git (`.yref` files are git-versioned) | Creates and updates `.yref` files |
-| Conflict resolution | Git (standard merge on `.yref` files) | Detects payload-vs-ref desync (see [stat cache](stat-cache-design.md)); git handles `.yref` merges |
+| Conflict resolution | Git (standard merge on `.yref` files) | Detects payload-vs-ref desync (see [stat cache](blobsy-stat-cache-design.md)); git handles `.yref` merges |
 | File transfer | External CLI tools (`aws-cli`, `rclone`) or template commands | Orchestrates concurrency |
 | Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
 | Compression | Node.js built-in `node:zlib` (`zstd`, `gzip`, `brotli`) | Decides what to compress, applies rules |
@@ -70,7 +63,7 @@ Git is the manifest.
 
 8. **Infrastructure neutral:** Pluggable backend (S3, R2, local, custom command),
    configurable transfer tools (aws-cli, rclone, or arbitrary template commands).
-   Compression via Node.js built-in zstd (V1).
+   Compression via Node.js built-in zstd.
 
 9. **One primitive:** The entire system reduces to: one file, one `.yref`, one blob.
    Directories, sync, conflicts, GC -- all follow from this.
@@ -119,7 +112,8 @@ double-execution.
 Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
 files, exits. No background processes, no lock files, no coordination between
 invocations. The only persistent local state is the stat cache (see
-[stat-cache-design.md](stat-cache-design.md)), which is machine-local and gitignored.
+[blobsy-stat-cache-design.md](blobsy-stat-cache-design.md)), which is machine-local and
+gitignored.
 
 This simplicity means blobsy works in any environment (containers, CI runners, remote
 shells) without setup, and never has stale state from a crashed daemon.
@@ -287,7 +281,7 @@ is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 | `{repo_path}` | Repository-relative path | `data/research/model.bin` |
 | `{filename}` | Filename only | `model.bin` |
 | `{dirname}` | Directory path only | `data/research/` |
-| `{git_branch}` (V2) | Current git branch | `main`, `feature/x` |
+| `{git_branch}` (Deferred) | Current git branch | `main`, `feature/x` |
 | `{compress_suffix}` | Compression suffix based on algorithm | `.zst`, `.gz`, `.br`, or empty string |
 
 Any text outside `{...}` is kept as-is (literal prefix/suffix).
@@ -302,7 +296,7 @@ Second resolution allows deduplication of identical content pushed in the same s
 the same path (all three must match: timestamp, content hash, and path).
 
 **Note on `{compress_suffix}`:** Automatically set based on compression configuration.
-V1 defaults to `.zst` (zstd) or empty string (no compression).
+The default is `.zst` (zstd) or empty string (no compression).
 This ensures compressed and uncompressed versions of the same file don’t collide.
 
 **Note on path separators:** All path variables (`{repo_path}`, `{dirname}`) use POSIX
@@ -397,13 +391,14 @@ s3://my-datasets/project-alpha/
 organization. Good for ML model versioning where the same model file appears in many
 contexts.
 
-##### Pattern 3: Branch-Isolated Storage (V2)
+##### Pattern 3: Branch-Isolated Storage (Deferred)
 
 **Separate namespaces per branch, with dedup within each branch.**
 
 **Note:** The `{git_branch}` template variable and branch-isolated storage are deferred
-to V2. V1 supports timestamp+hash (Pattern 1), pure CAS (Pattern 2), and shared storage
-(Pattern 4) only.
+to a future version.
+The initial release supports timestamp+hash (Pattern 1), pure CAS (Pattern 2), and
+shared storage (Pattern 4) only.
 
 ```yaml
 # .blobsy.yml
@@ -500,7 +495,7 @@ Use branch-isolated storage if multiple users push concurrently.
 | **Sortable by age** | Yes (chronological) | No | No | No |
 | **Rename cost** | Re-upload | Free | Free | Re-upload |
 | **Storage growth** | Low-moderate | Minimal | Moderate | High |
-| **Age-based cleanup (V2)** | Easier (GC by date prefix) | Requires full scan | Requires full scan | Requires filtering |
+| **Age-based cleanup (Deferred)** | Easier (GC by date prefix) | Requires full scan | Requires full scan | Requires filtering |
 | **Best for** | General use, balanced needs | Minimum storage cost | Multi-branch workflows | Simple sync, rsync-like |
 
 #### Advanced: Custom Templates
@@ -763,13 +758,13 @@ Different commands read from different git states:
 | `blobsy sync` | Working tree | Yes (with warning) | Yes (sets remote_key if pushing) |
 | `blobsy status` | Both (working tree + HEAD) | Yes | No |
 | `blobsy verify` | Working tree | Yes | No |
-| `blobsy gc` (V2) | HEAD (all branches/tags) | N/A | No |
+| `blobsy gc` (Deferred) | HEAD (all branches/tags) | N/A | No |
 
 **Key principle:** Commands read from **working tree** for current state, compare to
 **HEAD** to determine if committed.
 
-**GC is special (V2):** It reads from HEAD across all branches/tags to determine which
-remote blobs are referenced.
+**GC is special (Deferred):** It reads from HEAD across all branches/tags to determine
+which remote blobs are referenced.
 
 ### Warnings for Uncommitted Refs
 
@@ -882,8 +877,9 @@ The stat cache is **mandatory** for operations that modify `.yref` files (`track
 Uses file-per-entry storage (one JSON file per tracked file) with atomic writes to
 eliminate concurrent-write conflicts between parallel blobsy processes.
 
-See [stat-cache-design.md](stat-cache-design.md) for full design: entry format, storage
-layout, API, three-way merge algorithm, cache update rules, and recovery.
+See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for full design: entry
+format, storage layout, API, three-way merge algorithm, cache update rules, and
+recovery.
 
 ### Future: Remote Staleness Detection via Provider Hashes
 
@@ -894,8 +890,8 @@ provider’s response hash (e.g., ETag, `x-amz-checksum-crc64nvme`) alongside th
 value, the remote file hasn’t changed since last push -- without downloading or
 re-hashing.
 
-This is not needed for V1 -- SHA-256 hashes in `.yref` files handle all verification
-needs.
+This is not needed for the initial release -- SHA-256 hashes in `.yref` files handle all
+verification needs.
 
 ## CLI Commands
 
@@ -946,7 +942,7 @@ blobsy status        # All tracked files in repo
 blobsy sync          # All tracked files in repo
 ```
 
-**No glob patterns in V1:**
+**No glob patterns in the initial release:**
 
 Glob expansion (e.g., `data/*.bin`) is handled by your shell, not by blobsy.
 Use shell globs or pass explicit paths.
@@ -1084,7 +1080,7 @@ blobsy untrack data/model.bin.yref   # Also works (same result)
 | `--recursive` | Required for directory removal |
 
 The user then `git add` + `git commit` to finalize.
-The trash gives `blobsy gc` (V2 feature) a record of which remote blobs were once
+The trash gives `blobsy gc` (Deferred) a record of which remote blobs were once
 referenced.
 
 ### `blobsy rm`
@@ -1152,23 +1148,23 @@ blobsy rm data/model.bin.yref   # Also works (same result)
 1. Default: Move `.yref` to `.blobsy/trash/`, remove from `.gitignore`, delete local
    file
 2. `--local`: Only delete local file (keep tracking and remote)
-3. Remote blobs always left untouched (GC removes them later, see V2 features)
+3. Remote blobs always left untouched (GC removes them later, see deferred features)
 
 **Difference from `blobsy untrack`:**
 - `blobsy rm`: Deletes local file + stops tracking (permanent removal)
 - `blobsy untrack`: Stops tracking, keeps local file (you want to manage it yourself)
 
-**Note on trash command (V2):** The `blobsy trash` command (as a safer alternative to
-`rm` that moves files to a trash directory before deletion) is deferred to V2. V1 only
-provides `blobsy rm` for removing tracked files.
+**Note on trash command (Deferred):** The `blobsy trash` command (as a safer alternative
+to `rm` that moves files to a trash directory before deletion) is deferred to a future
+version. The initial release only provides `blobsy rm` for removing tracked files.
 
-### `blobsy mv` (V1)
+### `blobsy mv`
 
 Rename or move a tracked file.
 This fixes a critical gap: `git mv` only moves the `.yref` but leaves the payload at the
 old location, causing constant drift.
 
-**V1 behavior (files only):**
+**current behavior (files only):**
 
 ```bash
 $ blobsy mv data/model-v1.bin data/model-v2.bin
@@ -1197,14 +1193,15 @@ blobsy mv data/old.bin.yref data/new.bin   # Also works (same result)
 5. Update `.gitignore` (remove source entry, add dest entry)
 6. Preserve `remote_key` in the `.yref` (no re-upload needed)
 
-**Key design decision:** V1 always preserves the `remote_key`. Rationale:
+**Key design decision:** The initial release always preserves the `remote_key`.
+Rationale:
 
 - Content hasn’t changed → no need to re-upload
 - Avoids orphaning blobs at old keys
 - Simpler implementation
 - Works correctly for pure content-addressable templates
 - For path-based templates, the old path is “frozen” in the remote key (acceptable
-  tradeoff for V1)
+  tradeoff for the initial release)
 
 **Multi-user workflow:**
 
@@ -1229,18 +1226,18 @@ $ blobsy mv data/model-v1.bin data/model-v2.bin
 # Now in sync
 ```
 
-**V1 limitations (deferred to V2):**
+**Current limitations (deferred to a future version):**
 
 - No directory moves (only individual files)
 - No `--new-key` flag (always preserves `remote_key`)
 - No automatic move detection on `blobsy pull`
 
-**V2 enhancements:**
+**Deferred enhancements:**
 
 | Feature | Description |
 | --- | --- |
 | `blobsy mv --new-key` | Regenerate `remote_key` based on new path (requires re-upload) |
-| `blobsy mv dir1/ dir2/` | Recursive directory moves (implemented on top of V1 file move) |
+| `blobsy mv dir1/ dir2/` | Recursive directory moves (implemented on top of the initial release’s file move) |
 | Auto-detection | `blobsy pull` detects moved `.yref` files and fixes payload paths automatically |
 
 ### `blobsy sync`
@@ -1271,11 +1268,12 @@ warnings).
    - Verify backend is accessible and credentials are valid
    - Fail fast with clear error if backend is unreachable
    - Skip with `--skip-health-check` flag (advanced use)
-   - See [backend-and-transport-design.md](backend-and-transport-design.md#health-check)
+   - See
+     [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#health-check)
 
 2. **For each `.yref` file**, apply the three-way merge algorithm using the stat cache
-   as merge base. See [stat-cache-design.md](stat-cache-design.md) for the full decision
-   table and per-file sync logic.
+   as merge base. See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for the
+   full decision table and per-file sync logic.
 
    Summary:
    - **Local matches cache, .yref matches cache** -- up to date
@@ -1320,8 +1318,6 @@ Same per-file logic, just filtered to one direction.
 matches the `.yref` hash.
 If the file was modified after `blobsy track`, the push fails with a helpful error.
 Use `--force` to override (updates `.yref` to match current file, then pushes).
-See [conflict-detection-and-resolution.md](conflict-detection-and-resolution.md) for
-full push verification logic.
 
 **Pull behavior on local modifications:** If a local file has been modified (hash
 differs from both ref and remote), pull fails with exit code 2. Use `--force` to
@@ -1352,7 +1348,7 @@ What it does:
 
 No network access. The ref file has everything needed.
 
-**V2 enhancement:** File sizes shown in human-readable format (KB, MB, GB) for all
+**Deferred enhancement:** File sizes shown in human-readable format (KB, MB, GB) for all
 tracked files. Sizes are read from `.yref` metadata, so this remains fully offline.
 
 ### `blobsy stats`
@@ -1402,8 +1398,8 @@ What it does:
 - `--json` - Machine-readable JSON output with per-state breakdowns
 - `--verbose` - Show distribution by directory
 
-**V2 feature:** First introduced in V2. Complements `blobsy status` (per-file detail)
-with aggregate rollup view.
+**Deferred feature:** First introduced in future versions.
+Complements `blobsy status` (per-file detail) with aggregate rollup view.
 
 ### `blobsy verify`
 
@@ -1425,8 +1421,8 @@ For definitive integrity verification.
 ### `blobsy doctor`
 
 Comprehensive diagnostic and health check command.
-**V2 enhancement:** Expanded to include common error detection, troubleshooting advice,
-and integration validation.
+**Deferred enhancement:** Expanded to include common error detection, troubleshooting
+advice, and integration validation.
 
 ```bash
 $ blobsy doctor
@@ -1487,9 +1483,9 @@ No issues detected.
 For detailed help: https://github.com/jlevy/blobsy/docs
 ```
 
-**V1 behavior:** Basic configuration and connectivity checks.
+**Current behavior:** Basic configuration and connectivity checks.
 
-**V2 enhancements:**
+**Deferred enhancements:**
 1. **Comprehensive state overview** - Includes stats rollup (superset of `blobsy stats`)
 2. **Common error detection** - Detects and reports common configuration mistakes:
    - Missing `.gitignore` entries for tracked files
@@ -1555,9 +1551,6 @@ Installed automatically by `blobsy init`. To bypass the hook for a specific comm
 $ git commit --no-verify
 ```
 
-See [conflict-detection-and-resolution.md](conflict-detection-and-resolution.md) for
-hook implementation details and the full pre-commit script.
-
 ### `blobsy check-unpushed`
 
 Find committed `.yref` files whose blobs are missing from remote storage.
@@ -1607,7 +1600,7 @@ SETUP
   blobsy init                          Initialize blobsy in a git repo
   blobsy config [key] [value]          Get/set configuration
   blobsy health                        Check transport backend health (credentials, connectivity)
-  blobsy doctor                        Comprehensive diagnostics and health check (V2: enhanced)
+  blobsy doctor                        Comprehensive diagnostics and health check (Deferred: enhanced)
        [--fix]                       Auto-fix detected issues
   blobsy hooks install|uninstall       Manage pre-commit hook (auto-push on commit)
 
@@ -1615,7 +1608,7 @@ TRACKING
   blobsy track <path>...               Start tracking a file or directory (creates/updates .yref)
   blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .yref to trash)
   blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
-  blobsy mv <source> <dest>            Rename/move tracked file (V1: files only, preserves remote_key)
+  blobsy mv <source> <dest>            Rename/move tracked file (Initial release: files only, preserves remote_key)
 
 SYNC
   blobsy sync [path...]                Bidirectional: track changes, push missing, pull missing
@@ -1623,8 +1616,8 @@ SYNC
        [--force]                     Override hash mismatch (updates .yref to match file)
   blobsy pull [path...]                Download remote blobs to local
        [--force]                     Overwrite local modifications
-  blobsy status [path...]              Show state of all tracked files (○ ◐ ◑ ✓ ~ ? ⊗) (V2: with sizes)
-  blobsy stats                         Show aggregate statistics by state (V2: new command)
+  blobsy status [path...]              Show state of all tracked files (○ ◐ ◑ ✓ ~ ? ⊗) (Deferred: with sizes)
+  blobsy stats                         Show aggregate statistics by state (Deferred: new command)
   blobsy check-unpushed                Find committed .yref files with missing remote blobs
   blobsy pre-push-check                Verify all .yref files have remote blobs (for CI)
 
@@ -1910,10 +1903,10 @@ Key properties:
 - **Authentication:** No custom auth.
   Uses standard credential chains (env vars, AWS profiles, IAM roles, rclone config).
 
-See [backend-and-transport-design.md](backend-and-transport-design.md) for full details:
-backend configuration, S3-compatible endpoint setup, transfer tool selection, command
-template variables, atomic write implementation, error message format (human + JSON),
-all common error scenarios, and health check behavior.
+See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) for
+full details: backend configuration, S3-compatible endpoint setup, transfer tool
+selection, command template variables, atomic write implementation, error message format
+(human + JSON), all common error scenarios, and health check behavior.
 
 ## Per-File State Model
 
@@ -1938,7 +1931,7 @@ Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in re
 | h' | h | yes | **Modified locally** | modified | warns |
 | h' | h | no | **Modified + not pushed** | modified (not pushed) | warns |
 | h | (none) | -- | **Untracked** | (not shown) | (ignored) |
-| (none) | (none) | old | **Orphaned remote** | (not shown) | `gc` candidate (V2) |
+| (none) | (none) | old | **Orphaned remote** | (not shown) | `gc` candidate (Deferred) |
 
 ## Conflict Model
 
@@ -1994,18 +1987,14 @@ Blobsy uses a three-layer defense:
    conflict detection during sync.
    For each file, blobsy compares the local hash, the `.yref` hash, and the cached hash
    (last known state) to determine the correct action.
-   See [stat-cache-design.md](stat-cache-design.md) for the full decision table and
-   algorithm.
+   See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for the full decision
+   table and algorithm.
 
 3. **Attribution (Tertiary):** When a blob is missing from remote storage, error
    messages use git blame to identify who committed the `.yref` without pushing, with
    actionable resolution steps.
 
-See [conflict-detection-and-resolution.md](conflict-detection-and-resolution.md) for
-full design: race condition analysis, pre-commit hook implementation, push sanity
-checks, attribution error messages, and FAQ.
-
-### Single-Writer Model (V1)
+### Single-Writer Model
 
 Blobsy assumes one writer per tracked file at a time.
 This is the common case: each developer works on their own files.
@@ -2071,18 +2060,18 @@ It is committed to git.
 When you `blobsy untrack` a file, the `.yref` is moved here instead of deleted.
 This serves two purposes:
 
-1. **GC paper trail (V2).** `blobsy gc` (V2 feature) can scan `.blobsy/trash/` to find
-   remote blobs that were once tracked but are no longer referenced by any live `.yref`.
-   Without the trash, GC would have to walk the entire git history to discover orphaned
-   blobs.
+1. **GC paper trail (Deferred).** `blobsy gc` (Deferred) can scan `.blobsy/trash/` to
+   find remote blobs that were once tracked but are no longer referenced by any live
+   `.yref`. Without the trash, GC would have to walk the entire git history to discover
+   orphaned blobs.
 
 2. **Undo safety net.** If you untrack something by mistake, the `.yref` is still in
    `.blobsy/trash/` (and in git history).
    You can recover it.
 
-### GC Cleans the Trash (V2)
+### GC Cleans the Trash (Deferred)
 
-`blobsy gc` (V2 feature) removes trash entries whose remote blobs have been cleaned up.
+`blobsy gc` (Deferred) removes trash entries whose remote blobs have been cleaned up.
 Trash entries whose blobs are still referenced by other live `.yref` files on other
 branches are kept until those references are also gone.
 
@@ -2091,7 +2080,7 @@ branches are kept until those references are also gone.
 - **Trash** for soft-deleted refs (see above).
 - **Stat cache** at `.blobsy/stat-cache/` (gitignored, machine-local).
   One JSON file per tracked file.
-  See [stat-cache-design.md](stat-cache-design.md).
+  See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md).
 
 ### What `.blobsy/` Does Not Contain
 
@@ -2372,8 +2361,8 @@ and `blobsy sync` if needed.
 preserved in the remote (until GC removes unreferenced ones).
 Checking out an old commit and running `blobsy pull` works reliably as long as the old
 blobs haven’t been garbage collected.
-In V1, use `blobsy rm` to manually remove blobs you no longer need.
-In V2, `blobsy gc` will provide automatic cleanup with age-based retention.
+In the initial release, use `blobsy rm` to manually remove blobs you no longer need.
+In future versions, `blobsy gc` will provide automatic cleanup with age-based retention.
 
 **Manually edited `.yref` file.** If a user or tool modifies the hash, size, or other
 fields in a ref file, `blobsy status` may show incorrect state.
@@ -2412,7 +2401,7 @@ actual files are gitignored, so `git ls-files` only shows `.yref`s.
 
 For extreme cases, a future option could store `.yref` files in a parallel directory
 (e.g., `data/research.yrefs/`) for cleanliness.
-This is deferred to V2+.
+This is deferred to a future version..
 
 ## Agent and Automation Integration
 
@@ -2601,28 +2590,25 @@ Every error message must:
 - ✓ Link to relevant documentation
 - ✓ Work correctly in both human-readable and `--json` output modes
 
-## V1 Scope
+## Initial Release Scope
 
-**Note:** This document describes the V2 design architecture.
-“V1 Scope” refers to the initial shipping scope implementing this V2 architecture (not
-the older V1 manifest-based design).
-
-### What blobsy does (V1)
+### What blobsy does
 
 - Track files via per-file `.yref` ref files committed to git
 - Content-addressable remote storage with automatic dedup
 - Push/pull/sync with pluggable backends and configurable transfer tools
 - Per-file compression via Node.js built-in zstd/gzip/brotli
 - SHA-256 integrity verification
-- Content-addressable garbage collection (V2 feature)
+- Content-addressable garbage collection (Deferred)
 - Hierarchical `.blobsy.yml` configuration with externalization and compression rules
 - Per-file gitignore management
 - Machine-readable `--json` output for agents
-- `blobsy doctor` for basic diagnostics (V2: enhanced with error detection and auto-fix)
-- `blobsy status` for per-file state (V2: enhanced with file sizes)
+- `blobsy doctor` for basic diagnostics (Deferred: enhanced with error detection and
+  auto-fix)
+- `blobsy status` for per-file state (Deferred: enhanced with file sizes)
 - Full file versioning via git history of `.yref` files
 
-### What blobsy does not do (V1)
+### What blobsy does not do
 
 - Sub-file delta sync (whole-file granularity only)
 - Cross-repo deduplication
@@ -2637,23 +2623,24 @@ the older V1 manifest-based design).
 - Remote staleness detection via provider hashes
 - Web UI
 - Parallel `.yref` directory option (`.yref` files always adjacent to data files)
-- Batched multi-file transfer / transfer engine abstraction (V1 uses per-file
-  concurrency with a pool; V2 adds pluggable `TransferEngine` with batch support)
+- Batched multi-file transfer / transfer engine abstraction (The initial release uses
+  per-file concurrency with a pool; Future versions will add pluggable `TransferEngine`
+  with batch support)
 
 These are candidates for future versions if demand warrants.
 
-### What’s Deferred (V2+)
+### What’s Deferred
 
-- **Transfer engine abstraction.** V1 uses per-file CLI spawning with a concurrency
-  pool. V2 introduces a pluggable `TransferEngine` interface that supports both per-file
-  and batched transfer modes:
+- **Transfer engine abstraction.** The initial release uses per-file CLI spawning with a
+  concurrency pool. Future versions will introduce a pluggable `TransferEngine` interface
+  that supports both per-file and batched transfer modes:
 
   ```typescript
   interface TransferEngine {
-    // Per-file transfer (V1 model, always supported)
+    // Per-file transfer (Initial release model, always supported)
     transferFile(src: string, dest: string): Promise<void>
 
-    // Batch transfer (V2 optimization, optional)
+    // Batch transfer (Deferred optimization, optional)
     transferBatch?(files: Array<{src: string, dest: string}>): Promise<void>
   }
   ```
@@ -2663,8 +2650,8 @@ These are candidates for future versions if demand warrants.
   eliminates per-file process spawn overhead and enables tools like `s5cmd` (batch mode
   via `run` command) and `rclone` (`--files-from` flag) to operate at peak throughput.
 
-- **Additional transfer tool presets.** V1 supports `aws-cli` and `rclone`. V2 adds
-  first-class presets for:
+- **Additional transfer tool presets.** The initial release supports `aws-cli` and
+  `rclone`. Future versions will add first-class presets for:
   - `s5cmd` -- Go-based, fastest for many-file workloads via batch mode.
   - `gcloud` -- native GCS transfers with ADC auth (no HMAC keys).
   - `azcopy` -- native Azure Blob transfers.
@@ -2677,10 +2664,10 @@ These are candidates for future versions if demand warrants.
 
 - **Garbage collection (`blobsy gc`).** Removes remote blobs not referenced by any
   `.yref` file in any reachable git branch or tag.
-  With `blobsy rm` available in V1 for manual cleanup, automatic GC is less critical and
-  is deferred to V2.
+  With `blobsy rm` available in the initial release for manual cleanup, automatic GC is
+  less critical and is deferred to a future version.
 
-  **Safety requirements (V2 design):**
+  **Safety requirements (future versions design):**
 
   - **MUST require explicit safety parameter:** Either `--depth=N` (only scan last N
     commits on each branch) or `--age="duration"` (only remove blobs older than
@@ -2819,7 +2806,7 @@ content-addressable storage.
 | `blobsy-a64l` | R3 P0-2 | Post-merge promotion workflow | **Eliminated.** Content-addressable blobs are not prefix-bound. After merge, `.yref` files on main point to the same blobs that were pushed from the feature branch. No promotion needed. |
 | `blobsy-05j8` | R3 P0-4.2 | Delete semantics contradiction | **Eliminated.** Content-addressable storage never deletes or overwrites during sync. Old blobs remain until GC. No delete flags needed for push/pull. |
 | `blobsy-7h13` | R1 C2, R3 P0-4 | Single-file remote conflict detection | **Eliminated.** No “remote hash Z” needed. `.yref` merge conflicts handled by git. Payload-vs-ref desync detected by stat cache three-way merge (see [Conflict Detection](#conflict-detection)). Content-addressable = concurrent pushes of different content produce different keys (no overwrite). |
-| `blobsy-lsu9` | R3 P0-5 | Compression + transfer mechanics | **Resolved.** File-by-file orchestration (compress -> copy -> cleanup). Transfer tools used as copy engines, not diff engines. No staging directory needed. Compression is V1 via Node.js built-in `node:zlib`. |
+| `blobsy-lsu9` | R3 P0-5 | Compression + transfer mechanics | **Resolved.** File-by-file orchestration (compress -> copy -> cleanup). Transfer tools used as copy engines, not diff engines. No staging directory needed. Compression is supported in the initial release via Node.js built-in `node:zlib`. |
 
 ### Resolved in Spec (Carried Forward)
 
@@ -2828,7 +2815,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
 | `blobsy-suqh` | R1 C3, R3 4.9 | Interactive init contradiction | **Resolved.** `init` is interactive without flags; all sync ops are non-interactive. See Non-Interactive by Default. |
-| `blobsy-br1a` | R1 C4, R3 5 | `blobsy sync` bidirectional danger | **Simplified.** Sync = push missing + pull missing. No delete cascades. No `--strategy` flag in V1. |
+| `blobsy-br1a` | R1 C4, R3 5 | `blobsy sync` bidirectional danger | **Simplified.** Sync = push missing + pull missing. No delete cascades. No `--strategy` flag in the initial release. |
 | `blobsy-jlcn` | R1 M1, R3 4.1 | Pointer field types | **Resolved.** hash = content identifier (sha256:64-char-hex), size = bytes. See Ref File Format. |
 | `blobsy-n23z` | R1 M2 | Format versioning | **Resolved.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. |
 | `blobsy-0a9e` | R1 M3, R3 4.10 | Command backend template variables | **Resolved.** `{local}`, `{remote}`, `{relative_path}`, `{bucket}` specified. See Backend System. |
@@ -2846,9 +2833,9 @@ These issues were resolved in the original spec and remain resolved in this desi
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
-| `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for ALL backends (built-in SDK, external tools, command backends). Blobsy manages atomicity; does not rely on transport. See [backend-and-transport-design.md](backend-and-transport-design.md#atomic-writes). |
+| `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for ALL backends (built-in SDK, external tools, command backends). Blobsy manages atomicity; does not rely on transport. See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#atomic-writes). |
 | `blobsy-vj6p` | R3 4.10 | Security: command execution from repo config | **Addressed.** `command` backends disallowed from repo config by default. See Security and Trust Model. |
-| `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Ordered `sync.tools` list with capability check + fallthrough + `blobsy doctor`. See [backend-and-transport-design.md](backend-and-transport-design.md#transfer-delegation). |
+| `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Ordered `sync.tools` list with capability check + fallthrough + `blobsy doctor`. See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#transfer-delegation). |
 
 ### Eliminated by Architecture Change
 
@@ -2859,16 +2846,16 @@ These issues were resolved in the original spec and remain resolved in this desi
 | `blobsy-p8c4` | R3 4.2 | `stored_as` in manifest | **Eliminated.** No manifests. Compression state stored in `.yref`. |
 | `blobsy-fjqj` | R3 4.7 | Compression skip list in repo config | **Addressed.** Compression rules in `.blobsy.yml`. See Compression Rules. |
 
-### Deferred (P2 / V2)
+### Deferred (P2 / Future Versions)
 
 | Review IDs | Issue | Status |
 | --- | --- | --- |
-| R1 M8 | Dictionary compression | Deferred to V2. |
-| R1 M6 | Export/import specification | Deferred to V2. |
+| R1 M8 | Dictionary compression | Deferred to a future version. |
+| R1 M6 | Export/import specification | Deferred to a future version. |
 | R1 M9 | Team adoption workflow docs | Deferred. |
 | R1 M10, R3 7 | Integration surface (library vs CLI) | Stated: standalone CLI + npm package. |
 | R3 4.8 | Mixed directories: ignore vs include patterns | Resolved by externalization rules. |
-| R1 M11 | `command` backend as integration point | See [backend-and-transport-design.md](backend-and-transport-design.md#backend-types). |
-| R3 5 | s5cmd as future transport engine | Deferred to V2. V1 ships with aws-cli + rclone + template commands. |
+| R1 M11 | `command` backend as integration point | See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#backend-types). |
+| R3 5 | s5cmd as future transport engine | Deferred to a future version. The initial release ships with aws-cli + rclone + template commands. |
 | R1 S6, R3 4.7 | Compression suffix convention | Accepted: `.zst` suffix in remote; compression state in `.yref`. |
 | R3 4.7 | Small-file compression threshold | Built in: `compress.min_size: 100kb` default. |
