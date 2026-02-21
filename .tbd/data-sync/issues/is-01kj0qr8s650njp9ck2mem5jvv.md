@@ -3,9 +3,9 @@ type: is
 id: is-01kj0qr8s650njp9ck2mem5jvv
 title: "Phase 2 Stage 1: CLI Polish (--dry-run, error quality pass, polish golden tests)"
 kind: feature
-status: open
+status: closed
 priority: 1
-version: 8
+version: 10
 spec_path: docs/project/specs/active/plan-2026-02-21-blobsy-phase2-v1-completion.md
 labels: []
 dependencies:
@@ -20,5 +20,7 @@ dependencies:
   - type: blocks
     target: is-01kj0tewwzq18xvwhcnv69z0qc
 created_at: 2026-02-21T18:35:22.274Z
-updated_at: 2026-02-21T19:24:28.620Z
+updated_at: 2026-02-21T19:37:46.406Z
+closed_at: 2026-02-21T19:37:46.404Z
+close_reason: "Phase 2 Stage 1 complete: --dry-run global flag (all mutating commands), --quiet+--verbose validation, error quality pass (BlobsyError with suggestions), 282 golden tests passing"
 ---
