@@ -200,23 +200,38 @@ is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 
 | Variable | Description | Example |
 | --- | --- | --- |
+| `{iso_date_secs}` | ISO timestamp with second resolution, punctuation-free | `20260220T140322Z` |
 | `{content_sha256}` | Full SHA-256 hash (64 chars) | `7a3f0e9b2c1d4e5f...` |
-| `{content_sha256_short}` | Short hash (12 chars) | `7a3f0e9b2c1d` |
+| `{content_sha256_short}` | Short SHA-256 hash (12 chars) | `7a3f0e9b2c1d` |
 | `{repo_path}` | Repository-relative path | `data/research/model.bin` |
 | `{filename}` | Filename only | `model.bin` |
 | `{dirname}` | Directory path only | `data/research/` |
 | `{git_branch}` | Current git branch | `main`, `feature/x` |
+| `{compress_suffix}` | Compression suffix based on algorithm | `.zst`, `.gz`, `.br`, or empty string |
 
 Any text outside `{...}` is kept as-is (literal prefix/suffix).
+
+**Note on `{content_sha256_short}`:** Uses the first 12 hex characters of SHA-256 (48
+bits of entropy). Collision probability is negligible for typical use (birthday paradox:
+~1% chance after 16 million files).
+
+**Note on `{iso_date_secs}`:** Format is `YYYYMMDDTHHMMSSsZ` (e.g., `20260220T140322Z`).
+All punctuation removed for cleaner keys.
+Second resolution allows batch deduplication (files pushed in same second share same
+timestamp).
+
+**Note on `{compress_suffix}`:** Automatically set based on compression configuration.
+V1 defaults to `.zst` (zstd) or empty string (no compression).
+This ensures compressed and uncompressed versions of the same file don’t collide.
 
 #### Common Layout Patterns
 
 Blobsy supports three common patterns out of the box.
 Each optimizes for different needs.
 
-##### Pattern 1: Content-Addressable (Default - Recommended)
+##### Pattern 1: Timestamp + Content Hash (Default - Recommended)
 
-**Maximum deduplication across all branches and paths.**
+**Chronologically sortable with good deduplication and age-based cleanup.**
 
 ```yaml
 # .blobsy.yml
@@ -228,7 +243,49 @@ backends:
     region: us-east-1
 
 remote:
-  key_template: "sha256/{content_sha256}"  # default
+  key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"  # default
+```
+
+**Example remote keys:**
+```
+s3://my-datasets/project-alpha/
+  20260220T140322Z-7a3f0e9b2c1d/data/research/model.bin
+  20260220T140322Z-b4c8d2a1e3f5/data/research/dataset.parquet.zst
+  20260220T140425Z-a1b2c3d4e5f6/results/output.json.zst
+  20260221T093015Z-7a3f0e9b2c1d/data/research/model.bin  # same content, next day = new key
+```
+
+**Properties:**
+- ✅ **Chronologically sortable:** List by age, browse by time period
+- ✅ **Path-browsable:** Can see file paths within each timestamp prefix
+- ✅ **Age-based cleanup:** Easy to delete blobs older than N days
+  (`ls | head -n 100 | xargs rm`)
+- ✅ **Batch deduplication:** Same file pushed in same second with same content = same
+  key
+- ✅ **Content verification:** Hash in key ensures integrity
+- ✅ **Compression-aware:** `.zst` suffix distinguishes compressed from uncompressed
+- ✅ **Intuitive:** Timestamp, hash, and path are all human-readable
+- ⚠️ **Cross-time duplication:** Same content pushed at different times = different keys
+- ⚠️ **Second-level granularity:** Files pushed in different seconds don’t dedupe
+
+**Dedup characteristics:**
+- Same file (same path + same content) pushed **within the same second** = deduplicates
+- Common in build/dataset generation (batch of files created at once)
+- Different times = different keys (trades off some dedup for chronological
+  organization)
+
+**Use when:** You want a balance of organization, deduplication, and age-based
+management. **This is the recommended default** for most teams: intuitive, sortable,
+enables time-based cleanup, and still deduplicates common batch-push scenarios.
+
+##### Pattern 2: Pure Content-Addressable (Maximum Dedup)
+
+**Maximum deduplication across all branches, paths, and time.**
+
+```yaml
+# .blobsy.yml
+remote:
+  key_template: "sha256/{content_sha256}"
 ```
 
 **Example remote keys:**
@@ -240,22 +297,20 @@ s3://my-datasets/project-alpha/
 ```
 
 **Properties:**
-- ✅ **Maximum dedup:** Same content anywhere (any path, any branch) = single copy
+- ✅ **Maximum dedup:** Same content anywhere (any path, any branch, any time) = single
+  copy
 - ✅ **Immutable:** Hash = identity, blobs never overwritten
 - ✅ **Fast renames/moves:** No re-upload needed (hash doesn’t change)
-- ✅ **Simple GC:** Delete blobs whose hash not referenced by any `.yref`
+- ✅ **Minimal storage:** Absolute minimum storage usage
 - ✅ **No post-merge gap:** Feature branch blob = same key as main
-- ⚠️ **Not path-browsable:** Remote shows hashes, not paths
+- ❌ **Not chronologically sortable:** Can’t list by age
+- ❌ **Not browsable:** Remote shows hashes, not paths or timestamps
 
-**Browsability options:**
-- Store filename in S3 object metadata (`x-amz-meta-original-filename`)
-- Add cosmetic filename suffix: `sha256/{content_sha256}---{filename}`
-- Use `.yref` files in git to map hashes to paths
+**Use when:** Storage cost is the primary concern and you don’t need chronological
+organization. Good for ML model versioning where the same model file appears in many
+contexts.
 
-**Use when:** You want minimal storage usage and maximum deduplication.
-Best for production use, cost-sensitive teams, and ML model/dataset versioning.
-
-##### Pattern 2: Branch-Isolated Storage
+##### Pattern 3: Branch-Isolated Storage
 
 **Separate namespaces per branch, with dedup within each branch.**
 
@@ -300,7 +355,7 @@ s3://my-datasets/project-alpha/
 **Use when:** You want clear separation between branches, or are working with
 experimental/temporary branches that should be cleanly removed.
 
-##### Pattern 3: Global Shared Backing Store
+##### Pattern 4: Global Shared Backing Store
 
 **Single flat namespace, last-write-wins semantics (like rsync or network drives).**
 
@@ -346,16 +401,16 @@ Use branch-isolated storage if multiple users push concurrently.
 
 #### Comparison Table
 
-|  | Content-Addressable | Branch-Isolated | Global Shared |
-| --- | --- | --- | --- |
-| **Template** | `sha256/{content_sha256}` | `{git_branch}/sha256/{content_sha256}` | `shared/{repo_path}` |
-| **Dedup** | Maximum (global) | Per-branch | None |
-| **Browsability** | By hash only | By branch, then hash | By path |
-| **Rename cost** | Free (no re-upload) | Free (no re-upload) | Re-upload required |
-| **Branch merges** | Blobs already shared | Blobs in feature namespace | N/A |
-| **Storage growth** | Minimal | Moderate | High (no dedup) |
-| **GC complexity** | Simple (hash-based) | Moderate (branch-aware) | Simple (path-based) |
-| **Best for** | Production, cost-sensitive | Multi-branch workflows | Simple sync, external tools |
+|  | Timestamp+Hash (Default) | Pure CAS | Branch-Isolated | Global Shared |
+| --- | --- | --- | --- | --- |
+| **Template** | `{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}` | `sha256/{content_sha256}` | `{git_branch}/sha256/{content_sha256}` | `shared/{repo_path}` |
+| **Dedup** | Batch (same second + path) | Maximum (global) | Per-branch | None |
+| **Browsability** | By time, then path | By hash only | By branch, then hash | By path |
+| **Sortable by age** | Yes (chronological) | No | No | No |
+| **Rename cost** | Re-upload | Free | Free | Re-upload |
+| **Storage growth** | Low-moderate | Minimal | Moderate | High |
+| **Age-based cleanup** | Very easy (by prefix) | Difficult | Difficult | Requires filtering |
+| **Best for** | General use, balanced needs | Minimum storage cost | Multi-branch workflows | Simple sync, rsync-like |
 
 #### Advanced: Custom Templates
 
@@ -418,7 +473,7 @@ minimize noise in `git diff`.
 format: blobsy-yref/0.1
 sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
-remote_prefix: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+remote_key: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 ```
 
 Fields:
@@ -428,21 +483,28 @@ Fields:
 | `format` | string | Format version (`blobsy-yref/0.1`) |
 | `sha256` | string | 64-char lowercase hex, SHA-256 of the original file content |
 | `size` | integer | File size in bytes |
-| `remote_prefix` | string | Remote prefix where the blob was pushed (set by `blobsy push`). Empty or absent until first push. |
+| `remote_key` | string | Evaluated template key where the blob is stored (relative to bucket and global prefix). Set by `blobsy push`. Empty or absent until first push. |
 
 **Field types and encoding:**
 
 - `sha256`: 64-character lowercase hexadecimal string.
 - `size`: integer, in bytes.
+- `remote_key`: string, the evaluated template result (e.g., `sha256/7a3f0e...` or
+  `main/sha256/7a3f0e...` or `shared/data/model.bin`).
 
 **Format versioning:** The `format` field uses `<name>/<major>.<minor>` versioning
 (e.g., `blobsy-yref/0.1`). Compatibility policy: reject if major version is unsupported;
 warn if minor version is newer than the running blobsy version supports.
 
-**Why `remote_prefix` is in the ref:** Pull needs to know where to find the blob.
-Storing it in the ref means git versions it, and anyone who checks out the ref can pull
-without additional state.
-Push sets this field; it’s empty (or absent) until the first push.
+**Why `remote_key` is in the ref:** Pull needs to know exactly where to find the blob.
+Storing the evaluated key in the ref means git versions it, and anyone who checks out
+the ref can pull without needing to re-evaluate the template or know what template was
+used. Push evaluates the template and sets this field; it’s empty (or absent) until the
+first push.
+
+**Important:** The `remote_key` is the evaluated template result, NOT including the
+bucket or global prefix.
+Full remote path is constructed as: `{bucket}/{global_prefix}/{remote_key}`.
 
 **Why no `updated` timestamp:** Git already tracks when the file changed (`git log`). A
 timestamp in the ref adds no information and creates meaningless diffs.
@@ -457,13 +519,204 @@ When a file is compressed before upload, the `.yref` records this:
 format: blobsy-yref/0.1
 sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
-remote_prefix: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+remote_key: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 compressed: zstd
 compressed_size: 4194304
 ```
 
 The hash is always of the original file -- this ensures `blobsy status` can verify
 integrity by hashing the local file without decompressing anything.
+
+**Compression and remote keys:** If compression affects the stored object (which it
+typically does), the compression suffix should be part of the template to avoid key
+collisions:
+```yaml
+# With compression suffix in template
+key_template: "sha256/{content_sha256}.zst"  # when compressed: zstd is enabled
+# Result: remote_key: sha256/7a3f0e...zst
+```
+
+Alternatively, compression state is recorded in the `.yref` and blobsy handles the
+suffix automatically when constructing the final remote key during upload/download.
+
+## File State Model
+
+Every tracked file has three independent states that determine what actions are needed.
+Blobsy uses a clear symbol system to show these states at a glance.
+
+### Three Orthogonal States
+
+For every tracked file:
+
+1. **Tracked:** Does a `.yref` file exist in the working tree?
+2. **Synced:** Does the remote blob exist (indicated by `remote_key` being set)?
+3. **Committed:** Is the `.yref` file committed to git HEAD?
+
+These three states are independent - a file can be synced but not committed, committed
+but not synced, etc.
+
+### State Symbols
+
+| Symbol | Committed | Synced | Meaning | Next Action |
+| --- | --- | --- | --- | --- |
+| `○` | ✗ | ✗ | Just tracked, needs push and commit | `blobsy push` + `git commit` |
+| `◐` | ✓ | ✗ | Committed but not uploaded | `blobsy push` |
+| `◑` | ✗ | ✓ | Uploaded but not committed | `git commit` |
+| `✓` | ✓ | ✓ | Fully done | None |
+| `~` | - | - | Modified locally (hash changed) | `blobsy track` |
+| `?` | - | - | Missing local file | `blobsy pull` or `blobsy rm` |
+| `⊗` | - | - | Staged for deletion | `git commit` |
+
+**Note on `~` and `?`:** These indicate the local file state, independent of commit/sync
+status.
+
+### State Detection
+
+**Tracked:** `.yref` file exists in working tree.
+
+**Synced:**
+- `.yref` has `remote_key` field set (not empty)
+- Optionally verified: remote blob actually exists at that key
+
+**Committed:**
+```bash
+# Compare working tree .yref to HEAD
+git show HEAD:path/to/file.yref 2>/dev/null | diff - path/to/file.yref
+# No diff = committed, diff = not committed
+```
+
+**Modified:** Local file hash ≠ `.yref` sha256 field.
+
+**Missing:** `.yref` exists but local file doesn’t exist.
+
+**Staged for deletion:** `.yref` in `.blobsy/trash/`, not in working tree.
+
+### Example Status Output
+
+```bash
+$ blobsy status
+
+Tracked files (7):
+  ✓ data/model-v1.bin (committed and synced)
+  ○ data/model-v2.bin (not committed, not synced)
+  ◐ data/dataset.parquet (committed, not synced)
+  ◑ results/output.json (not committed, synced)
+  ~ data/experiment.bin (modified locally)
+  ? data/missing.bin (file missing)
+  ⊗ data/old.bin (staged for deletion)
+
+Summary:
+  1 fully synced (✓)
+  1 needs push (◐)
+  2 need commit (○ ◑)
+  1 modified (~)
+  1 missing (?)
+  1 staged for deletion (⊗)
+
+Actions needed:
+  Run 'blobsy track data/experiment.bin' to update modified file
+  Run 'blobsy push' to sync 1 file (◐)
+  Run 'blobsy pull data/missing.bin' or 'blobsy rm data/missing.bin'
+  Run 'git add -A && git commit' to commit 2 refs and finalize deletion
+```
+
+### State Transitions
+
+**Typical workflow:**
+
+```bash
+# 1. Track a file
+$ blobsy track data/model.bin
+○ data/model.bin (not committed, not synced)
+
+# 2. Push to remote
+$ blobsy push data/model.bin
+◑ data/model.bin (not committed, synced)
+
+# 3. Commit the ref
+$ git add data/model.bin.yref && git commit -m "Track model"
+✓ data/model.bin (committed and synced)
+```
+
+**Alternative workflow (commit first):**
+
+```bash
+# 1. Track
+$ blobsy track data/model.bin
+○ data/model.bin (not committed, not synced)
+
+# 2. Commit first
+$ git add data/model.bin.yref && git commit -m "Track model"
+◐ data/model.bin (committed, not synced)
+
+# 3. Push (updates remote_key in working tree)
+$ blobsy push
+◑ data/model.bin (not committed, synced)
+Note: Updated remote_key in 1 .yref file
+
+# 4. Commit the remote_key update
+$ git commit -am "Update remote_key after push"
+✓ data/model.bin (committed and synced)
+```
+
+### Working Tree vs HEAD Semantics
+
+Different commands read from different git states:
+
+| Command | Reads .yref from | Can operate on uncommitted refs? | Modifies .yref? |
+| --- | --- | --- | --- |
+| `blobsy track` | Working tree | Yes | Yes (updates hash/size) |
+| `blobsy push` | Working tree | Yes (with warning) | Yes (sets remote_key) |
+| `blobsy pull` | Working tree | Yes (with warning) | No |
+| `blobsy sync` | Working tree | Yes (with warning) | Yes (sets remote_key if pushing) |
+| `blobsy status` | Both (working tree + HEAD) | Yes | No |
+| `blobsy verify` | Working tree | Yes | No |
+| `blobsy gc` (V2) | HEAD (all branches/tags) | N/A | No |
+
+**Key principle:** Commands read from **working tree** for current state, compare to
+**HEAD** to determine if committed.
+
+**GC is special (V2):** It reads from HEAD across all branches/tags to determine which
+remote blobs are referenced.
+
+### Warnings for Uncommitted Refs
+
+Commands that modify `.yref` files warn when they’re uncommitted:
+
+```bash
+$ blobsy push
+Warning: Operating on 2 uncommitted .yref files:
+  data/model.bin.yref (new)
+  results/output.json.yref (modified)
+
+Uploading 2 files...
+  ◑ data/model.bin (500 MB)
+  ◑ results/output.json (1.2 MB)
+
+Reminder: Run 'git add -A && git commit' to commit these refs.
+```
+
+### Error States (Inline Warnings)
+
+Rare error conditions are shown as inline warnings, not special symbols:
+
+```bash
+$ blobsy status data/corrupt.bin
+◐ data/corrupt.bin (committed, not synced)
+   ⚠ Warning: remote_key references missing blob
+      Referenced: 20260220T140322Z-abc123/data/corrupt.bin
+      Remote blob not found
+      Run 'blobsy push' to re-upload
+
+$ blobsy verify
+✓ data/model.bin (ok)
+~ data/experiment.bin (modified)
+◐ data/corrupt.bin (committed, not synced)
+   ⚠ Hash mismatch (possible corruption):
+      Expected: abc123...
+      Actual:   def456...
+      Run 'blobsy track' to update ref, or 'blobsy pull --force' to re-download
+```
 
 ## Integrity Model
 
@@ -565,7 +818,7 @@ The cache is never shared across machines -- it is gitignored and machine-local.
 
 One optimization for a future version: after a successful push, blobsy could store the
 provider’s response hash (e.g., ETag, `x-amz-checksum-crc64nvme`) alongside the
-`remote_prefix` in the `.yref`. This enables cheap remote staleness detection: a
+`remote_key` in the `.yref`. This enables cheap remote staleness detection: a
 `HeadObject` request returns the current provider hash, and if it matches the stored
 value, the remote file hasn’t changed since last push -- without downloading or
 re-hashing.
@@ -654,7 +907,7 @@ Updated data/research/model.bin.yref (sha256 changed)
 
 ### `blobsy untrack`
 
-Stop tracking a file or directory.
+Stop tracking a file or directory (keeps local file).
 
 ```bash
 $ blobsy untrack data/bigfile.zip
@@ -662,9 +915,12 @@ Untracked data/bigfile.zip
 Moved data/bigfile.zip.yref -> .blobsy/trash/data/bigfile.zip.yref
 Removed data/bigfile.zip from .gitignore
 (Local file preserved)
+```
 
-# Directory (recursive)
-$ blobsy untrack data/research/
+**Directory untracking (requires `--recursive`):**
+
+```bash
+$ blobsy untrack --recursive data/research/
 Untracked 2 files in data/research/
 Moved data/research/model.bin.yref -> .blobsy/trash/data/research/model.bin.yref
 Moved data/research/raw/data.parquet.yref -> .blobsy/trash/data/research/raw/data.parquet.yref
@@ -672,49 +928,137 @@ Removed 2 entries from .gitignore
 (Local files preserved)
 ```
 
-What it does:
+**Path specifications:**
+
+Both the original file path and `.yref` path are accepted:
+
+```bash
+blobsy untrack data/model.bin        # Works
+blobsy untrack data/model.bin.yref   # Also works (same result)
+```
+
+**What it does:**
 
 1. Move each `.yref` to `.blobsy/trash/` (preserving the path structure).
 2. Remove the gitignore entry.
 3. Leave local files and remote blobs untouched.
 
+**Flags:**
+
+| Flag | Effect |
+| --- | --- |
+| `--recursive` | Required for directory removal |
+
 The user then `git add` + `git commit` to finalize.
-The trash gives `blobsy gc` a record of which remote blobs were once referenced.
+The trash gives `blobsy gc` (V2 feature) a record of which remote blobs were once
+referenced.
+
+### `blobsy rm`
+
+Remove files from blobsy tracking and delete the local file.
+
+**Default behavior (deletes local file):**
+
+```bash
+$ blobsy rm data/old-model.bin
+⊗ data/old-model.bin (staged for deletion)
+
+Moved data/old-model.bin.yref -> .blobsy/trash/data/old-model.bin.yref
+Removed data/old-model.bin from .gitignore
+Deleted local file: data/old-model.bin (500 MB freed)
+
+Next: Run 'git add -A && git commit -m "Remove old-model.bin"'
+```
+
+**With `--local` flag (delete local file only, keep .yref and remote):**
+
+```bash
+$ blobsy rm --local data/large-dataset.parquet
+? data/large-dataset.parquet (file missing)
+
+Deleted local file: data/large-dataset.parquet (2.5 GB freed)
+Kept .yref and remote blob (run 'blobsy pull' to restore)
+
+Use case: Free up local disk space while keeping the file tracked and synced.
+```
+
+**Directory removal (requires `--recursive`):**
+
+```bash
+$ blobsy rm --recursive data/old-experiments/
+Staged for removal (3 files):
+  ⊗ data/old-experiments/model-v1.bin
+  ⊗ data/old-experiments/model-v2.bin
+  ⊗ data/old-experiments/results.csv
+
+Moved 3 .yref files to .blobsy/trash/
+Removed 3 entries from .gitignore
+Deleted 3 local files (1.2 GB freed)
+```
+
+**Path specifications:**
+
+Both the original file path and `.yref` path are accepted:
+
+```bash
+blobsy rm data/model.bin        # Works
+blobsy rm data/model.bin.yref   # Also works (same result)
+```
+
+**Flags:**
+
+| Flag | Effect |
+| --- | --- |
+| (none) | Move .yref to trash, remove from .gitignore, delete local file |
+| `--local` | Delete local file only, keep .yref and remote blob (useful for freeing disk space) |
+| `--recursive` | Required for directory removal |
+
+**What it does:**
+
+1. Default: Move `.yref` to `.blobsy/trash/`, remove from `.gitignore`, delete local
+   file
+2. `--local`: Only delete local file (keep tracking and remote)
+3. Remote blobs always left untouched (GC removes them later, see V2 features)
+
+**Difference from `blobsy untrack`:**
+- `blobsy rm`: Deletes local file + stops tracking (permanent removal)
+- `blobsy untrack`: Stops tracking, keeps local file (you want to manage it yourself)
 
 ### `blobsy sync`
 
 The primary sync command.
-Ensures local files and remote blobs match the committed refs.
+Ensures local files and remote blobs are in sync, automatically tracking changes and
+syncing in both directions.
 
 ```bash
 $ blobsy sync
 Syncing 4 tracked files...
-  data/bigfile.zip                  ok (up to date)
-  data/research/report.md           pushed (4 KB)
-  data/research/raw/response.json   pulled (1.0 MB)
-  data/research/raw/data.parquet    ok (up to date)
-Done. 1 pushed, 1 pulled, 2 up to date.
+  ✓ data/bigfile.zip (committed and synced)
+  ◑ data/research/report.md (not committed, synced) - pushed 4 KB
+  ✓ data/research/raw/response.json (committed and synced) - pulled 1.0 MB
+  ○ data/research/raw/data.parquet (not committed, not synced)
+
+Done: 1 pushed, 1 pulled, 2 up to date
+
+Reminder: 2 .yref files have uncommitted changes. Run 'git add -A && git commit' to commit.
 ```
 
-**Precondition: `.yref` files must be committed to git.** If any `.yref` has uncommitted
-changes, sync errors:
+**Reads from:** Working tree `.yref` files (can operate on uncommitted refs with
+warnings).
 
-```
-Error: data/bigfile.zip.yref has uncommitted changes.
-Run 'git add' and 'git commit' first.
-```
+**Algorithm for each `.yref`:**
 
-Algorithm for each `.yref`:
-
-1. **Read the ref** -- get `sha256`, `size`, `remote_prefix`.
+1. **Read the ref** from working tree -- get `sha256`, `size`, `remote_key`.
 2. **Check local file** -- hash it (using stat cache for speed).
-3. **If local matches ref and remote has the blob:** nothing to do.
-4. **If local matches ref but remote doesn’t have it:** push (upload blob, set
-   `remote_prefix` in ref).
-5. **If local is missing but remote has the blob:** pull (download blob).
-6. **If local differs from ref:** warn -- file was modified locally but ref not updated.
-   Run `blobsy track` to update the ref first.
-   Sync does not overwrite local modifications.
+3. **If local file changed:** update `.yref` with new hash (like `blobsy track`).
+4. **If local matches ref and remote has the blob:** nothing to do (✓).
+5. **If local matches ref but remote doesn’t have it:** push (upload blob, set
+   `remote_key` in ref) (becomes ◑).
+6. **If local is missing but remote has the blob:** pull (download blob).
+7. **If local differs from ref:** update ref, then push (combined track + push).
+
+**Important:** Sync can modify `.yref` files (update hash, set `remote_key`). These
+modifications are in the working tree - user must commit them.
 
 **Transfer mechanics:**
 
@@ -769,7 +1113,7 @@ What it does:
 
 1. Find all `.yref` files in the repo.
 2. For each, compare local file hash against the ref’s `sha256`.
-3. Report: ok, modified, missing, not pushed (no `remote_prefix`).
+3. Report: ok, modified, missing, not pushed (no `remote_key`).
 
 No network access. The ref file has everything needed.
 
@@ -790,55 +1134,15 @@ Verifying 4 tracked files...
 Reads and hashes every file (bypasses stat cache).
 For definitive integrity verification.
 
-### `blobsy gc`
-
-With content-addressable layout (default), GC removes blobs not referenced by any
-`.yref` file on any reachable branch:
-
-```bash
-$ blobsy gc --dry-run
-Scanning refs across all branches...
-Scanning remote blobs...
-  sha256/7a3f0e... referenced by main, feature/x   -> KEEP
-  sha256/b4c8d2... referenced by main               -> KEEP
-  sha256/old123... not referenced                    -> REMOVE (50 MB)
-Would remove: 1 blob, 50 MB
-
-$ blobsy gc
-Removed: sha256/old123.../data/old-file.bin (50 MB)
-Done. 1 blob removed, 50 MB freed.
-```
-
-Algorithm:
-
-1. Collect all `sha256` values from all `.yref` files across all reachable
-   branches/tags.
-2. Scan `.blobsy/trash/` for expired refs.
-3. List all remote objects.
-4. Remove objects whose hash isn’t in the referenced set.
-
-**Safety:**
-
-```bash
-blobsy gc --dry-run              # preview only
-blobsy gc --older-than 30d       # only remove blobs older than 30 days
-```
-
-GC also cleans `.blobsy/trash/` entries whose remote blobs have been removed.
-Trash entries whose blobs are still referenced by live `.yref` files on other branches
-are kept until those references are also gone.
-
-With timestamp-hash layout, GC removes entire prefixes whose git commit is unreachable.
-
 ### `blobsy doctor`
 
 Diagnostic command that prints resolved configuration and detected issues:
 
 ```bash
 $ blobsy doctor
-Backend: s3 (bucket: my-datasets, region: us-east-1)
-Sync tool: aws-cli (detected at /usr/local/bin/aws)
-Remote layout: content-addressable
+Backend: s3 (bucket: my-datasets, prefix: project-v1/, region: us-east-1)
+Sync tools: aws-cli (detected at /usr/local/bin/aws), rclone (not found)
+Key template: sha256/{content_sha256}
 Tracked files: 12 (.yref files found)
 Stat cache: 12 entries, 0 stale
 Issues: none
@@ -865,22 +1169,19 @@ SETUP
   blobsy doctor                        Diagnose configuration and connectivity
 
 TRACKING
-  blobsy track <path>                  Start tracking a file or directory
+  blobsy track <path>                  Start tracking a file or directory (creates/updates .yref)
   blobsy untrack <path>                Stop tracking, move .yref to trash
+  blobsy rm [--delete] <path>          Remove from tracking (optionally delete local file)
 
 SYNC
-  blobsy sync [path...]                Bidirectional: push missing + pull missing
-  blobsy push [path...]                Upload local blobs to remote
+  blobsy sync [path...]                Bidirectional: track changes, push missing, pull missing
+  blobsy push [path...]                Upload local blobs to remote, set remote_key
   blobsy pull [path...]                Download remote blobs to local
        [--force]                     Overwrite local modifications
-  blobsy status [path...]              Show state of all tracked files (offline)
+  blobsy status [path...]              Show state of all tracked files (○ ◐ ◑ ✓ ~ ? ⊗)
 
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
-
-MAINTENANCE
-  blobsy gc [--dry-run]                Remove unreferenced remote blobs
-       [--older-than <duration>]     Only remove blobs older than <duration>
 ```
 
 ### Flags (Global)
@@ -988,7 +1289,7 @@ ignore:
   - ".blobsy.yml"
 
 remote:
-  layout: content-addressable
+  key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"  # default (timestamp+hash)
 
 sync:
   tools: [aws-cli, rclone]        # ordered preference list; first available is used
@@ -1073,11 +1374,13 @@ backends:
   default:
     type: s3
     bucket: my-datasets
-    prefix: project-v1/
+    prefix: project-v1/          # global prefix for all blobs
     region: us-east-1
 
 remote:
-  layout: content-addressable    # default | timestamp
+  key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"  # default (content-addressable)
+  # Or: "{git_branch}/sha256/{content_sha256}"  # branch-isolated
+  # Or: "shared/{repo_path}"                     # global shared
 
 sync:
   tools: [aws-cli, rclone]      # ordered preference list; first available is used
@@ -1097,6 +1400,9 @@ backends:
     bucket: my-datasets
     prefix: my-project/
     region: us-east-1
+
+remote:
+  key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"  # default (timestamp+hash)
 
 externalize:
   min_size: 1mb
@@ -1339,12 +1645,12 @@ Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in re
 | h' | h | yes | **Modified locally** | modified | warns |
 | h' | h | no | **Modified + not pushed** | modified (not pushed) | warns |
 | h | (none) | -- | **Untracked** | (not shown) | (ignored) |
-| (none) | (none) | old | **Orphaned remote** | (not shown) | `gc` candidate |
+| (none) | (none) | old | **Orphaned remote** | (not shown) | `gc` candidate (V2) |
 
 ### Key Invariant
 
 `blobsy sync` only operates on files whose `.yref` is committed to git.
-It never modifies `.yref` files (except to set `remote_prefix` after a successful push).
+It never modifies `.yref` files (except to set `remote_key` after a successful push).
 The user controls the ref via `blobsy track` + `git commit`.
 
 Sync succeeds cleanly when all three layers agree.
@@ -1457,17 +1763,18 @@ It is committed to git.
 When you `blobsy untrack` a file, the `.yref` is moved here instead of deleted.
 This serves two purposes:
 
-1. **GC paper trail.** `blobsy gc` can scan `.blobsy/trash/` to find remote blobs that
-   were once tracked but are no longer referenced by any live `.yref`. Without the
-   trash, GC would have to walk the entire git history to discover orphaned blobs.
+1. **GC paper trail (V2).** `blobsy gc` (V2 feature) can scan `.blobsy/trash/` to find
+   remote blobs that were once tracked but are no longer referenced by any live `.yref`.
+   Without the trash, GC would have to walk the entire git history to discover orphaned
+   blobs.
 
 2. **Undo safety net.** If you untrack something by mistake, the `.yref` is still in
    `.blobsy/trash/` (and in git history).
    You can recover it.
 
-### GC Cleans the Trash
+### GC Cleans the Trash (V2)
 
-`blobsy gc` removes trash entries whose remote blobs have been cleaned up.
+`blobsy gc` (V2 feature) removes trash entries whose remote blobs have been cleaned up.
 Trash entries whose blobs are still referenced by other live `.yref` files on other
 branches are kept until those references are also gone.
 
@@ -1742,7 +2049,8 @@ and `blobsy sync` if needed.
 preserved in the remote (until GC removes unreferenced ones).
 Checking out an old commit and running `blobsy pull` works reliably as long as the old
 blobs haven’t been garbage collected.
-Use `blobsy gc --older-than 30d` to retain history for a reasonable period.
+In V1, use `blobsy rm` to manually remove blobs you no longer need.
+In V2, `blobsy gc` will provide automatic cleanup with age-based retention.
 
 **Manually edited `.yref` file.** If a user or tool modifies the hash, size, or other
 fields in a ref file, `blobsy status` may show incorrect state.
@@ -1833,7 +2141,7 @@ All commands are safe to run repeatedly:
 
 ### Non-Interactive by Default
 
-All sync operations (`push`, `pull`, `sync`, `status`, `verify`, `gc`) are fully
+All sync operations (`push`, `pull`, `sync`, `status`, `verify`) are fully
 non-interactive. They succeed or fail without prompts.
 `--force` for destructive operations.
 `--dry-run` for preview.
@@ -1953,7 +2261,45 @@ These are candidates for future versions if demand warrants.
 - **Parallel `.yref` directory option.** Storing `.yref` files in a parallel directory
   (e.g., `data/research.yrefs/`) instead of adjacent to data files.
 
-- **Advanced GC strategies.** Branch-aware retention policies, age-based remote cleanup.
+- **Garbage collection (`blobsy gc`).** Removes remote blobs not referenced by any
+  `.yref` file in any reachable git branch or tag.
+  With `blobsy rm` available in V1 for manual cleanup, automatic GC is less critical and
+  is deferred to V2.
+
+  **Safety requirements (V2 design):**
+
+  - **MUST require explicit safety parameter:** Either `--depth=N` (only scan last N
+    commits on each branch) or `--age="duration"` (only remove blobs older than
+    specified duration like “7 days” or “30d”).
+  - **MUST support `--dry-run` mode** showing what would be removed before actual
+    deletion.
+  - **Algorithm:**
+    1. Collect all `remote_key` values from `.yref` files across all reachable
+       branches/tags (uses `git for-each-ref` to find all branch and tag refs)
+    2. Apply depth/age limits to determine which commits to scan
+    3. Scan `.blobsy/trash/` for expired refs
+    4. List all objects in remote storage (within configured bucket + global prefix)
+    5. Delete remote objects whose key isn’t in the referenced set
+
+  **Examples:**
+
+  ```bash
+  # Preview what would be removed (required before actual GC)
+  blobsy gc --depth=5 --dry-run
+
+  # Remove blobs not referenced in last 5 commits of any branch
+  blobsy gc --depth=5
+
+  # Remove blobs older than 30 days that aren't referenced
+  blobsy gc --age="30 days"
+
+  # Combine constraints
+  blobsy gc --depth=10 --age="7 days"
+  ```
+
+  **Template-agnostic:** GC works with any key template by examining actual `remote_key`
+  values in `.yref` files, correctly handling content-addressable, branch-isolated,
+  shared, and mixed layouts.
 
 - **Multi-backend routing.** Routing different directories to different backends.
 
