@@ -70,6 +70,15 @@ describe('parseBackendUrl', () => {
 describe('validateBackendUrl', () => {
   it('rejects local path inside repo', () => {
     const parsed = parseBackendUrl('local:./subdir');
-    expect(() => { validateBackendUrl(parsed, '/tmp/repo'); }).toThrow('outside the git repository');
+    expect(() => {
+      validateBackendUrl(parsed, '/tmp/repo');
+    }).toThrow('outside the git repository');
+  });
+
+  it('allows local path outside repo', () => {
+    const parsed = parseBackendUrl('local:../remote');
+    expect(() => {
+      validateBackendUrl(parsed, '/tmp/repo');
+    }).not.toThrow();
   });
 });

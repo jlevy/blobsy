@@ -42,7 +42,10 @@ export function formatJson(data: unknown): string {
 }
 
 /** Format a simple message as JSON. */
-export function formatJsonMessage(message: string, level: 'info' | 'debug' | 'warning' = 'info'): string {
+export function formatJsonMessage(
+  message: string,
+  level: 'info' | 'debug' | 'warning' = 'info',
+): string {
   return formatJson({ message, level });
 }
 
@@ -94,9 +97,9 @@ export function formatTransferSummary(results: TransferResult[]): string {
 export function formatError(error: BlobsyError | Error): string {
   const lines: string[] = [`Error: ${error.message}`];
 
-  if ('suggestions' in error && (error).suggestions) {
+  if ('suggestions' in error && error.suggestions) {
     lines.push('');
-    for (const suggestion of (error).suggestions) {
+    for (const suggestion of error.suggestions) {
       lines.push(`  ${suggestion}`);
     }
   }

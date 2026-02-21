@@ -10,7 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data ../remote
+  mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
 ---
@@ -22,71 +22,83 @@ No tracked files found.
 ? 0
 ```
 
-# Status after tracking (uncommitted, not synced)
+# Track a file then check status
 
 ```console
-$ blobsy track data/model.bin blobsy status
+$ blobsy track data/model.bin
 Tracking data/model.bin
 Created data/model.bin.yref
 Added data/model.bin to .gitignore
-Error: File not found: blobsy
-? 1
+? 0
 ```
 
-# Status after commit (committed, not synced)
-
 ```console
-$ git add -A && git commit -q -m "track model" blobsy status
-error: pathspec 'blobsy' did not match any file(s) known to git
-error: pathspec 'status' did not match any file(s) known to git
-? 1
-```
+$ blobsy status
+  ○  data/model.bin  not pushed
 
-# Status after push (synced but ref not committed with remote_key)
-
-```console
-$ blobsy push data/model.bin blobsy status
-Error: Push not yet implemented (Stage 2).
-? 1
-```
-
-# Status after committing the push (fully synced)
-
-```console
-$ git add -A && git commit -q -m "push model" blobsy status
-error: pathspec 'blobsy' did not match any file(s) known to git
-error: pathspec 'status' did not match any file(s) known to git
-? 1
+1 tracked file
+? 0
 ```
 
 # Status with modified file
 
 ```console
-$ echo "modified content" > data/model.bin blobsy status
+$ echo "modified content" > data/model.bin
+? 0
+```
+
+```console
+$ blobsy status
+  ~  data/model.bin  modified
+
+1 tracked file
 ? 0
 ```
 
 # Status with missing file
 
 ```console
-$ rm data/model.bin blobsy status
-rm: blobsy: No such file or directory
-rm: status: No such file or directory
-? 1
+$ rm data/model.bin
+? 0
 ```
 
-# Status with multiple files in various states
+```console
+$ blobsy status
+  ?  data/model.bin  file missing
+
+1 tracked file
+? 0
+```
+
+# Track another file and check status with multiple files
 
 ```console
-$ echo "hello blobsy" > data/model.bin blobsy track data/dataset.csv blobsy status
+$ echo "hello blobsy" > data/model.bin
+? 0
+```
+
+```console
+$ blobsy track data/dataset.csv
+Tracking data/dataset.csv
+Created data/dataset.csv.yref
+Added data/dataset.csv to .gitignore
+? 0
+```
+
+```console
+$ blobsy status
+  ○  data/dataset.csv  not pushed
+  ○  data/model.bin  not pushed
+
+2 tracked files
 ? 0
 ```
 
 # Status for a specific path
 
 ```console
-$ blobsy status data/model.bin
-  ~  data/model.bin  modified
+$ blobsy status data/dataset.csv
+  ○  data/dataset.csv  not pushed
 
 1 tracked file
 ? 0

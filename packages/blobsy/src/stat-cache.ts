@@ -42,20 +42,14 @@ export async function readCacheEntry(
 }
 
 /** Write a stat cache entry atomically. */
-export async function writeCacheEntry(
-  cacheDir: string,
-  entry: StatCacheEntry,
-): Promise<void> {
+export async function writeCacheEntry(cacheDir: string, entry: StatCacheEntry): Promise<void> {
   const entryPath = getCacheEntryPath(cacheDir, entry.path);
   await ensureDir(dirname(entryPath));
   await writeFile(entryPath, JSON.stringify(entry, null, 2) + '\n');
 }
 
 /** Delete a stat cache entry. */
-export async function deleteCacheEntry(
-  cacheDir: string,
-  relativePath: string,
-): Promise<void> {
+export async function deleteCacheEntry(cacheDir: string, relativePath: string): Promise<void> {
   const entryPath = getCacheEntryPath(cacheDir, relativePath);
   try {
     await unlink(entryPath);
@@ -94,10 +88,7 @@ export async function getCachedHash(
 }
 
 /** Get the merge base hash from cache (for three-way sync). */
-export async function getMergeBase(
-  cacheDir: string,
-  relativePath: string,
-): Promise<string | null> {
+export async function getMergeBase(cacheDir: string, relativePath: string): Promise<string | null> {
   const entry = await readCacheEntry(cacheDir, relativePath);
   return entry?.hash ?? null;
 }

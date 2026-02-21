@@ -5,11 +5,7 @@ import { tmpdir } from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  addGitignoreEntry,
-  readBlobsyBlock,
-  removeGitignoreEntry,
-} from '../src/gitignore.js';
+import { addGitignoreEntry, readBlobsyBlock, removeGitignoreEntry } from '../src/gitignore.js';
 
 describe('gitignore', () => {
   function tmpDir(): string {

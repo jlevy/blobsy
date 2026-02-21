@@ -36,9 +36,7 @@ export function parseBackendUrl(url: string): ParsedBackendUrl {
 
   // Reject query strings and fragments
   if (url.includes('?') || url.includes('#')) {
-    throw new ValidationError(
-      `Backend URL must not contain query strings or fragments: ${url}`,
-    );
+    throw new ValidationError(`Backend URL must not contain query strings or fragments: ${url}`);
   }
 
   // Check for cloud schemes (s3://, gs://, azure://)
@@ -57,29 +55,28 @@ export function parseBackendUrl(url: string): ParsedBackendUrl {
 
   // Bare path without scheme
   if (url.startsWith('/') || url.startsWith('.') || url.startsWith('~')) {
-    throw new ValidationError(
-      `Bare paths are not supported. Did you mean 'local:${url}'?`,
-      [`Use 'local:' prefix for local backends: local:${url}`, ...SCHEME_EXAMPLES],
-    );
+    throw new ValidationError(`Bare paths are not supported. Did you mean 'local:${url}'?`, [
+      `Use 'local:' prefix for local backends: local:${url}`,
+      ...SCHEME_EXAMPLES,
+    ]);
   }
 
   // Unrecognized scheme
   const colonIndex = url.indexOf(':');
   const unknownScheme = colonIndex > 0 ? url.slice(0, colonIndex + 1) : url;
-  throw new ValidationError(
-    `Unrecognized backend URL scheme: ${unknownScheme}`,
-    ['Supported schemes:', ...SCHEME_EXAMPLES],
-  );
+  throw new ValidationError(`Unrecognized backend URL scheme: ${unknownScheme}`, [
+    'Supported schemes:',
+    ...SCHEME_EXAMPLES,
+  ]);
 }
 
 function parseCloudUrl(url: string, scheme: string, type: BackendType): ParsedBackendUrl {
   // s3://bucket/prefix/ or gs://bucket/prefix/ or azure://container/prefix/
   const afterScheme = url.slice(scheme.length + 1); // skip "s3://" -> after "//"
   if (!afterScheme || !url.includes('://')) {
-    throw new ValidationError(
-      `Invalid ${scheme} URL format: ${url}`,
-      [`Expected format: ${scheme}//bucket/prefix/`],
-    );
+    throw new ValidationError(`Invalid ${scheme} URL format: ${url}`, [
+      `Expected format: ${scheme}//bucket/prefix/`,
+    ]);
   }
 
   const pathPart = url.slice(url.indexOf('://') + 3);
@@ -88,15 +85,13 @@ function parseCloudUrl(url: string, scheme: string, type: BackendType): ParsedBa
   if (slashIndex === -1 || slashIndex === pathPart.length - 1) {
     const bucket = slashIndex === -1 ? pathPart : pathPart.slice(0, slashIndex);
     if (slashIndex === -1) {
-      throw new ValidationError(
-        `${scheme} URL requires a prefix after the bucket: ${url}`,
-        [`Example: ${scheme}//${bucket}/my-prefix/`],
-      );
+      throw new ValidationError(`${scheme} URL requires a prefix after the bucket: ${url}`, [
+        `Example: ${scheme}//${bucket}/my-prefix/`,
+      ]);
     }
-    throw new ValidationError(
-      `${scheme} URL requires a non-empty prefix: ${url}`,
-      [`Example: ${scheme}//${bucket}/my-prefix/`],
-    );
+    throw new ValidationError(`${scheme} URL requires a non-empty prefix: ${url}`, [
+      `Example: ${scheme}//${bucket}/my-prefix/`,
+    ]);
   }
 
   const bucket = pathPart.slice(0, slashIndex);
@@ -116,10 +111,10 @@ function parseCloudUrl(url: string, scheme: string, type: BackendType): ParsedBa
 function parseLocalUrl(url: string): ParsedBackendUrl {
   const path = url.slice('local:'.length);
   if (!path || path.trim().length === 0) {
-    throw new ValidationError(
-      'local: URL requires a path.',
-      ['Example: local:../blobsy-remote', 'Example: local:~/blobsy-storage'],
-    );
+    throw new ValidationError('local: URL requires a path.', [
+      'Example: local:../blobsy-remote',
+      'Example: local:~/blobsy-storage',
+    ]);
   }
 
   return { type: 'local', path, originalUrl: url };
@@ -127,9 +122,7 @@ function parseLocalUrl(url: string): ParsedBackendUrl {
 
 function validateBucketName(bucket: string, _type: BackendType, url: string): void {
   if (bucket.length < 3 || bucket.length > 63) {
-    throw new ValidationError(
-      `Bucket name must be 3-63 characters: "${bucket}" in ${url}`,
-    );
+    throw new ValidationError(`Bucket name must be 3-63 characters: "${bucket}" in ${url}`);
   }
 
   if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(bucket)) {

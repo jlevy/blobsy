@@ -28,10 +28,9 @@ export async function readYRef(path: string): Promise<YRef> {
   try {
     parsed = parseYaml(content);
   } catch (err) {
-    throw new ValidationError(
-      `Malformed YAML in .yref file: ${path}: ${(err as Error).message}`,
-      ['Check that the .yref file contains valid YAML.'],
-    );
+    throw new ValidationError(`Malformed YAML in .yref file: ${path}: ${(err as Error).message}`, [
+      'Check that the .yref file contains valid YAML.',
+    ]);
   }
 
   if (typeof parsed !== 'object' || parsed === null) {

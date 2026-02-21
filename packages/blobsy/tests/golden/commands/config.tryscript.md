@@ -15,7 +15,7 @@ before: |
 $ blobsy config
 backends:
   default:
-    url: local:../remote
+    url: local:remote
 ? 0
 ```
 

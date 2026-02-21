@@ -1,9 +1,19 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { defineConfig } from 'tryscript';
+
+// Shared mock remote directory for the entire test suite run.
+// Each test's push creates unique content-addressed keys, so no collision.
+const testRemote = mkdtempSync(join(tmpdir(), 'blobsy-test-remote-'));
 
 export default defineConfig({
   env: {
     NO_COLOR: '1',
     BLOBSY_NO_HOOKS: '1',
+    BLOBSY_BACKEND_URL: `local:${testRemote}`,
+    BLOBSY_TEST_REMOTE: testRemote,
   },
   timeout: 10000,
   patterns: {

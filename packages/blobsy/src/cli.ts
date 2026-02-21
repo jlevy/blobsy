@@ -11,16 +11,11 @@ import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
-import type { Help} from 'commander';
+import type { Help } from 'commander';
 import { Command, Option } from 'commander';
 
 import { parseBackendUrl, validateBackendUrl } from './backend-url.js';
-import {
-  getConfigPath,
-  getExternalizeConfig,
-  resolveConfig,
-  writeConfigFile,
-} from './config.js';
+import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
 import { shouldExternalize } from './externalize.js';
 import {
   formatError,
@@ -44,6 +39,17 @@ import {
   yrefPath,
 } from './paths.js';
 import { readYRef, writeYRef } from './ref.js';
+import {
+  handlePush,
+  handlePull,
+  handleSync,
+  handleHealth,
+  handleDoctor,
+  handleHooks,
+  handleCheckUnpushed,
+  handlePrePushCheck,
+  handleHook,
+} from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
 import { BlobsyError, FILE_STATE_SYMBOLS, YREF_FORMAT, ValidationError } from './types.js';
@@ -57,7 +63,9 @@ function createProgram(): Command {
     .version(getVersion(), '--version', 'Show version number')
     .helpOption('-h, --help', 'Display help for command')
     .addOption(new Option('--json', 'Structured JSON output').hideHelp(false).preset(true))
-    .addOption(new Option('--quiet', 'Suppress all output except errors').hideHelp(false).preset(true))
+    .addOption(
+      new Option('--quiet', 'Suppress all output except errors').hideHelp(false).preset(true),
+    )
     .addOption(new Option('--verbose', 'Detailed progress output').hideHelp(false).preset(true))
     .configureHelp({
       helpWidth: 80,
@@ -446,11 +454,14 @@ async function trackSingleFile(
       return;
     }
 
-    // Hash changed, update
+    // Hash changed, update. Clear remote_key since old key points to old content.
     const newRef: YRef = {
       ...existingRef,
       hash,
       size: fileSize,
+      remote_key: undefined,
+      compressed: undefined,
+      compressed_size: undefined,
     };
     await writeYRef(refPath, newRef);
 
@@ -531,7 +542,9 @@ async function trackDirectory(
       const existingRef = await readYRef(refPath);
       if (existingRef.hash === hash) {
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> already tracked (unchanged)`);
+          console.log(
+            `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> already tracked (unchanged)`,
+          );
         }
         unchanged++;
         continue;
@@ -543,7 +556,9 @@ async function trackDirectory(
       await writeCacheEntry(cacheDir, entry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> updated (hash changed)`);
+        console.log(
+          `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> updated (hash changed)`,
+        );
       }
       tracked++;
     } else {
@@ -554,7 +569,9 @@ async function trackDirectory(
       await writeCacheEntry(cacheDir, entry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> tracked`);
+        console.log(
+          `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> tracked`,
+        );
       }
       tracked++;
     }
@@ -584,9 +601,8 @@ async function handleStatus(
   const repoRoot = findRepoRoot();
 
   // Find all .yref files
-  const targetPaths = paths.length > 0
-    ? paths.map((p) => resolveFilePath(stripYrefExtension(p)))
-    : [repoRoot];
+  const targetPaths =
+    paths.length > 0 ? paths.map((p) => resolveFilePath(stripYrefExtension(p))) : [repoRoot];
 
   const files: { relPath: string; absPath: string; refPath: string }[] = [];
   for (const tp of targetPaths) {
@@ -631,16 +647,18 @@ async function handleStatus(
   }
 
   if (useJson) {
-    console.log(formatJson({
-      files: results.map((r) => ({
-        path: r.path,
-        state: r.state,
-        details: r.details,
-      })),
-      summary: {
-        total: results.length,
-      },
-    }));
+    console.log(
+      formatJson({
+        files: results.map((r) => ({
+          path: r.path,
+          state: r.state,
+          details: r.details,
+        })),
+        summary: {
+          total: results.length,
+        },
+      }),
+    );
   } else {
     for (const r of results) {
       console.log(`  ${r.symbol}  ${r.path}  ${r.details}`);
@@ -690,9 +708,8 @@ async function handleVerify(
   const useJson = Boolean(opts.json) || globalOpts.json;
   const repoRoot = findRepoRoot();
 
-  const targetPaths = paths.length > 0
-    ? paths.map((p) => resolveFilePath(stripYrefExtension(p)))
-    : [repoRoot];
+  const targetPaths =
+    paths.length > 0 ? paths.map((p) => resolveFilePath(stripYrefExtension(p))) : [repoRoot];
 
   const files: { relPath: string; absPath: string; refPath: string }[] = [];
   for (const tp of targetPaths) {
@@ -796,7 +813,11 @@ async function handleUntrack(
   }
 }
 
-async function untrackFile(absPath: string, repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+async function untrackFile(
+  absPath: string,
+  repoRoot: string,
+  globalOpts: GlobalOptions,
+): Promise<void> {
   const relPath = toRepoRelative(absPath, repoRoot);
   const refPath = yrefPath(absPath);
   const fileName = basename(absPath);
@@ -1076,76 +1097,6 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: strin
     current = current[part] as Record<string, unknown>;
   }
   current[parts[parts.length - 1]!] = value;
-}
-
-// Stub handlers for Stage 2 commands
-function handlePush(
-  _paths: string[],
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Push not yet implemented (Stage 2).', 'unknown');
-}
-
-function handlePull(
-  _paths: string[],
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Pull not yet implemented (Stage 2).', 'unknown');
-}
-
-function handleSync(
-  _paths: string[],
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Sync not yet implemented (Stage 2).', 'unknown');
-}
-
-function handleHealth(
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Health not yet implemented (Stage 2).', 'unknown');
-}
-
-function handleDoctor(
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Doctor not yet implemented (Stage 2).', 'unknown');
-}
-
-function handleHooks(
-  _action: string,
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Hooks not yet implemented (Stage 2).', 'unknown');
-}
-
-function handleCheckUnpushed(
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Check-unpushed not yet implemented (Stage 2).', 'unknown');
-}
-
-function handlePrePushCheck(
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): never {
-  throw new BlobsyError('Pre-push-check not yet implemented (Stage 2).', 'unknown');
-}
-
- 
-async function handleHook(
-  _type: string,
-  _opts: Record<string, unknown>,
-  _cmd: Command,
-): Promise<void> {
-  // Stub: exit 0 (no-op hook until push is implemented)
 }
 
 // --- Main ---

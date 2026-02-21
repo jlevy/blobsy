@@ -17,12 +17,15 @@ describe('ref parser', () => {
   it('parses a valid .yref file', async () => {
     const dir = tmpDir();
     const refPath = join(dir, 'test.yref');
-    writeFileSync(refPath, `# blobsy -- https://github.com/jlevy/blobsy
+    writeFileSync(
+      refPath,
+      `# blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
 hash: sha256:${'a'.repeat(64)}
 size: 1024
-`);
+`,
+    );
 
     const ref = await readYRef(refPath);
     expect(ref.format).toBe('blobsy-yref/0.1');
@@ -34,13 +37,16 @@ size: 1024
   it('parses a .yref file with optional fields', async () => {
     const dir = tmpDir();
     const refPath = join(dir, 'test.yref');
-    writeFileSync(refPath, `format: blobsy-yref/0.1
+    writeFileSync(
+      refPath,
+      `format: blobsy-yref/0.1
 hash: sha256:${'b'.repeat(64)}
 size: 2048
 remote_key: sha256/test
 compressed: zstd
 compressed_size: 512
-`);
+`,
+    );
 
     const ref = await readYRef(refPath);
     expect(ref.remote_key).toBe('sha256/test');
@@ -105,10 +111,14 @@ compressed_size: 512
   });
 
   it('rejects unsupported major version', () => {
-    expect(() => { validateFormatVersion('blobsy-yref/2.0'); }).toThrow('Unsupported');
+    expect(() => {
+      validateFormatVersion('blobsy-yref/2.0');
+    }).toThrow('Unsupported');
   });
 
   it('accepts current format version', () => {
-    expect(() => { validateFormatVersion(YREF_FORMAT); }).not.toThrow();
+    expect(() => {
+      validateFormatVersion(YREF_FORMAT);
+    }).not.toThrow();
   });
 });

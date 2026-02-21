@@ -139,9 +139,9 @@ Exit codes: 0 = success, 1 = error, 2 = conflict
 
 #### `cli.ts` -- CLI Entry Point
 
-**Responsibility:** Commander.js entry point. Registers all subcommands, parses global
-flags, dispatches to per-command handlers, manages exit codes, and formats output (human
-or JSON).
+**Responsibility:** Commander.js entry point.
+Registers all subcommands, parses global flags, dispatches to per-command handlers,
+manages exit codes, and formats output (human or JSON).
 
 **Key exports:**
 
@@ -153,30 +153,32 @@ or JSON).
 
 **Design constraints:**
 
-- Fully non-interactive. Missing required args produce usage errors with examples, never
-  prompts.
+- Fully non-interactive.
+  Missing required args produce usage errors with examples, never prompts.
 - Global options: `--json`, `--verbose`, `--help`, `--force`. (`--dry-run` and `--quiet`
   deferred to Stage 3.)
 - Exit codes: 0 = success, 1 = error, 2 = conflict.
 - Path specifications: accept original file path (`data/model.bin`), `.yref` path
-  (`data/model.bin.yref`), or directory path. Normalize by stripping `.yref` suffix.
-- `blobsy track <file>` always externalizes; `blobsy track <dir>` applies externalization
-  rules per-file.
+  (`data/model.bin.yref`), or directory path.
+  Normalize by stripping `.yref` suffix.
+- `blobsy track <file>` always externalizes; `blobsy track <dir>` applies
+  externalization rules per-file.
 - `blobsy track` is idempotent (updates hash if changed, no-op if unchanged).
-- `blobsy push` verifies local hash matches `.yref` hash before upload. `--force`
-  overrides.
+- `blobsy push` verifies local hash matches `.yref` hash before upload.
+  `--force` overrides.
 - `blobsy pull` refuses if local file modified (exit 2). `--force` overrides.
 - `blobsy untrack` and `blobsy rm` on directories require `--recursive`.
 - `blobsy mv`: files only in initial release, always preserves `remote_key`.
 - `blobsy sync` runs health check first (skippable with `--skip-health-check`).
 - JSON output wraps all responses in `{ "schema_version": "0.1", ... }`.
-- Follow tbd's CLI patterns: `BaseCommand` class, `CommandContext` for global options,
+- Follow tbd’s CLI patterns: `BaseCommand` class, `CommandContext` for global options,
   `OutputManager` for dual-mode output, `CLIError` hierarchy, `picocolors` for terminal
   colors, colored help via Commander v14+ `configureHelp()`.
 
 #### `types.ts` -- Shared Type Definitions
 
-**Responsibility:** Central type definitions shared across the codebase. No runtime logic.
+**Responsibility:** Central type definitions shared across the codebase.
+No runtime logic.
 
 **Key exports:**
 
@@ -256,20 +258,21 @@ type ErrorCategory =
 - `YRef` fields use stable key ordering: `format`, `hash`, `size`, `remote_key`,
   `compressed`, `compressed_size`.
 - `hash` format: `sha256:<64-char-lowercase-hex>`.
-- `remote_key` does NOT include bucket or global prefix. Full remote path is
-  `{bucket}/{global_prefix}/{remote_key}`.
+- `remote_key` does NOT include bucket or global prefix.
+  Full remote path is `{bucket}/{global_prefix}/{remote_key}`.
 - Format versioning: reject if major version unsupported; warn if minor is newer.
 
 #### `ref.ts` -- `.yref` File I/O
 
-**Responsibility:** Read and write `.yref` files. Serialize/deserialize YAML with
-self-documenting comment header and stable field ordering.
+**Responsibility:** Read and write `.yref` files.
+Serialize/deserialize YAML with self-documenting comment header and stable field
+ordering.
 
 **Key exports:**
 
 - `readYRef(path: string): Promise<YRef>` -- parse, validate format version.
-- `writeYRef(path: string, ref: YRef): Promise<void>` -- write with comment header, stable
-  ordering, atomic (temp+rename).
+- `writeYRef(path: string, ref: YRef): Promise<void>` -- write with comment header,
+  stable ordering, atomic (temp+rename).
 - `validateFormatVersion(format: string): void` -- reject unsupported major, warn newer
   minor.
 
@@ -301,8 +304,8 @@ subdirectory. Bottom-up resolution.
 
 **Key exports:**
 
-- `resolveConfig(targetPath: string, repoRoot: string): Promise<BlobsyConfig>` -- walk up
-  from target, merge bottom-up.
+- `resolveConfig(targetPath: string, repoRoot: string): Promise<BlobsyConfig>` -- walk
+  up from target, merge bottom-up.
 - `loadConfigFile(filePath: string): Promise<BlobsyConfig>` -- parse single file.
 - `getBuiltinDefaults(): BlobsyConfig` -- hardcoded defaults.
 - `mergeConfigs(base: BlobsyConfig, override: Partial<BlobsyConfig>): BlobsyConfig` --
@@ -312,14 +315,15 @@ subdirectory. Bottom-up resolution.
 
 **Design constraints:**
 
-- Merge semantics: entire value replaced, not deep-merged. If a subdirectory specifies
-  `externalize.always: ["*.parquet"]`, it completely replaces the parent's `always` list.
+- Merge semantics: entire value replaced, not deep-merged.
+  If a subdirectory specifies `externalize.always: ["*.parquet"]`, it completely
+  replaces the parent’s `always` list.
 - Settings affecting remote storage (compression, checksum, `key_template`) must be in
   git-tracked config, not user-global.
 - Hardcoded defaults (compiled into blobsy):
   - `externalize.min_size`: `"1mb"`
-  - `externalize.always`: `["*.parquet", "*.bin", "*.weights", "*.onnx",
-    "*.safetensors", "*.pkl", "*.pt", "*.h5", "*.arrow", "*.sqlite", "*.db"]`
+  - `externalize.always`:
+    `["*.parquet", "*.bin", "*.weights", "*.onnx", "*.safetensors", "*.pkl", "*.pt", "*.h5", "*.arrow", "*.sqlite", "*.db"]`
   - `compress.algorithm`: `"zstd"`, `compress.min_size`: `"100kb"`
   - `remote.key_template`:
     `"{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"`
@@ -329,14 +333,15 @@ subdirectory. Bottom-up resolution.
 
 #### `backend-url.ts` -- Backend URL Parsing
 
-**Responsibility:** Parse backend URLs into structured config. Validate per-scheme rules.
+**Responsibility:** Parse backend URLs into structured config.
+Validate per-scheme rules.
 Reject unrecognized schemes with helpful errors listing supported options.
 
 **Key exports:**
 
 - `parseBackendUrl(url: string): ParsedBackendUrl` -- parse and validate.
-- `validateBackendUrl(parsed: ParsedBackendUrl, repoRoot: string): void` -- runtime checks
-  (local path outside repo, etc.).
+- `validateBackendUrl(parsed: ParsedBackendUrl, repoRoot: string): void` -- runtime
+  checks (local path outside repo, etc.).
 - `formatBackendUrl(parsed: ParsedBackendUrl): string` -- canonical display string.
 
 **Depends on:** `paths.ts`.
@@ -348,10 +353,12 @@ Reject unrecognized schemes with helpful errors listing supported options.
 - Cloud schemes require a non-empty prefix (reject `s3://my-bucket` alone).
 - S3 bucket naming: 3-63 chars, lowercase alphanumeric + hyphens, no leading/trailing
   hyphen.
-- Prefix must not start with `/`, must not contain `//`, `\`, null bytes, or control chars.
-  Trailing slash normalized (always appended internally).
+- Prefix must not start with `/`, must not contain `//`, `\`, null bytes, or control
+  chars. Trailing slash normalized (always appended internally).
 - `local:` paths resolved relative to repo root, not CWD. Must resolve outside repo.
   Tilde expansion supported.
+- `BLOBSY_BACKEND_URL` env var overrides the configured backend URL (useful for testing
+  and CI). Checked by `resolveBackend()` before reading `.blobsy.yml`.
 - Bare paths rejected with hint: `Did you mean 'local:../blobsy-remote'?`
 - Query strings and fragments rejected.
 - Case-insensitive scheme matching.
@@ -359,13 +366,13 @@ Reject unrecognized schemes with helpful errors listing supported options.
 
 #### `hash.ts` -- Content Hashing
 
-**Responsibility:** Compute SHA-256 hashes of file content via streaming. Format as
-`sha256:<64-char-lowercase-hex>`.
+**Responsibility:** Compute SHA-256 hashes of file content via streaming.
+Format as `sha256:<64-char-lowercase-hex>`.
 
 **Key exports:**
 
-- `computeHash(filePath: string): Promise<string>` -- stream file through SHA-256, return
-  formatted hash.
+- `computeHash(filePath: string): Promise<string>` -- stream file through SHA-256,
+  return formatted hash.
 - `hashString(input: string): string` -- hash a string (used by stat cache path
   computation).
 
@@ -373,8 +380,8 @@ Reject unrecognized schemes with helpful errors listing supported options.
 
 **Design constraints:**
 
-- Hash is always of the **original file content** (before compression). This lets
-  `blobsy status` verify integrity without decompression.
+- Hash is always of the **original file content** (before compression).
+  This lets `blobsy status` verify integrity without decompression.
 - Throughput ~400-600 MB/s; negligible overhead relative to network transfer.
 - Deterministic: same content always produces same hash.
 
@@ -399,12 +406,13 @@ stripping/appending, POSIX normalization, stat cache path computation.
 
 **Design constraints:**
 
-- All path variables in remote keys (`{repo_path}`, `{dirname}`) use POSIX forward slashes
-  regardless of OS. Windows backslashes converted.
+- All path variables in remote keys (`{repo_path}`, `{dirname}`) use POSIX forward
+  slashes regardless of OS. Windows backslashes converted.
 - Both `data/model.bin` and `data/model.bin.yref` accepted as input; produce identical
   behavior.
 - Stat cache path: SHA-256 of repo-relative path, first 18 hex chars, 2-char prefix
-  sharding (256 buckets). Example:
+  sharding (256 buckets).
+  Example:
 
 ```typescript
 function getCacheEntryPath(cacheDir: string, relativePath: string): string {
@@ -416,8 +424,8 @@ function getCacheEntryPath(cacheDir: string, relativePath: string): string {
 
 #### `gitignore.ts` -- Gitignore Management
 
-**Responsibility:** Add and remove entries within a clearly marked blobsy-managed block in
-per-directory `.gitignore` files.
+**Responsibility:** Add and remove entries within a clearly marked blobsy-managed block
+in per-directory `.gitignore` files.
 
 **Key exports:**
 
@@ -440,7 +448,7 @@ raw/data.parquet
 # <<< blobsy-managed <<<
 ```
 
-- Entries are paths relative to the `.gitignore` file's directory (not repo-relative).
+- Entries are paths relative to the `.gitignore` file’s directory (not repo-relative).
 - Entries sorted for minimal git diff noise.
 - If no `.gitignore` exists in the target directory, create one.
 - No wildcards, no negation patterns -- explicit per-file entries only.
@@ -449,26 +457,28 @@ raw/data.parquet
 
 #### `externalize.ts` -- Externalization Rules
 
-**Responsibility:** Decide per-file whether to externalize (`.yref` + gitignore) or leave
-in git, based on config rules.
+**Responsibility:** Decide per-file whether to externalize (`.yref` + gitignore) or
+leave in git, based on config rules.
 
 **Key exports:**
 
 - `shouldExternalize(filePath: string, fileSize: number, config: ExternalizeConfig): boolean`.
 - `filterFilesForExternalization(files: Array<{path: string; size: number}>, config: ExternalizeConfig, ignorePatterns: string[]): Array<{path: string; externalize: boolean}>`.
 
-**Depends on:** `types.ts`. Glob matching library (e.g. `picomatch`) for pattern matching.
+**Depends on:** `types.ts`. Glob matching library (e.g. `picomatch`) for pattern
+matching.
 
 **Design constraints:**
 
-- **Explicit file** (`blobsy track data/bigfile.zip`): always externalizes, bypasses rules.
-  The caller (`cli.ts`) handles this distinction.
+- **Explicit file** (`blobsy track data/bigfile.zip`): always externalizes, bypasses
+  rules. The caller (`cli.ts`) handles this distinction.
 - **Directory** (`blobsy track data/research/`): applies rules per-file.
 - Decision logic order: (1) skip files matching `ignore` patterns, (2) check `never`
-  patterns -- if match, keep in git, (3) check `always` patterns -- if match, externalize,
-  (4) compare file size against `min_size`.
+  patterns -- if match, keep in git, (3) check `always` patterns -- if match,
+  externalize, (4) compare file size against `min_size`.
 - Same `.gitignore`-style glob syntax for patterns.
-- Subdirectory config override replaces the parent's pattern lists entirely (not appended).
+- Subdirectory config override replaces the parent’s pattern lists entirely (not
+  appended).
 
 #### `format.ts` -- Output Formatting
 
@@ -482,18 +492,19 @@ transfer summaries, error messages with troubleshooting, and JSON envelopes.
 - `formatTransferSummary(results: TransferResult[]): string`.
 - `formatError(error: BlobsyError): string` -- with troubleshooting suggestions.
 - `formatJson(data: unknown): string` -- wrap in `{ "schema_version": "0.1", ... }`.
-- `formatStatusOutput(files: FileStatus[]): string` -- full status table with summary and
-  actions.
+- `formatStatusOutput(files: FileStatus[]): string` -- full status table with summary
+  and actions.
 
 **Depends on:** `types.ts`.
 
 **Design constraints:**
 
-- State symbols: `○` (new), `◐` (committed not synced), `◑` (synced not committed),
-  `✓` (fully done), `~` (modified), `?` (missing), `⊗` (staged for deletion).
+- State symbols: `○` (new), `◐` (committed not synced), `◑` (synced not committed), `✓`
+  (fully done), `~` (modified), `?` (missing), `⊗` (staged for deletion).
 - JSON output always includes `"schema_version": "0.1"`.
 - Simple commands (track, mv) use `{ "message": "...", "level": "info" }`.
-- Structured commands (status, verify, push/pull, doctor) use richer per-command schemas.
+- Structured commands (status, verify, push/pull, doctor) use richer per-command
+  schemas.
 - Errors always use `{ "error": "...", "type": "..." }`.
 - Error messages include: failed command, exit code, stdout+stderr, error category,
   troubleshooting suggestions.
@@ -504,7 +515,8 @@ transfer summaries, error messages with troubleshooting, and JSON envelopes.
 #### `stat-cache.ts` -- Stat Cache
 
 **Responsibility:** File-per-entry stat cache at `.blobsy/stat-cache/` (gitignored,
-machine-local). Provides fast change detection (avoid re-hashing unchanged files) and the
+machine-local).
+Provides fast change detection (avoid re-hashing unchanged files) and the
 merge base for three-way conflict detection during sync.
 
 **Key exports:**
@@ -515,8 +527,8 @@ merge base for three-way conflict detection during sync.
 - `deleteCacheEntry(cacheDir: string, relativePath: string): Promise<void>`.
 - `getCachedHash(cacheDir: string, relativePath: string, currentStats: FileStats): Promise<string | null>`
   -- returns hash only if size+mtime match (fast path).
-- `getMergeBase(cacheDir: string, relativePath: string): Promise<string | null>` -- returns
-  cached hash regardless of stat (for three-way merge).
+- `getMergeBase(cacheDir: string, relativePath: string): Promise<string | null>` --
+  returns cached hash regardless of stat (for three-way merge).
 - `gcCache(cacheDir: string, trackedFiles: Set<string>): Promise<number>`.
 
 **Depends on:** `node:fs/promises`, `paths.ts` (for `getCacheEntryPath`), `types.ts`.
@@ -525,11 +537,12 @@ merge base for three-way conflict detection during sync.
 
 - Stat comparison: composite key is `size` + `mtimeNs`. Fall back to `size` + `mtimeMs`
   when nanosecond unavailable.
-- `mtimeNs` stored as string (JSON does not support BigInt). Uses
-  `fs.stat(path, { bigint: true })` for nanosecond precision.
-- Cache is mandatory for `track`, `push`, `pull`, `sync`; optional for `status`, `verify`.
-- Never update cache without completing the corresponding operation. If push fails
-  mid-upload, retain old entry.
+- `mtimeNs` stored as string (JSON does not support BigInt).
+  Uses `fs.stat(path, { bigint: true })` for nanosecond precision.
+- Cache is mandatory for `track`, `push`, `pull`, `sync`; optional for `status`,
+  `verify`.
+- Never update cache without completing the corresponding operation.
+  If push fails mid-upload, retain old entry.
 - Directory layout: 2-char prefix sharding, 18-hex-char filename, `.json` extension.
 - Tolerant of corrupt entries (skip on read, overwrite on next write).
 - Three-way merge decision table:
@@ -574,8 +587,9 @@ dev/testing. Same interface as cloud backends.
 
 #### `backend-command.ts` -- Command Template Backend
 
-**Responsibility:** Implement the `command` backend: execute arbitrary shell commands for
-push/pull with template variable expansion. Used by the echo backend test fixture.
+**Responsibility:** Implement the `command` backend: execute arbitrary shell commands
+for push/pull with template variable expansion.
+Used by the echo backend test fixture.
 
 **Key exports:**
 
@@ -590,9 +604,11 @@ push/pull with template variable expansion. Used by the echo backend test fixtur
 - Template variables: `{local}` (absolute local path), `{remote}` (full remote key),
   `{relative_path}` (repo-relative), `{bucket}`.
 - One command invocation per file, up to `sync.parallel` concurrently.
-- On pull: blobsy sets `$BLOBSY_TEMP_OUT` env var pointing to temp file. User template
-  writes there. Blobsy verifies hash and renames on exit 0.
-- Capture both stdout and stderr. Display both on failure.
+- On pull: blobsy sets `$BLOBSY_TEMP_OUT` env var pointing to temp file.
+  User template writes there.
+  Blobsy verifies hash and renames on exit 0.
+- Capture both stdout and stderr.
+  Display both on failure.
 - Exit code 0 = success; non-zero = failure with categorized error.
 - Security: command backends from repo-level `.blobsy.yml` require explicit trust
   (`blobsy trust`). Only allowed from `~/.blobsy.yml` or trusted repos.
@@ -601,8 +617,8 @@ push/pull with template variable expansion. Used by the echo backend test fixtur
 #### `transfer.ts` -- Transfer Coordinator
 
 **Responsibility:** Orchestrate file transfers: select transfer tool, manage concurrency
-pool, delegate to the appropriate backend, handle compression before/after, manage atomic
-writes on pull.
+pool, delegate to the appropriate backend, handle compression before/after, manage
+atomic writes on pull.
 
 **Key exports:**
 
@@ -619,13 +635,15 @@ writes on pull.
 **Design constraints:**
 
 - Push workflow: compress to temp (if applicable) -> upload -> clean up temp.
-- Pull workflow: download to `.blobsy-tmp-*` -> decompress (if compressed) -> verify hash
-  -> atomic rename to final path.
+- Pull workflow: download to `.blobsy-tmp-*` -> decompress (if compressed) -> verify
+  hash -> atomic rename to final path.
 - Concurrency: up to `sync.parallel` (default 8) concurrent transfers.
-- Tool selection: capability check, not just binary existence. Falls through to next tool
-  in the `sync.tools` preference list on failure.
-- Health check runs before bulk transfers. Cached for 60 seconds.
-- Partial failure: continue remaining files, collect all errors, exit code 1 if any failed.
+- Tool selection: capability check, not just binary existence.
+  Falls through to next tool in the `sync.tools` preference list on failure.
+- Health check runs before bulk transfers.
+  Cached for 60 seconds.
+- Partial failure: continue remaining files, collect all errors, exit code 1 if any
+  failed.
 - Blobsy manages atomic downloads for ALL backends (never relies on external tools for
   atomicity).
 - Error categorization: pattern-match on stdout/stderr for auth, network, permission,
@@ -668,7 +686,8 @@ Called during `push` to set `remote_key` in `.yref`.
 #### `compress.ts` -- Compression
 
 **Responsibility:** Compress and decompress files using Node.js built-in `node:zlib`
-(zstd, gzip, brotli). Decide per-file whether to compress based on config rules.
+(zstd, gzip, brotli).
+Decide per-file whether to compress based on config rules.
 
 **Key exports:**
 
@@ -686,7 +705,8 @@ Called during `push` to set `remote_key` in `.yref`.
 - Decision logic mirrors externalize: (1) check `never` patterns, (2) check `always`
   patterns, (3) compare against `min_size`.
 - Algorithms: `zstd` (default), `gzip`, `brotli`, `none`.
-- Minimum Node.js 22.11.0 for zstd.
+- Minimum Node.js 22.15.0 for native zstd (`createZstdCompress`/`createZstdDecompress`
+  in `node:zlib`). Also supported in 23.8.0+ and 24.13.0+.
 - Streaming in-process; no external CLI tools.
 - Hash is always of the original content (not compressed).
 - `.yref` records compression: `compressed: zstd`, `compressed_size: 4194304`.
@@ -699,8 +719,9 @@ Called during `push` to set `remote_key` in `.yref`.
 
 #### `doctor.ts` -- Diagnostics
 
-**Responsibility:** Comprehensive diagnostic and health check. Validates configuration,
-connectivity, repository state, integrity, and git hooks. Auto-fix mode for safe repairs.
+**Responsibility:** Comprehensive diagnostic and health check.
+Validates configuration, connectivity, repository state, integrity, and git hooks.
+Auto-fix mode for safe repairs.
 
 **Key exports:**
 
@@ -722,16 +743,16 @@ connectivity, repository state, integrity, and git hooks. Auto-fix mode for safe
 - Output sections: CONFIGURATION, REPOSITORY STATE, GIT HOOKS, CONNECTIVITY, INTEGRITY
   CHECKS.
 - Detects: missing `.gitignore` entries, orphaned `.gitignore` entries, invalid `.yref`
-  files (malformed YAML, unsupported format), uncommitted refs after push, modified files
-  not re-tracked, stale stat cache entries, missing pre-commit hook.
+  files (malformed YAML, unsupported format), uncommitted refs after push, modified
+  files not re-tracked, stale stat cache entries, missing pre-commit hook.
 - `--fix` safe repairs: add missing `.gitignore` entries, remove orphaned entries, clean
   stale stat cache, install missing hook, remove orphaned `.blobsy-tmp-*` temp files.
 - Connectivity check: test upload/download (write + delete 1 KB test object).
 
 #### `hooks.ts` -- Git Hook Management
 
-**Responsibility:** Install and uninstall the pre-commit hook shim script. Detect existing
-hook managers and provide integration guidance.
+**Responsibility:** Install and uninstall the pre-commit hook shim script.
+Detect existing hook managers and provide integration guidance.
 
 **Key exports:**
 
@@ -754,7 +775,8 @@ hook managers and provide integration guidance.
 exec blobsy hook pre-commit
 ```
 
-- Uses `#!/bin/sh` (POSIX), not bash. `exec` for correct exit code propagation.
+- Uses `#!/bin/sh` (POSIX), not bash.
+  `exec` for correct exit code propagation.
 - Hook manager detection before install:
   1. `lefthook.yml` -> print Lefthook integration instructions.
   2. `.husky/` -> print Husky integration instructions.
@@ -775,55 +797,57 @@ Build the core primitives and all commands that work without a backend.
 
 **Core primitives:**
 
-- [ ] CLI scaffold with Commander.js: all subcommands registered with `--help`
-- [ ] `types.ts`: YRef, BlobsyConfig, FileState, StatCacheEntry
-- [ ] `ref.ts`: Parse/serialize `.yref` files
-- [ ] `config.ts`: Parse `.blobsy.yml`, merge hierarchy, apply defaults
-- [ ] `backend-url.ts`: Parse backend URLs (`s3://`, `local:`, etc.) into config
-- [ ] `hash.ts`: SHA-256 streaming hash
-- [ ] `paths.ts`: Path resolution (file path, `.yref` path, directory expansion)
-- [ ] `gitignore.ts`: Manage blobsy-managed block in `.gitignore`
-- [ ] `externalize.ts`: Apply externalization rules for directory tracking
-- [ ] `format.ts`: State symbols, human-readable sizes, output formatting
+- [x] CLI scaffold with Commander.js: all subcommands registered with `--help`
+- [x] `types.ts`: YRef, BlobsyConfig, FileState, StatCacheEntry
+- [x] `ref.ts`: Parse/serialize `.yref` files
+- [x] `config.ts`: Parse `.blobsy.yml`, merge hierarchy, apply defaults
+- [x] `backend-url.ts`: Parse backend URLs (`s3://`, `local:`, etc.)
+  into config
+- [x] `hash.ts`: SHA-256 streaming hash
+- [x] `paths.ts`: Path resolution (file path, `.yref` path, directory expansion)
+- [x] `gitignore.ts`: Manage blobsy-managed block in `.gitignore`
+- [x] `externalize.ts`: Apply externalization rules for directory tracking
+- [x] `format.ts`: State symbols, human-readable sizes, output formatting
 
 **Commands:**
 
-- [ ] `blobsy --help` (top-level and per-command)
-- [ ] `blobsy init` (create `.blobsy.yml`, install stub pre-commit hook -- hook exits 0
+- [x] `blobsy --help` (top-level and per-command)
+- [x] `blobsy init` (create `.blobsy.yml`, install stub pre-commit hook -- hook exits 0
   until `push` is implemented in Stage 2)
-- [ ] `blobsy track` (single file, directory, idempotent re-track)
-- [ ] `blobsy status` (offline state symbols: `○` `◐` `~` `?` `⊗`; summary and actions.
+- [x] `blobsy track` (single file, directory, idempotent re-track)
+- [x] `blobsy status` (offline state symbols: `○` `◐` `~` `?` `⊗`; summary and actions.
   Symbols requiring push -- `◑` and `✓` -- are exercised in Stage 2 golden tests.)
-- [ ] `blobsy verify` (hash every file, report ok/mismatch/missing)
-- [ ] `blobsy untrack` (move to trash, update gitignore)
-- [ ] `blobsy rm` (delete local, move ref to trash, `--local` variant)
-- [ ] `blobsy mv` (move payload + ref, update gitignore)
-- [ ] `blobsy config` (get/set values)
+- [x] `blobsy verify` (hash every file, report ok/mismatch/missing)
+- [x] `blobsy untrack` (move to trash, update gitignore)
+- [x] `blobsy rm` (delete local, move ref to trash, `--local` variant)
+- [x] `blobsy mv` (move payload + ref, update gitignore)
+- [x] `blobsy config` (get/set values)
 
 **Note:** `--json` is implemented for all commands from Stage 1. `--dry-run` and
 `--quiet` are deferred to Stage 3.
 
 **Unit tests:**
 
-- [ ] `ref-parser.test.ts`: Parse, serialize, round-trip, reject malformed
-- [ ] `config.test.ts`: Parse, merge hierarchy, defaults, invalid config
-- [ ] `backend-url.test.ts`: Parse `s3://`, `gs://`, `azure://`, `local:`, reject invalid
-- [ ] `hash.test.ts`: Known content hash, empty file, format
-- [ ] `gitignore.test.ts`: Add, remove, duplicate prevention, create new
-- [ ] `path-resolution.test.ts`: File, `.yref`, directory, relative/absolute
-- [ ] `externalize.test.ts`: Size threshold, always/never patterns, edge cases
+- [x] `ref-parser.test.ts`: Parse, serialize, round-trip, reject malformed
+- [x] `config.test.ts`: Parse, merge hierarchy, defaults, invalid config
+- [x] `backend-url.test.ts`: Parse `s3://`, `gs://`, `azure://`, `local:`, reject
+  invalid
+- [x] `hash.test.ts`: Known content hash, empty file, format
+- [x] `gitignore.test.ts`: Add, remove, duplicate prevention, create new
+- [x] `path-resolution.test.ts`: File, `.yref`, directory, relative/absolute
+- [x] `externalize.test.ts`: Size threshold, always/never patterns, edge cases
 
 **Golden tests (tryscript):**
 
-- [ ] `commands/help.tryscript.md`
-- [ ] `commands/init.tryscript.md`
-- [ ] `commands/track.tryscript.md`
-- [ ] `commands/status.tryscript.md`
-- [ ] `commands/verify.tryscript.md`
-- [ ] `commands/untrack.tryscript.md`
-- [ ] `commands/rm.tryscript.md`
-- [ ] `commands/mv.tryscript.md`
-- [ ] `commands/config.tryscript.md`
+- [x] `commands/help.tryscript.md`
+- [x] `commands/init.tryscript.md`
+- [x] `commands/track.tryscript.md`
+- [x] `commands/status.tryscript.md`
+- [x] `commands/verify.tryscript.md`
+- [x] `commands/untrack.tryscript.md`
+- [x] `commands/rm.tryscript.md`
+- [x] `commands/mv.tryscript.md`
+- [x] `commands/config.tryscript.md`
 
 ### Stage 2: Backend + Sync Commands
 
@@ -832,59 +856,62 @@ Implement push, pull, sync, and all supporting commands.
 
 **Core modules:**
 
-- [ ] `stat-cache.ts`: Per-file stat cache with three-way merge
-- [ ] `backend-local.ts`: Local filesystem backend
-- [ ] `backend-command.ts`: Command template backend (shell out with variable substitution)
-- [ ] `transfer.ts`: Transfer coordinator with concurrency pool
-- [ ] `template.ts`: Key template evaluation (`{iso_date_secs}`, `{content_sha256}`, etc.)
-- [ ] `compress.ts`: Compression via `node:zlib`
+- [x] `stat-cache.ts`: Per-file stat cache with three-way merge
+- [x] `backend-local.ts`: Local filesystem backend
+- [x] `backend-command.ts`: Command template backend (shell out with variable
+  substitution)
+- [x] `transfer.ts`: Transfer coordinator with concurrency pool
+- [x] `template.ts`: Key template evaluation (`{iso_date_secs}`, `{content_sha256}`,
+  etc.)
+- [x] `compress.ts`: Compression via `node:zlib`
 
 **Commands:**
 
-- [ ] `blobsy push` (upload, verify hash, set remote_key, warn uncommitted)
-- [ ] `blobsy pull` (download, atomic write, refuse if modified)
-- [ ] `blobsy sync` (health check, three-way merge, conflict detection)
-- [ ] `blobsy health` (backend connectivity check)
-- [ ] `blobsy hooks install|uninstall` (manage pre-commit hook; replaces stub from Stage 1)
-- [ ] `blobsy hook pre-commit` (internal: auto-push on commit)
-- [ ] `blobsy doctor` (diagnostics, `--fix`)
-- [ ] `blobsy check-unpushed` (find refs with missing blobs)
-- [ ] `blobsy pre-push-check` (CI-friendly verification)
+- [x] `blobsy push` (upload, verify hash, set remote_key, warn uncommitted)
+- [x] `blobsy pull` (download, atomic write, refuse if modified)
+- [x] `blobsy sync` (health check, three-way merge, conflict detection)
+- [x] `blobsy health` (backend connectivity check)
+- [x] `blobsy hooks install|uninstall` (manage pre-commit hook; replaces stub from Stage
+  1\)
+- [x] `blobsy hook pre-commit` (internal: auto-push on commit)
+- [x] `blobsy doctor` (diagnostics, `--fix`)
+- [x] `blobsy check-unpushed` (find refs with missing blobs)
+- [x] `blobsy pre-push-check` (CI-friendly verification)
 
 **Unit tests:**
 
-- [ ] `stat-cache.test.ts`: Read/write/delete entries, cached hash, merge base, GC
-- [ ] `template.test.ts`: Variable substitution, all template variables, edge cases
+- [x] `stat-cache.test.ts`: Read/write/delete entries, cached hash, merge base, GC
+- [x] `template.test.ts`: Variable substitution, all template variables, edge cases
 
 **Golden tests (tryscript):**
 
-- [ ] `commands/push-pull.tryscript.md`
-- [ ] `commands/sync.tryscript.md`
-- [ ] `commands/doctor.tryscript.md`
-- [ ] `commands/hooks.tryscript.md`
-- [ ] `commands/health.tryscript.md`
-- [ ] `commands/check-unpushed.tryscript.md`
-- [ ] `commands/pre-push-check.tryscript.md`
-- [ ] `echo-backend/push-commands.tryscript.md`
-- [ ] `echo-backend/pull-commands.tryscript.md`
-- [ ] `echo-backend/sync-commands.tryscript.md`
-- [ ] `echo-backend/compression-commands.tryscript.md`
-- [ ] `workflows/fresh-setup.tryscript.md`
-- [ ] `workflows/modify-and-resync.tryscript.md`
-- [ ] `workflows/two-user-conflict.tryscript.md`
-- [ ] `workflows/doctor-fix.tryscript.md`
-- [ ] `workflows/compression.tryscript.md`
-- [ ] `workflows/branch-workflow.tryscript.md`
-- [ ] `workflows/multi-file-sync.tryscript.md`
-- [ ] `errors/conflict-errors.tryscript.md`
-- [ ] `errors/validation-errors.tryscript.md`
-- [ ] `errors/partial-failure.tryscript.md`
-- [ ] `errors/not-found-errors.tryscript.md`
-- [ ] `json/status-json.tryscript.md` (full JSON shape including `◑` and `✓` states)
-- [ ] `json/verify-json.tryscript.md`
-- [ ] `json/push-pull-json.tryscript.md`
-- [ ] `json/sync-json.tryscript.md`
-- [ ] `json/doctor-json.tryscript.md`
+- [x] `commands/push-pull.tryscript.md`
+- [x] `commands/sync.tryscript.md`
+- [x] `commands/doctor.tryscript.md`
+- [x] `commands/hooks.tryscript.md`
+- [x] `commands/health.tryscript.md`
+- [x] `commands/check-unpushed.tryscript.md`
+- [x] `commands/pre-push-check.tryscript.md`
+- [x] `echo-backend/push-commands.tryscript.md`
+- [x] `echo-backend/pull-commands.tryscript.md`
+- [x] `echo-backend/sync-commands.tryscript.md`
+- [x] `echo-backend/compression-commands.tryscript.md`
+- [x] `workflows/fresh-setup.tryscript.md`
+- [x] `workflows/modify-and-resync.tryscript.md`
+- [x] `workflows/two-user-conflict.tryscript.md`
+- [x] `workflows/doctor-fix.tryscript.md`
+- [x] `workflows/compression.tryscript.md`
+- [x] `workflows/branch-workflow.tryscript.md`
+- [x] `workflows/multi-file-sync.tryscript.md`
+- [x] `errors/conflict-errors.tryscript.md`
+- [x] `errors/validation-errors.tryscript.md`
+- [x] `errors/partial-failure.tryscript.md`
+- [x] `errors/not-found-errors.tryscript.md`
+- [x] `json/status-json.tryscript.md` (full JSON shape including `◑` and `✓` states)
+- [x] `json/verify-json.tryscript.md`
+- [x] `json/push-pull-json.tryscript.md`
+- [x] `json/sync-json.tryscript.md`
+- [x] `json/doctor-json.tryscript.md`
 
 ### Stage 3: Polish + Cloud Backend Prep
 

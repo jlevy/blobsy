@@ -4,12 +4,7 @@ import { tmpdir } from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  getBuiltinDefaults,
-  loadConfigFile,
-  mergeConfigs,
-  parseSize,
-} from '../src/config.js';
+import { getBuiltinDefaults, loadConfigFile, mergeConfigs, parseSize } from '../src/config.js';
 
 describe('config', () => {
   function tmpDir(): string {
@@ -27,10 +22,13 @@ describe('config', () => {
   it('loads a valid config file', async () => {
     const dir = tmpDir();
     const configPath = join(dir, '.blobsy.yml');
-    writeFileSync(configPath, `backends:
+    writeFileSync(
+      configPath,
+      `backends:
   default:
     url: local:../remote
-`);
+`,
+    );
 
     const config = await loadConfigFile(configPath);
     expect(config.backends?.default?.url).toBe('local:../remote');

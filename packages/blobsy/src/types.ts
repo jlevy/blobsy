@@ -54,7 +54,7 @@ export type BackendType = 's3' | 'gcs' | 'azure' | 'local' | 'command';
 
 /** Configuration for a single backend. */
 export interface BackendConfig {
-  type: BackendType;
+  type?: BackendType | undefined;
   url?: string | undefined;
   bucket?: string | undefined;
   prefix?: string | undefined;
@@ -69,6 +69,9 @@ export interface BackendConfig {
   /** Shell command template for exists check (command backend) */
   exists_command?: string | undefined;
 }
+
+/** BackendConfig with type resolved (always set after resolveBackend). */
+export type ResolvedBackendConfig = BackendConfig & { type: BackendType };
 
 /** Externalization rules: decide which files to externalize from git. */
 export interface ExternalizeConfig {

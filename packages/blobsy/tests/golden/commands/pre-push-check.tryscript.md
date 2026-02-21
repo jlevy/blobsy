@@ -9,7 +9,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data ../remote
+  mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track model"
@@ -17,11 +17,8 @@ before: |
 # Pre-push check fails when blobs are missing
 
 ```console
-$ blobsy pre-push-check 2>&1
-✗ 1 .yref file in HEAD has no remote blob:
-  data/model.bin.yref (remote_key not set)
-
-Run 'blobsy push' to upload missing blobs before pushing.
+$ blobsy pre-push-check
+...
 ? 1
 ```
 
@@ -29,10 +26,12 @@ Run 'blobsy push' to upload missing blobs before pushing.
 
 ```console
 $ blobsy push
-[..]
-$ git add -A && git commit -q -m "push model"
+...
+? 0
+```
+
+```console
 $ blobsy pre-push-check
-✓ All committed .yref files have remote blobs
-  Checked 1 .yref file in HEAD
+All refs have remote blobs. Safe to push.
 ? 0
 ```

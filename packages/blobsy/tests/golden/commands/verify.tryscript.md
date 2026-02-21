@@ -30,27 +30,56 @@ All files verified.
 # Verify with a modified file
 
 ```console
-$ echo "corrupted" > data/model.bin blobsy verify
+$ echo "corrupted" > data/model.bin
 ? 0
 ```
 
-# Verify with a missing file
-
 ```console
-$ rm data/weights.bin blobsy verify
-rm: blobsy: No such file or directory
-rm: verify: No such file or directory
+$ blobsy verify
+  ✗  data/model.bin  mismatch
+  ✓  data/weights.bin  ok
+
+Verification failed.
 ? 1
 ```
 
-# Verify a single file
+# Verify with a missing file too
 
 ```console
-$ echo "hello blobsy" > data/model.bin blobsy verify data/model.bin
+$ rm data/weights.bin
 ? 0
 ```
 
-# Verify via .yref path (equivalent)
+```console
+$ blobsy verify
+  ✗  data/model.bin  mismatch
+  ✗  data/weights.bin  missing
+
+Verification failed.
+? 1
+```
+
+# Verify a single file (restore model.bin first)
+
+```console
+$ echo "hello blobsy" > data/model.bin
+? 0
+```
+
+```console
+$ blobsy verify data/model.bin
+  ✓  data/model.bin  ok
+
+All files verified.
+? 0
+```
+
+# Verify via .yref path (equivalent) after tampering
+
+```console
+$ echo "tampered" > data/model.bin
+? 0
+```
 
 ```console
 $ blobsy verify data/model.bin.yref

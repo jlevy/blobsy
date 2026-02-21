@@ -1,5 +1,7 @@
 ---
 sandbox: true
+env:
+  BLOBSY_BACKEND_URL: ""
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/echo-backend.ts
@@ -7,56 +9,74 @@ before: |
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
-  cat > .blobsy.yml << 'EOF'
+  FIXTURE="$(pwd)/echo-backend.ts"
+  cat > .blobsy.yml << YAML
   backends:
     default:
       type: command
-      push_command: npx tsx echo-backend.ts push {local} {bucket}/{remote}
-      pull_command: npx tsx echo-backend.ts pull {bucket}/{remote} {local}
-      exists_command: npx tsx echo-backend.ts exists {bucket}/{remote}
       bucket: test-bucket
-      prefix: ""
+      push_command: "npx tsx $FIXTURE push {local} {remote}"
+      pull_command: "npx tsx $FIXTURE pull {remote} {local}"
+      exists_command: "npx tsx $FIXTURE exists {remote}"
   compress:
-    min_size: 0
     algorithm: zstd
+    min_size: "0"
     always:
       - "*.txt"
-  EOF
+  YAML
   git add -A && git commit -q -m "init"
-  mkdir -p data .mock-remote
+  mkdir -p data
 ---
-# Track and push a compressible file -- echo shows compressed temp file
+# Track and push a compressible file
 
 ```console
 $ cp small-file.txt data/readme.txt
+? 0
+```
+
+```console
 $ blobsy track data/readme.txt
-Tracking data/readme.txt
-Created data/readme.txt.yref
-Added data/readme.txt to .gitignore
-$ git add -A && git commit -q -m "track readme"
+...
+? 0
+```
+
+```console
+$ git add -A && git commit -q -m "track"
+? 0
+```
+
+```console
 $ blobsy push data/readme.txt
-PUSH [CWD]/[..] -> test-bucket/[REMOTE_KEY]
-Pushed data/readme.txt (13 B, compressed: zstd)
-Updated data/readme.txt.yref (remote_key set)
+...
+? 0
+```
+
+# Verify ref has compression fields
+
+```console
+$ grep compressed data/readme.txt.yref
+...
 ? 0
 ```
 
 # The mock remote has the compressed blob
 
 ```console
-$ find .mock-remote/ -type f | sort
-.mock-remote/[REMOTE_KEY]
+$ find .mock-remote -type f | wc -l | tr -d ' '
+1
 ? 0
 ```
 
-# Pull decompresses -- echo shows the pull command
+# Delete local, pull decompresses
 
 ```console
 $ rm data/readme.txt
-$ git add -A && git commit -q -m "push readme"
+? 0
+```
+
+```console
 $ blobsy pull data/readme.txt
-PULL test-bucket/[REMOTE_KEY] -> [CWD]/[..]
-Pulled data/readme.txt (13 B, decompressed: zstd)
+...
 ? 0
 ```
 

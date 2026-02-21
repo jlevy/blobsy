@@ -10,7 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data/research ../remote
+  mkdir -p data/research
   cp small-file.txt data/model.bin
   cp another-file.txt data/research/data.bin
   cp small-file.txt data/research/report.bin
@@ -27,28 +27,45 @@ Moved data/model.bin.yref to trash
 ? 0
 ```
 
-# Verify: local file preserved, .yref moved to trash, gitignore updated
+# Verify local file preserved
 
 ```console
-$ cat data/model.bin test -f data/model.bin.yref && echo "exists" || echo "gone" test -f .blobsy/trash/data/model.bin.yref && echo "in trash" || echo "not in trash"
+$ cat data/model.bin
 hello blobsy
-cat: test: No such file or directory
-cat: -f: No such file or directory
-cat: data/model.bin.yref: No such file or directory
-gone test -f .blobsy/trash/data/model.bin.yref
-in trash
 ? 0
 ```
 
-# Untrack via .yref path (equivalent)
+# Verify .yref moved
 
 ```console
-$ blobsy track data/model.bin blobsy untrack data/model.bin.yref
+$ test -f data/model.bin.yref && echo "exists" || echo "gone"
+gone
+? 0
+```
+
+# Verify trash has the ref
+
+```console
+$ ls .blobsy/trash/ | wc -l | tr -d ' '
+[..]
+? 0
+```
+
+# Untrack via .yref path (re-track first)
+
+```console
+$ blobsy track data/model.bin
 Tracking data/model.bin
 Created data/model.bin.yref
 Added data/model.bin to .gitignore
-Error: File not found: blobsy
-? 1
+? 0
+```
+
+```console
+$ blobsy untrack data/model.bin.yref
+Untracked data/model.bin
+Moved data/model.bin.yref to trash
+? 0
 ```
 
 # Untrack directory without --recursive fails
@@ -70,12 +87,17 @@ Moved data/research/report.bin.yref to trash
 ? 0
 ```
 
-# Verify directory untrack
+# Verify directory files preserved after untrack
 
 ```console
-$ test -f data/research/data.bin && echo "file preserved" || echo "file gone" test -f data/research/data.bin.yref && echo "ref exists" || echo "ref gone" find .blobsy/trash/ -type f | sort
+$ test -f data/research/data.bin && echo "file preserved"
 file preserved
-ref exists
+? 0
+```
+
+```console
+$ test -f data/research/data.bin.yref && echo "ref exists" || echo "ref gone"
+ref gone
 ? 0
 ```
 

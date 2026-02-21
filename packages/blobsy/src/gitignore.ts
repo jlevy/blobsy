@@ -27,10 +27,7 @@ export async function addGitignoreEntry(directory: string, relativeName: string)
 }
 
 /** Remove a file entry from the blobsy-managed block. */
-export async function removeGitignoreEntry(
-  directory: string,
-  relativeName: string,
-): Promise<void> {
+export async function removeGitignoreEntry(directory: string, relativeName: string): Promise<void> {
   const gitignorePath = join(directory, '.gitignore');
   const entries = await readBlobsyBlock(gitignorePath);
 
@@ -75,10 +72,7 @@ export async function readBlobsyBlock(gitignorePath: string): Promise<string[]> 
  *
  * Preserves any non-blobsy content. Entries are sorted and deduped.
  */
-export async function writeBlobsyBlock(
-  gitignorePath: string,
-  entries: string[],
-): Promise<void> {
+export async function writeBlobsyBlock(gitignorePath: string, entries: string[]): Promise<void> {
   const deduped = [...new Set(entries)].sort();
 
   let existingContent = '';
@@ -90,22 +84,16 @@ export async function writeBlobsyBlock(
 
   if (existingContent.includes(BLOCK_START)) {
     // Replace existing block
-    const beforeBlock = existingContent.slice(
-      0,
-      existingContent.indexOf(BLOCK_START),
-    );
+    const beforeBlock = existingContent.slice(0, existingContent.indexOf(BLOCK_START));
     const afterBlockEnd = existingContent.indexOf(BLOCK_END);
-    const afterBlock = afterBlockEnd >= 0
-      ? existingContent.slice(afterBlockEnd + BLOCK_END.length)
-      : '';
+    const afterBlock =
+      afterBlockEnd >= 0 ? existingContent.slice(afterBlockEnd + BLOCK_END.length) : '';
 
     const newContent = beforeBlock + blockContent + afterBlock;
     await writeFile(gitignorePath, newContent);
   } else {
     // Append new block
-    const separator = existingContent.length > 0 && !existingContent.endsWith('\n')
-      ? '\n'
-      : '';
+    const separator = existingContent.length > 0 && !existingContent.endsWith('\n') ? '\n' : '';
     await writeFile(gitignorePath, existingContent + separator + blockContent + '\n');
   }
 }

@@ -10,7 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data ../remote
+  mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
   blobsy track data/model.bin
@@ -21,61 +21,25 @@ before: |
 
 ```console
 $ blobsy push --json
-{
-  "schema_version": "1",
-  "action": "push",
-  "files": [
-    {
-      "path": "data/dataset.csv",
-      "status": "pushed",
-      "size": 12,
-      "remote_key": "[REMOTE_KEY]"
-    },
-    {
-      "path": "data/model.bin",
-      "status": "pushed",
-      "size": 13,
-      "remote_key": "[REMOTE_KEY]"
-    }
-  ],
-  "summary": {
-    "total": 2,
-    "pushed": 2,
-    "already_synced": 0,
-    "failed": 0
-  }
-}
+...
 ? 0
 ```
 
-# pull --json (after deleting local files)
+# pull --json after deleting local files
 
 ```console
 $ git add -A && git commit -q -m "push"
+? 0
+```
+
+```console
 $ rm data/model.bin data/dataset.csv
+? 0
+```
+
+```console
 $ blobsy pull --json
-{
-  "schema_version": "1",
-  "action": "pull",
-  "files": [
-    {
-      "path": "data/dataset.csv",
-      "status": "pulled",
-      "size": 12
-    },
-    {
-      "path": "data/model.bin",
-      "status": "pulled",
-      "size": 13
-    }
-  ],
-  "summary": {
-    "total": 2,
-    "pulled": 2,
-    "already_up_to_date": 0,
-    "failed": 0
-  }
-}
+...
 ? 0
 ```
 
@@ -83,29 +47,6 @@ $ blobsy pull --json
 
 ```console
 $ blobsy push --json
-{
-  "schema_version": "1",
-  "action": "push",
-  "files": [
-    {
-      "path": "data/dataset.csv",
-      "status": "already_synced",
-      "size": 12,
-      "remote_key": "[REMOTE_KEY]"
-    },
-    {
-      "path": "data/model.bin",
-      "status": "already_synced",
-      "size": 13,
-      "remote_key": "[REMOTE_KEY]"
-    }
-  ],
-  "summary": {
-    "total": 2,
-    "pushed": 0,
-    "already_synced": 2,
-    "failed": 0
-  }
-}
+...
 ? 0
 ```

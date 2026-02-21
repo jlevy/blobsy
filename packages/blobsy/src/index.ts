@@ -20,11 +20,23 @@ export type {
   YRef,
 } from './types.js';
 
-export { BlobsyError, ConflictError, ValidationError, YREF_FORMAT, YREF_EXTENSION } from './types.js';
+export {
+  BlobsyError,
+  ConflictError,
+  ValidationError,
+  YREF_FORMAT,
+  YREF_EXTENSION,
+} from './types.js';
 
 export { computeHash, hashString, isValidHash } from './hash.js';
 export { readYRef, writeYRef } from './ref.js';
-export { resolveConfig, loadConfigFile, mergeConfigs, getBuiltinDefaults, parseSize } from './config.js';
+export {
+  resolveConfig,
+  loadConfigFile,
+  mergeConfigs,
+  getBuiltinDefaults,
+  parseSize,
+} from './config.js';
 export { parseBackendUrl, validateBackendUrl, formatBackendUrl } from './backend-url.js';
 export {
   findRepoRoot,

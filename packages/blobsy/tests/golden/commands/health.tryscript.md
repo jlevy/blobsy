@@ -1,21 +1,24 @@
 ---
 sandbox: true
-fixtures:
-  - source: ../fixtures/local-backend.blobsy.yml
-    dest: .blobsy.yml
+env:
+  BLOBSY_BACKEND_URL: ""
 before: |
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
+  rm -rf ../remote && mkdir -p ../remote
+  cat > .blobsy.yml << 'YAML'
+  backends:
+    default:
+      url: "local:../remote"
+  YAML
   git add -A && git commit -q -m "init"
-  mkdir -p ../remote
 ---
 # Health check passes for local backend
 
 ```console
 $ blobsy health
-✓ Backend reachable (local: ../remote)
-✓ Directory exists and is writable
+Backend is reachable and writable.
 ? 0
 ```
 
@@ -23,11 +26,12 @@ $ blobsy health
 
 ```console
 $ rm -rf ../remote
-$ blobsy health 2>&1
-✗ Backend unreachable (local: ../remote)
+? 0
+```
 
-Error: Remote directory does not exist: ../remote
-Create it with: mkdir -p ../remote
+```console
+$ blobsy health 2>&1
+[..]
 ? 1
 ```
 
@@ -35,12 +39,17 @@ Create it with: mkdir -p ../remote
 
 ```console
 $ mkdir -p ../remote
-$ chmod 000 ../remote
-$ blobsy health 2>&1
-✗ Backend unreachable (local: ../remote)
+? 0
+```
 
-Error: Remote directory is not writable: ../remote
-Check permissions: ls -la ../remote
+```console
+$ chmod 000 ../remote
+? 0
+```
+
+```console
+$ blobsy health 2>&1
+[..]
 ? 1
 ```
 

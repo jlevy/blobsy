@@ -77,9 +77,7 @@ export async function loadConfigFile(filePath: string): Promise<BlobsyConfig> {
   try {
     content = await readFile(filePath, 'utf-8');
   } catch (err) {
-    throw new ValidationError(
-      `Cannot read config file: ${filePath}: ${(err as Error).message}`,
-    );
+    throw new ValidationError(`Cannot read config file: ${filePath}: ${(err as Error).message}`);
   }
 
   let parsed: unknown;
@@ -125,10 +123,7 @@ export function mergeConfigs(base: BlobsyConfig, override: Partial<BlobsyConfig>
  * Walk up from target path, find all .blobsy.yml files, merge bottom-up.
  * Resolution order: built-in defaults <- ~/.blobsy.yml <- repo-root <- ... <- target dir
  */
-export async function resolveConfig(
-  targetPath: string,
-  repoRoot: string,
-): Promise<BlobsyConfig> {
+export async function resolveConfig(targetPath: string, repoRoot: string): Promise<BlobsyConfig> {
   let config = getBuiltinDefaults();
 
   // User-global config
@@ -207,10 +202,27 @@ export function parseSize(size: string | number): number {
 
 /** Get the effective externalize config, using defaults if not specified. */
 export function getExternalizeConfig(config: BlobsyConfig): ExternalizeConfig {
-  return config.externalize ?? getBuiltinDefaults().externalize!;
+  const defaults = getBuiltinDefaults().externalize!;
+  if (!config.externalize) {
+    return defaults;
+  }
+  return {
+    min_size: config.externalize.min_size ?? defaults.min_size,
+    always: config.externalize.always ?? defaults.always,
+    never: config.externalize.never ?? defaults.never,
+  };
 }
 
 /** Get the effective compress config, using defaults if not specified. */
 export function getCompressConfig(config: BlobsyConfig): CompressConfig {
-  return config.compress ?? getBuiltinDefaults().compress!;
+  const defaults = getBuiltinDefaults().compress!;
+  if (!config.compress) {
+    return defaults;
+  }
+  return {
+    algorithm: config.compress.algorithm ?? defaults.algorithm,
+    min_size: config.compress.min_size ?? defaults.min_size,
+    always: config.compress.always ?? defaults.always,
+    never: config.compress.never ?? defaults.never,
+  };
 }

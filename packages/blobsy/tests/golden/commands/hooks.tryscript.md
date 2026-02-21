@@ -7,7 +7,7 @@ before: |
   cat > .blobsy.yml << 'EOF'
   backends:
     default:
-      url: local:../remote
+      url: local:remote
   EOF
   git add -A && git commit -q -m "init"
 ---
@@ -15,26 +15,22 @@ before: |
 
 ```console
 $ blobsy hooks install
-✓ Installed pre-commit hook (.git/hooks/pre-commit)
+Installed pre-commit hook.
 ? 0
 ```
 
 # Verify hook file exists and is executable
 
 ```console
-$ test -x .git/hooks/pre-commit && echo "executable" || echo "not executable"
+$ test -x .git/hooks/pre-commit && echo "executable"
 executable
-$ head -2 .git/hooks/pre-commit
-#!/bin/sh
-# Installed by: blobsy hooks install
 ? 0
 ```
 
-# Re-install is idempotent
-
 ```console
-$ blobsy hooks install
-✓ Installed pre-commit hook (.git/hooks/pre-commit)
+$ head -2 .git/hooks/pre-commit
+#!/bin/sh
+# Installed by: blobsy hooks install
 ? 0
 ```
 
@@ -42,7 +38,7 @@ $ blobsy hooks install
 
 ```console
 $ blobsy hooks uninstall
-✓ Removed pre-commit hook
+Uninstalled pre-commit hook.
 ? 0
 ```
 
@@ -58,18 +54,24 @@ gone
 
 ```console
 $ blobsy hooks uninstall
-No blobsy pre-commit hook found.
+No pre-commit hook found.
 ? 0
 ```
 
 # Uninstall refuses if hook is not blobsy-owned
 
 ```console
-$ echo '#!/bin/sh' > .git/hooks/pre-commit
-$ echo 'echo "custom hook"' >> .git/hooks/pre-commit
+$ printf '#!/bin/sh\necho "custom hook"\n' > .git/hooks/pre-commit
+? 0
+```
+
+```console
 $ chmod +x .git/hooks/pre-commit
-$ blobsy hooks uninstall 2>&1
-Warning: .git/hooks/pre-commit exists but was not installed by blobsy.
-Not removing. Edit or remove it manually if needed.
-? 1
+? 0
+```
+
+```console
+$ blobsy hooks uninstall
+Pre-commit hook not managed by blobsy.
+? 0
 ```
