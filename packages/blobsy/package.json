@@ -41,11 +41,11 @@
     "publint": "publint",
     "prepack": "pnpm build"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.0.18",
     "publint": "^0.3.17",
+    "tryscript": "^0.1.6",
     "tsdown": "^0.20.3",
     "vitest": "^4.0.18"
   }
