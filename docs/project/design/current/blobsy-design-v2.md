@@ -71,6 +71,15 @@ Git is the manifest.
     It cares about the contract: a `.yref` file points to a blob, and the blob must be
     reachable. Everything else is pluggable.
 
+11. **Deterministic by design:** Blobsy operations are predictable and reproducible.
+    Same content produces same hash.
+    Same configuration produces same remote keys.
+    `.yref` files use stable field ordering to minimize git diff noise.
+    Content-addressable storage ensures multiple users pushing identical content produce
+    identical remote blobs.
+    This determinism enables reliable team collaboration, reproducible builds, and
+    predictable storage costs.
+
 ## Related Work
 
 A survey of existing tools shows no single solution cleanly fills this role.
@@ -213,16 +222,23 @@ Any text outside `{...}` is kept as-is (literal prefix/suffix).
 
 **Note on `{content_sha256_short}`:** Uses the first 12 hex characters of SHA-256 (48
 bits of entropy). Collision probability is negligible for typical use (birthday paradox:
-~1% chance after 16 million files).
+~1% chance after ~2.4 million files, ~50% chance after ~17 million files).
 
-**Note on `{iso_date_secs}`:** Format is `YYYYMMDDTHHMMSSsZ` (e.g., `20260220T140322Z`).
+**Note on `{iso_date_secs}`:** Format is `YYYYMMDDTHHMMSSZ` (e.g., `20260220T140322Z`).
 All punctuation removed for cleaner keys.
-Second resolution allows batch deduplication (files pushed in same second share same
-timestamp).
+Second resolution allows deduplication of identical content pushed in the same second to
+the same path (all three must match: timestamp, content hash, and path).
 
 **Note on `{compress_suffix}`:** Automatically set based on compression configuration.
 V1 defaults to `.zst` (zstd) or empty string (no compression).
 This ensures compressed and uncompressed versions of the same file don’t collide.
+
+**Note on path separators:** All path variables (`{repo_path}`, `{dirname}`) use POSIX
+forward slashes (`/`) in remote keys, regardless of the local OS. On Windows,
+backslashes in local paths are automatically converted to forward slashes when
+constructing remote keys.
+This ensures cross-platform compatibility and correct behavior with cloud storage
+providers.
 
 #### Common Layout Patterns
 
@@ -231,7 +247,7 @@ Each optimizes for different needs.
 
 ##### Pattern 1: Timestamp + Content Hash (Default - Recommended)
 
-**Chronologically sortable with good deduplication and age-based cleanup.**
+**Chronologically sortable with good deduplication.**
 
 ```yaml
 # .blobsy.yml
@@ -258,8 +274,6 @@ s3://my-datasets/project-alpha/
 **Properties:**
 - ✅ **Chronologically sortable:** List by age, browse by time period
 - ✅ **Path-browsable:** Can see file paths within each timestamp prefix
-- ✅ **Age-based cleanup:** Easy to delete blobs older than N days
-  (`ls | head -n 100 | xargs rm`)
 - ✅ **Batch deduplication:** Same file pushed in same second with same content = same
   key
 - ✅ **Content verification:** Hash in key ensures integrity
@@ -276,7 +290,8 @@ s3://my-datasets/project-alpha/
 
 **Use when:** You want a balance of organization, deduplication, and age-based
 management. **This is the recommended default** for most teams: intuitive, sortable,
-enables time-based cleanup, and still deduplicates common batch-push scenarios.
+enables time-based cleanup, and still deduplicates re-pushes of the same content to the
+same path within the same second.
 
 ##### Pattern 2: Pure Content-Addressable (Maximum Dedup)
 
@@ -404,12 +419,12 @@ Use branch-isolated storage if multiple users push concurrently.
 |  | Timestamp+Hash (Default) | Pure CAS | Branch-Isolated | Global Shared |
 | --- | --- | --- | --- | --- |
 | **Template** | `{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}` | `sha256/{content_sha256}` | `{git_branch}/sha256/{content_sha256}` | `shared/{repo_path}` |
-| **Dedup** | Batch (same second + path) | Maximum (global) | Per-branch | None |
+| **Dedup** | Same path+content+timestamp | Maximum (global) | Per-branch | None |
 | **Browsability** | By time, then path | By hash only | By branch, then hash | By path |
 | **Sortable by age** | Yes (chronological) | No | No | No |
 | **Rename cost** | Re-upload | Free | Free | Re-upload |
 | **Storage growth** | Low-moderate | Minimal | Moderate | High |
-| **Age-based cleanup** | Very easy (by prefix) | Difficult | Difficult | Requires filtering |
+| **Age-based cleanup (V2)** | Easier (GC by date prefix) | Requires full scan | Requires full scan | Requires filtering |
 | **Best for** | General use, balanced needs | Minimum storage cost | Multi-branch workflows | Simple sync, rsync-like |
 
 #### Advanced: Custom Templates
@@ -439,8 +454,8 @@ key_template: "{git_branch}/cas/{content_sha256}"
 
 #### How Templates Work
 
-1. **On `blobsy track`:** Compute hash, create `.yref` with `sha256` and `size` (no
-   remote key yet)
+1. **On `blobsy track`:** Compute hash, create `.yref` with `hash` and `size` (no remote
+   key yet)
 2. **On `blobsy push`:**
    - Evaluate `key_template` for each file with current context (branch, path, hash,
      etc.)
@@ -471,7 +486,7 @@ minimize noise in `git diff`.
 # blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
-sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+hash: sha256:7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
 remote_key: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 ```
@@ -481,13 +496,14 @@ Fields:
 | Field | Type | Description |
 | --- | --- | --- |
 | `format` | string | Format version (`blobsy-yref/0.1`) |
-| `sha256` | string | 64-char lowercase hex, SHA-256 of the original file content |
+| `hash` | string | Content identifier with `sha256:` prefix followed by 64-char lowercase hex hash of the original file content |
 | `size` | integer | File size in bytes |
 | `remote_key` | string | Evaluated template key where the blob is stored (relative to bucket and global prefix). Set by `blobsy push`. Empty or absent until first push. |
 
 **Field types and encoding:**
 
-- `sha256`: 64-character lowercase hexadecimal string.
+- `hash`: Content identifier string in format `sha256:<64-char-hex>` (e.g.,
+  `sha256:7a3f0e9b...`).
 - `size`: integer, in bytes.
 - `remote_key`: string, the evaluated template result (e.g., `sha256/7a3f0e...` or
   `main/sha256/7a3f0e...` or `shared/data/model.bin`).
@@ -517,7 +533,7 @@ When a file is compressed before upload, the `.yref` records this:
 # blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
-sha256: 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
+hash: sha256:7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
 remote_key: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 compressed: zstd
@@ -585,7 +601,7 @@ git show HEAD:path/to/file.yref 2>/dev/null | diff - path/to/file.yref
 # No diff = committed, diff = not committed
 ```
 
-**Modified:** Local file hash ≠ `.yref` sha256 field.
+**Modified:** Local file hash ≠ `.yref` hash field.
 
 **Missing:** `.yref` exists but local file doesn’t exist.
 
@@ -739,7 +755,7 @@ detection independent of mtime (which `git checkout` doesn’t preserve), and cl
 in `git diff` when data actually changed.
 
 **At-rest verification** via `blobsy verify`: hash each local file, compare against the
-`.yref`’s `sha256`, report mismatches.
+`.yref`’s `hash`, report mismatches.
 Works for all tracked files, fully offline.
 
 ### Why SHA-256 Over Provider-Native Hashes
@@ -776,14 +792,14 @@ In practice the OS page cache makes the second read nearly free.
 ### Local Stat Cache
 
 Blobsy maintains a local stat cache (gitignored, machine-local) that stores the
-last-known `size`, `mtime_ms`, and `sha256` for each tracked file.
+last-known `size`, `mtime_ms`, and `hash` for each tracked file.
 This follows the same approach as git’s index: use filesystem metadata as a fast-path to
 avoid re-hashing unchanged files.
 
 **How it works:**
 
 1. On push, sync, or verify, blobsy calls `stat()` on each local file.
-2. If `size` and `mtime_ms` match the cached entry, the cached `sha256` is trusted (file
+2. If `size` and `mtime_ms` match the cached entry, the cached `hash` is trusted (file
    assumed unchanged -- no read or hash needed).
 3. If either differs, blobsy reads and hashes the file, then updates the cache.
 
@@ -957,11 +973,11 @@ modification”:
 ```bash
 # After modifying a tracked file
 $ blobsy track data/research/model.bin
-Updated data/research/model.bin.yref (sha256 changed)
+Updated data/research/model.bin.yref (hash changed)
 
 # Or refresh all tracked files in a directory
 $ blobsy track data/research/
-Updated data/research/model.bin.yref (sha256 changed)
+Updated data/research/model.bin.yref (hash changed)
 1 file updated, 1 unchanged.
 ```
 
@@ -1084,6 +1100,10 @@ blobsy rm data/model.bin.yref   # Also works (same result)
 - `blobsy rm`: Deletes local file + stops tracking (permanent removal)
 - `blobsy untrack`: Stops tracking, keeps local file (you want to manage it yourself)
 
+**Note on trash command (V2):** The `blobsy trash` command (as a safer alternative to
+`rm` that moves files to a trash directory before deletion) is deferred to V2. V1 only
+provides `blobsy rm` for removing tracked files.
+
 ### `blobsy mv` (V1)
 
 Rename or move a tracked file.
@@ -1189,7 +1209,7 @@ warnings).
 
 **Algorithm for each `.yref`:**
 
-1. **Read the ref** from working tree -- get `sha256`, `size`, `remote_key`.
+1. **Read the ref** from working tree -- get `hash`, `size`, `remote_key`.
 2. **Check local file** -- hash it (using stat cache for speed).
 3. **If local file changed:** update `.yref` with new hash (like `blobsy track`).
 4. **If local matches ref and remote has the blob:** nothing to do (✓).
@@ -1253,7 +1273,7 @@ $ blobsy status
 What it does:
 
 1. Find all `.yref` files in the repo.
-2. For each, compare local file hash against the ref’s `sha256`.
+2. For each, compare local file hash against the ref’s `hash`.
 3. Report: ok, modified, missing, not pushed (no `remote_key`).
 4. Show human-readable file sizes from `.yref` metadata.
 
@@ -1504,6 +1524,13 @@ Five levels, each overriding the one above:
 Resolution is bottom-up: the most specific `.blobsy.yml` wins.
 Settings merge -- a subdirectory file only needs to specify what it overrides.
 If no `.blobsy.yml` exists anywhere, the built-in defaults apply.
+
+**Merge semantics:** When a setting is overridden, the entire value is replaced (not
+deep-merged).
+For arrays and objects, the full array/object from the more specific config
+replaces the inherited one.
+Example: if a subdirectory `.blobsy.yml` specifies `externalize.always: ["*.parquet"]`,
+it completely replaces the parent’s `always` list -- it does not append to it.
 
 **Important:** Any setting that affects how remote bytes are stored (compression
 algorithm, checksum algorithm) must be in git-tracked config (repo-level `.blobsy.yml`),
@@ -1788,6 +1815,16 @@ source and destination path.
 **Security restriction:** `command` backends from repo-level config require explicit
 trust. See [Security and Trust Model](#security-and-trust-model).
 
+**Cross-platform limitations:** Command backends run through Node.js `child_process`,
+which uses different shells on different platforms (cmd.exe on Windows, /bin/sh on
+Unix). For cross-platform compatibility in mixed OS environments, avoid complex shell
+pipes, operators, or bash-specific syntax.
+Instead, use simple command invocations or prefer named tools (`aws-cli`, `rclone`) that
+have cross-platform installers and consistent CLI interfaces.
+If shell-specific features are needed, consider maintaining separate `.blobsy.yml` files
+with platform-specific commands or using the `s3` backend type with named transfer
+tools.
+
 ### S3-Compatible Backends
 
 R2, MinIO, Backblaze B2, Tigris, and other S3-compatible stores all use the same
@@ -1886,18 +1923,35 @@ Uses the standard credential chain for the backend:
 
 ### Atomic Writes
 
-**External tools (aws-cli, rclone):** Handle atomic writes internally.
-Downloaded files are written atomically via temp-file-then-rename.
+**All backends:** Blobsy manages atomic downloads for ALL backends to ensure consistent,
+reliable behavior regardless of the underlying transport mechanism.
+We do not rely on external tools to handle atomicity.
 
-**Built-in `@aws-sdk` engine:** Blobsy must implement temp-file-then-rename for:
+**Download pattern for all backends:**
 
-- Local file writes during pull (avoid partial files on interrupt).
-- `.yref` file updates.
-- Stat cache writes.
+1. Download to blobsy-managed temp file (`.blobsy-tmp-*` pattern)
+2. Compute SHA-256 hash and verify integrity
+3. Atomically rename to final location only after successful verification
 
-Temp files use the pattern `.blobsy-tmp-*` in the same directory as the target file.
-`blobsy doctor` reports orphaned temp files.
-On startup or via `blobsy clean`, orphaned temp files are removed.
+**Backend-specific implementation:**
+
+- **Built-in `@aws-sdk` engine:** Blobsy downloads directly to temp file, then renames
+- **External tools (aws-cli, rclone):** Blobsy wraps tool invocation to download to temp
+  file first, then verifies and renames
+- **Command backends:** Blobsy provides `$BLOBSY_TEMP_OUT` environment variable pointing
+  to temp file location; user templates write there; blobsy verifies hash and renames on
+  exit code 0
+
+**Other atomic operations:** Blobsy also uses temp-file-then-rename for:
+
+- `.yref` file updates
+- Stat cache writes
+
+**Temp file management:**
+
+- Temp files use the pattern `.blobsy-tmp-*` in the same directory as the target file
+- `blobsy doctor` reports orphaned temp files
+- On startup or via `blobsy clean`, orphaned temp files are removed
 
 **Interrupted operations:** If push or pull is interrupted midway, re-running is safe.
 Already-transferred files are detected via hash comparison and skipped.
@@ -1948,10 +2002,10 @@ that file’s `.yref`:
 
 ```
 <<<<<<< HEAD
-sha256: aaa111...
+hash: sha256:aaa111...
 size: 1048576
 =======
-sha256: ccc333...
+hash: sha256:ccc333...
 size: 2097152
 >>>>>>> origin/main
 ```
@@ -2458,6 +2512,9 @@ package as a library.
 Compression uses Node.js built-in `node:zlib` (zstd, gzip, brotli) -- no external
 compression dependencies.
 
+**Minimum Node.js version:** Node.js 22.11.0 or later (required for `node:zlib` zstd
+support). Older versions can still use gzip or brotli compression.
+
 ### No Daemon
 
 Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
@@ -2681,7 +2738,7 @@ content-addressable storage.
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
 | `blobsy-cx82` | R3 P0-1 | Versioning semantics: “latest mirror” vs “immutable snapshots” | **Resolved.** Content-addressable storage = immutable blobs. Git history of `.yref` files = full versioning. Old commits can be checked out and pulled (blobs are never overwritten). No contradiction. |
-| `blobsy-mlv9` | R3 P0-3 | `manifest_sha256` for directory pointers | **Eliminated.** No manifests, no directory pointers. Each file has its own `.yref` with its own `sha256`. Git diff is meaningful per-file. |
+| `blobsy-mlv9` | R3 P0-3 | `manifest_sha256` for directory pointers | **Eliminated.** No manifests, no directory pointers. Each file has its own `.yref` with its own `hash`. Git diff is meaningful per-file. |
 | `blobsy-a64l` | R3 P0-2 | Post-merge promotion workflow | **Eliminated.** Content-addressable blobs are not prefix-bound. After merge, `.yref` files on main point to the same blobs that were pushed from the feature branch. No promotion needed. |
 | `blobsy-05j8` | R3 P0-4.2 | Delete semantics contradiction | **Eliminated.** Content-addressable storage never deletes or overwrites during sync. Old blobs remain until GC. No delete flags needed for push/pull. |
 | `blobsy-7h13` | R1 C2, R3 P0-4 | Single-file remote conflict detection | **Eliminated.** No “remote hash Z” needed. Conflicts are git conflicts on `.yref` files, resolved with standard git tools. Content-addressable = concurrent pushes of different content produce different keys (no overwrite). |
@@ -2695,7 +2752,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 | --- | --- | --- | --- |
 | `blobsy-suqh` | R1 C3, R3 4.9 | Interactive init contradiction | **Resolved.** `init` is interactive without flags; all sync ops are non-interactive. See Non-Interactive by Default. |
 | `blobsy-br1a` | R1 C4, R3 5 | `blobsy sync` bidirectional danger | **Simplified.** Sync = push missing + pull missing. No delete cascades. No `--strategy` flag in V1. |
-| `blobsy-jlcn` | R1 M1, R3 4.1 | Pointer field types | **Resolved.** sha256 = 64-char lowercase hex, size = bytes. See Ref File Format. |
+| `blobsy-jlcn` | R1 M1, R3 4.1 | Pointer field types | **Resolved.** hash = content identifier (sha256:64-char-hex), size = bytes. See Ref File Format. |
 | `blobsy-n23z` | R1 M2 | Format versioning | **Resolved.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. |
 | `blobsy-0a9e` | R1 M3, R3 4.10 | Command backend template variables | **Resolved.** `{local}`, `{remote}`, `{relative_path}`, `{bucket}` specified. See Backend System. |
 | `blobsy-srme` | R1 M4, R3 4.8 | Which `.gitignore` to modify | **Resolved.** Same directory as tracked path. See Gitignore Management. |
@@ -2712,7 +2769,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
-| `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for built-in SDK. See Atomic Writes section. |
+| `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for ALL backends (built-in SDK, external tools, command backends). Blobsy manages atomicity; does not rely on transport. See Atomic Writes section. |
 | `blobsy-vj6p` | R3 4.10 | Security: command execution from repo config | **Addressed.** `command` backends disallowed from repo config by default. See Security and Trust Model. |
 | `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Ordered `sync.tools` list with capability check + fallthrough + `blobsy doctor`. See Transfer Delegation. |
 
