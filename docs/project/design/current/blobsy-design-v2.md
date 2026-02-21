@@ -828,6 +828,66 @@ needs.
 
 ## CLI Commands
 
+### Path Specifications
+
+All blobsy commands that operate on files accept flexible path specifications:
+
+**Accepted path formats:**
+
+1. **Original file path:** `data/model.bin`
+2. **Ref file path:** `data/model.bin.yref` (equivalent to #1)
+3. **Directory path:** `data/research/` (behavior depends on command)
+
+**Path resolution:**
+
+- When you specify `data/model.bin.yref`, blobsy treats it as `data/model.bin`
+- Both forms are accepted and produce identical results
+- This allows tab-completion to work naturally (completing to `.yref` files works)
+
+**Directory behavior by command:**
+
+| Command | Directory Support | Recursive by Default | Notes |
+| --- | --- | --- | --- |
+| `blobsy track` | Yes | Yes | Applies externalization rules per-file |
+| `blobsy untrack` | Yes | Requires `--recursive` | Safety: prevents accidental bulk untrack |
+| `blobsy rm` | Yes | Requires `--recursive` | Safety: prevents accidental bulk deletion |
+| `blobsy push` | Yes | Yes | Uploads all tracked files in directory |
+| `blobsy pull` | Yes | Yes | Downloads all tracked files in directory |
+| `blobsy sync` | Yes | Yes | Syncs all tracked files in directory |
+| `blobsy status` | Yes | Yes | Shows status of all tracked files in directory |
+| `blobsy verify` | Yes | Yes | Verifies all tracked files in directory |
+
+**Examples:**
+
+```bash
+# These are equivalent (file path vs .yref path)
+blobsy track data/model.bin
+blobsy track data/model.bin.yref
+
+# Directory operations
+blobsy track data/research/              # Tracks all eligible files (recursive)
+blobsy status data/research/              # Shows status of tracked files in directory
+blobsy untrack --recursive data/old/      # Requires --recursive flag
+blobsy rm --recursive data/experiments/   # Requires --recursive flag
+
+# Path omitted = operate on entire repo
+blobsy status        # All tracked files in repo
+blobsy sync          # All tracked files in repo
+```
+
+**No glob patterns in V1:**
+
+Glob expansion (e.g., `data/*.bin`) is handled by your shell, not by blobsy.
+Use shell globs or pass explicit paths.
+
+```bash
+# Shell expands the glob
+blobsy track data/*.bin
+
+# Or use find
+find data -name "*.bin" -exec blobsy track {} +
+```
+
 ### `blobsy init`
 
 Initialize blobsy in a git repo.
@@ -1169,9 +1229,9 @@ SETUP
   blobsy doctor                        Diagnose configuration and connectivity
 
 TRACKING
-  blobsy track <path>                  Start tracking a file or directory (creates/updates .yref)
-  blobsy untrack <path>                Stop tracking, move .yref to trash
-  blobsy rm [--delete] <path>          Remove from tracking (optionally delete local file)
+  blobsy track <path>...               Start tracking a file or directory (creates/updates .yref)
+  blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .yref to trash)
+  blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
 
 SYNC
   blobsy sync [path...]                Bidirectional: track changes, push missing, pull missing
