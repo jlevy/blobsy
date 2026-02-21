@@ -137,6 +137,6 @@ Includes issues from all review rounds.
 | `blobsy-qk6f` (R6-gemini) | Command backend cross-platform limitations documentation | Deferred. |
 | `blobsy-fxrg` (R6-gpt5pro) | `.blobsy.yml` merge semantics (arrays replaced vs merged) | Deferred. Needs formal documentation. |
 | R6-opus 3.2 | Template system complexity (named layout presets) | Not yet simplified. Templates remain configurable. Named presets could reduce cognitive load. |
-| R6-opus 3.8 | Credential exposure in command backends (env var sanitization) | Noted as risk. Command backends already restricted by trust model. |
+| R6-opus 3.8 | Credential exposure in command backends (env var sanitization) | Noted as risk. Command backends use shell-free execution with strict character validation. |
 | R6-opus 4.1, R6-codex 6 | Per-file transfer overhead for many-file workloads | Acknowledged as V1 limitation. Batch transfer engine deferred to V2. |
 | R6-opus 3.5 | Edge cases: concurrent ops, partial file writes, symlink cycles, case sensitivity, Unicode normalization, 10K+ file performance | Partially addressed. Some covered by stat cache and atomic writes. Others deferred. |

@@ -425,9 +425,9 @@ storage backend, a user can integrate it in minutes with a template command.
 The `command` backend is sufficient for any tool that can copy a single file given a
 source and destination path.
 
-**Security restriction:** `command` backends from repo-level config require explicit
-trust. See the Security and Trust Model section in the
-[main design](blobsy-design.md#security-and-trust-model).
+**Security:** Command execution uses a shell-free model with strict character
+validation. See the Security Model section in the
+[main design](blobsy-design.md#security-model).
 
 **Cross-platform limitations:** Command backends run through Node.js `child_process`,
 which uses different shells on different platforms (cmd.exe on Windows, /bin/sh on

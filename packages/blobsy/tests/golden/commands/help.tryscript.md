@@ -34,7 +34,6 @@ Commands:
   hooks <action>         Install or uninstall the blobsy pre-commit hook
   check-unpushed         List committed .yref files whose blobs are not yet pushed
   pre-push-check         CI guard: fail if any .yref is missing its remote blob
-  trust                  Trust this repo to run command backends from .blobsy.yml
   skill                  Output blobsy skill documentation (for AI agents)
   prime                  Output context primer for AI agents working in this repo
   help [command]         Display help for command
@@ -306,21 +305,6 @@ Usage: blobsy pre-push-check [options]
 CI guard: fail if any .yref is missing its remote blob
 
 Options:
-  -h, --help             Display help for command
-? 0
-```
-
-# Per-command help: trust
-
-```console
-$ blobsy trust --help
-Usage: blobsy trust [options]
-
-Trust this repo to run command backends from .blobsy.yml
-
-Options:
-  --revoke               Remove trust for current repo
-  --list                 Show all trusted repos
   -h, --help             Display help for command
 ? 0
 ```

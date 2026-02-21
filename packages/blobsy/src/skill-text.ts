@@ -9,7 +9,7 @@ export const SKILL_BRIEF = `\
 blobsy: Git-native large file storage CLI.
 Track large files with .yref pointers in Git, store blobs in S3/local/custom backends.
 
-Commands: init, track, push, pull, sync, status, verify, untrack, rm, mv, config, health, doctor, trust
+Commands: init, track, push, pull, sync, status, verify, untrack, rm, mv, config, health, doctor
 Global flags: --json, --quiet, --verbose, --dry-run
 
 Quick start:
@@ -41,7 +41,6 @@ directories, or custom command backends.
   blobsy config [key] [val]  Show, get, or set .blobsy.yml values
   blobsy health              Test backend connectivity
   blobsy doctor [--fix]      Run diagnostics, optionally auto-fix
-  blobsy trust               Trust repo for command backend execution
   blobsy hooks <action>      Install/uninstall pre-commit hook
 
 ## Global Options
@@ -69,8 +68,6 @@ Override via environment: BLOBSY_BACKEND_URL=s3://bucket/prefix/
 - Content-addressable: identical files share the same blob (SHA-256)
 - Compression: zstd, gzip, or brotli (configurable per-repo)
 - Externalization rules control which files are tracked in directory scans
-- Command backends require explicit trust (blobsy trust)
-
 ## Common Workflows
 
 Track and push:

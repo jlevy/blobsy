@@ -613,8 +613,8 @@ Used by the echo backend test fixture and custom backends.
 - Capture both stdout and stderr.
   Display both on failure.
 - Exit code 0 = success; non-zero = failure with categorized error.
-- Security: command backends from repo-level `.blobsy.yml` require explicit trust
-  (`blobsy trust`). Only allowed from `~/.blobsy.yml` or trusted repos.
+- Security: shell-free execution model with strict character validation prevents
+  injection.
 
 **Shell-free execution model:**
 

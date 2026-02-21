@@ -48,23 +48,6 @@ The local backend directory isn’t writable.
 - Fix permissions: `chmod u+w /path/to/local/store`
 - Verify the path in your config: `blobsy config backends.default.url`
 
-### “Command backend not allowed”
-
-Blobsy blocks command backends from `.blobsy.yml` by default to prevent arbitrary code
-execution.
-
-```
-Error: .blobsy.yml specifies a 'command' backend, which can execute arbitrary shell
-commands. This is not allowed from repo config by default.
-```
-
-**Solutions:**
-
-- Trust this repo: `blobsy trust`
-- Or configure the backend in your user-level config (`~/.blobsy.yml`) instead.
-- To revoke trust later: `blobsy trust --revoke`
-- For CI/testing, set `BLOBSY_TRUST_ALL=1` (not recommended for interactive use).
-
 ## Network Errors
 
 ### “ENOTFOUND” or “ETIMEDOUT”

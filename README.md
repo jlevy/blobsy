@@ -66,7 +66,6 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy config [key] [val]` | Get or set configuration |
 | `blobsy health` | Check backend connectivity |
 | `blobsy doctor [--fix]` | Diagnostics and self-repair |
-| `blobsy trust` | Trust repo for command backend execution |
 | `blobsy hooks <action>` | Manage pre-commit hook |
 
 ### Global Options
@@ -119,8 +118,7 @@ backends:
     exists_command: "rclone lsf remote:{remote}"
 ```
 
-Command backends require explicit trust (`blobsy trust`) since they execute shell
-commands.
+Command backends execute user-configured shell commands for push/pull/exists operations.
 
 ## Externalization Rules
 

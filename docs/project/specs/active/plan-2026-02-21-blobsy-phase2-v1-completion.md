@@ -26,7 +26,6 @@ backends, polished UX, agent-friendly documentation, and a publishable npm packa
 - Complete CLI documentation: README, troubleshooting guide, `--help` quality pass
 - End-to-end testing against MinIO (S3-compatible, Docker-based)
 - npm package publishable and `publint`-clean
-- `blobsy trust` command for command backend security
 
 ## Non-Goals
 
@@ -88,7 +87,7 @@ publishing.
 | Stage | Epic Bead | Sub-beads |
 | --- | --- | --- |
 | Stage 1: CLI Polish | `blobsy-nwrr` | `blobsy-t6db` (--dry-run), `blobsy-1jcr` (--quiet validation), `blobsy-kz4d` (error quality), `blobsy-f2of` (golden tests) |
-| Stage 2: S3 Backend + Trust | `blobsy-8yrt` | `blobsy-32uo` (Backend interface), `blobsy-lkpe` (backend-s3.ts), `blobsy-n8i8` (trust), `blobsy-zqhx` (unit tests), `blobsy-ay6g` (error golden tests) |
+| Stage 2: S3 Backend | `blobsy-8yrt` | `blobsy-32uo` (Backend interface), `blobsy-lkpe` (backend-s3.ts), `blobsy-zqhx` (unit tests), `blobsy-ay6g` (error golden tests) |
 | Stage 3: E2E Testing + CI | `blobsy-os74` | `blobsy-ecok` (MinIO e2e), `blobsy-00fu` (CI config) |
 | Stage 4: Documentation | `blobsy-40s0` | `blobsy-j6iz` (README), `blobsy-bpzg` (CLI help), `blobsy-4jht` (skill commands), `blobsy-p5mb` (agent files), `blobsy-rdtm` (troubleshooting), `blobsy-qte5` (.yref self-doc) |
 | Stage 5: Publishing | `blobsy-4qu2` | `blobsy-dtzy` (doc sync), `blobsy-cfyt` (package readiness), `blobsy-ackj` (CI/CD), `blobsy-hdi5` (deps audit) |
@@ -142,10 +141,10 @@ on.
 - [ ] `commands/quiet.tryscript.md` -- `--quiet` suppresses output, errors still shown
 - [ ] Update existing golden tests if output format changed
 
-### Stage 2: S3 Backend + Trust
+### Stage 2: S3 Backend
 
-Implement the S3 backend using `@aws-sdk/client-s3` and the `blobsy trust` command.
-Transfer tool delegation (aws-cli, rclone) is deferred to V1.1.
+Implement the S3 backend using `@aws-sdk/client-s3`. Transfer tool delegation (aws-cli,
+rclone) is deferred to V1.1.
 
 #### Backend Interface
 
@@ -187,21 +186,10 @@ and reduce the surface area.
 GCS support is deferred to V1.1 to reduce V1 scope and dependencies.
 URL parsing for `gs://` is already implemented in `backend-url.ts`.
 
-#### `blobsy trust` Command
-
-- [ ] `blobsy trust` marks the current repo as trusted for command backend execution
-- [ ] Trust marker stored in `~/.blobsy/trusted-repos.json` (repo path -> trust
-  timestamp)
-- [ ] `blobsy trust --revoke` removes trust
-- [ ] `blobsy trust --list` shows trusted repos
-- [ ] Command backends from repo-level `.blobsy.yml` check trust before execution
-
 #### Unit Tests
 
 - [ ] `backend-s3.test.ts`: mock SDK calls, verify push/pull/exists/health/error
   categorization
-- [ ] `trust.test.ts`: trust marker create/read/revoke, trust check before command
-  execution
 
 #### Golden Tests
 
@@ -368,14 +356,13 @@ Before release, reconcile all design documents with the actual implementation:
 | `backend-s3.ts` | 2 | S3 backend via `@aws-sdk/client-s3` |
 | `transfer-tool.ts` | V1.1 | External tool detection and delegation (aws-cli, rclone) |
 | `backend.ts` | 2 | Backend interface and factory (`resolveBackend`) |
-| `trust.ts` | 2 | Repo trust management for command backends |
 | `skill.ts` | 4 | Skill/prime command content generation |
 
 ### Modified Modules
 
 | Module | Stage | Changes |
 | --- | --- | --- |
-| `cli.ts` | 1 | Add `--dry-run` global flag; `trust`, `skill`, `prime`, `docs` commands |
+| `cli.ts` | 1 | Add `--dry-run` global flag; `skill`, `prime`, `docs` commands |
 | `transfer.ts` | 2 | Use `Backend` interface, integrate S3 SDK backend |
 | `format.ts` | 1 | Error formatting improvements, dry-run output format |
 | `types.ts` | 2 | `Backend` interface, `TransferTool` type |
@@ -388,7 +375,6 @@ Before release, reconcile all design documents with the actual implementation:
 | Test File | What It Covers |
 | --- | --- |
 | `backend-s3.test.ts` | S3 SDK operations (mocked), error categorization |
-| `trust.test.ts` | Trust marker create/read/revoke |
 
 ### Golden Tests (New)
 
@@ -396,7 +382,6 @@ Before release, reconcile all design documents with the actual implementation:
 | --- | --- |
 | `commands/dry-run.tryscript.md` | `--dry-run` across all mutating commands |
 | `commands/quiet.tryscript.md` | `--quiet` suppresses output |
-| `commands/trust.tryscript.md` | `blobsy trust` and command backend security |
 | `errors/auth-errors.tryscript.md` | Missing/invalid credentials |
 | `errors/permission-errors.tryscript.md` | Access denied errors |
 | `errors/network-errors.tryscript.md` | Timeout, DNS, connection errors |
@@ -440,7 +425,6 @@ deferred to V1.1+.
 
 - S3 backend via `@aws-sdk/client-s3` (built-in SDK, no external tool delegation)
 - Local and command backends (already implemented in Phase 1)
-- `blobsy trust` command
 - `--dry-run` support
 - E2E tests against MinIO (Docker-based, no cloud credentials needed)
 - Full documentation (README, CLI help, agent skill files)

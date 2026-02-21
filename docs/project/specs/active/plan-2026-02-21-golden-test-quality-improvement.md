@@ -131,13 +131,6 @@ genuinely dynamic fields with named patterns (`[HASH]`, `[REMOTE_KEY]`, `[SIZE]`
 | 40 | `blobsy check-unpushed` | File list (1 not pushed) |
 | 49 | `blobsy push` | Per-file push output |
 
-#### `commands/trust.tryscript.md` -- 2 elisions
-
-| Line | Command | What is suppressed |
-| --- | --- | --- |
-| 31 | `blobsy trust` | Trust confirmation message |
-| 47 | `blobsy trust --revoke` | Revoke confirmation message |
-
 #### `commands/mv.tryscript.md` -- 2 elisions
 
 | Line | Command | What is suppressed |
@@ -483,11 +476,6 @@ Missing: health check failure, conflict detection, partial failure,
 
 1 `...` elision. Missing: pull when remote blob doesn’t exist.
 
-#### Issue 16: Trust Test Is Surgical (P2)
-
-2 `...` elisions (trust and revoke messages) plus `wc -l` for list count.
-Full trust/revoke message text not captured.
-
 #### Issue 19: Workflow Tests Need Remote State Verification (P2)
 
 Some workflows have partial remote checks (`test -n`, `wc -l`) but none show full
@@ -513,11 +501,6 @@ listing because other tests may have pushed to the same remote).
 #### Issue 24: JSON Coverage Incomplete Across Surface (P1)
 
 Same as Issue 2. ~14 commands still missing JSON golden tests.
-
-#### Issue 26: Trust Security Path Not Tested E2E (P1)
-
-No test that command backend execution is blocked when untrusted, and allowed after
-trust.
 
 #### Issue 27: Global Flag Matrix Incomplete (P2)
 
@@ -554,8 +537,6 @@ output.
   compression (Issue 1 partial)
 - [ ] Fix `commands/sync.tryscript.md` -- 4 `...` (replace with full per-file output)
 - [ ] Fix `commands/check-unpushed.tryscript.md` -- 3 `...`
-- [ ] Fix `commands/trust.tryscript.md` -- 2 `...` (show trust/revoke messages) +
-  replace `wc -l` with full listing (Issue 16)
 - [ ] Fix `commands/mv.tryscript.md` -- 2 `...` (show track scan + mv details)
 - [ ] Fix `commands/pre-push-check.tryscript.md` -- 1 `...`
 - [ ] Fix `echo-backend/sync-commands.tryscript.md` -- 2 `...`
@@ -598,7 +579,6 @@ After Track A is complete, fill coverage gaps:
 - [ ] Issue 14: Add pull-with-missing-remote-blob test
 - [ ] Issue 15: Add hook execution test during git commit
 - [ ] Issue 20: Add externalization rules test (min_size, never, ignore patterns)
-- [ ] Issue 26: Add trust security workflow (untrusted -> blocked, trusted -> allowed)
 - [ ] Issue 2/24: Add JSON golden tests for remaining ~14 commands
 - [ ] Issue 29: Add JSON-mode error tests
 
@@ -632,11 +612,10 @@ As `--dry-run`, quiet semantics, and error text are finalized:
 - [ ] Issue 29 JSON error-path coverage
 - [ ] Refresh snapshots affected by error quality pass
 
-### Phase 2 Stage 2 Alignment (S3 Backend + Trust)
+### Phase 2 Stage 2 Alignment (S3 Backend)
 
 - [ ] Issue 22 + 23: harness backend resolution and isolation
-- [ ] Issue 26: trust enforcement workflow tests
-- [ ] S3/trust-specific golden scenarios
+- [ ] S3-specific golden scenarios
 
 ### Phase 2 Stage 3 Alignment (E2E / MinIO)
 

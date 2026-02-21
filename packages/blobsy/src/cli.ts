@@ -56,7 +56,6 @@ import {
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
-import { trustRepo, revokeRepo, listTrustedRepos } from './trust.js';
 import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
 import { BlobsyError, FILE_STATE_SYMBOLS, YREF_FORMAT, ValidationError } from './types.js';
 
@@ -268,13 +267,6 @@ function createProgram(): Command {
     .description('Internal hook commands')
     .argument('<type>', 'Hook type (pre-commit)')
     .action(wrapAction(handleHook));
-
-  program
-    .command('trust')
-    .description('Trust this repo to run command backends from .blobsy.yml')
-    .option('--revoke', 'Remove trust for current repo')
-    .option('--list', 'Show all trusted repos')
-    .action(wrapAction(handleTrust));
 
   program
     .command('skill')
@@ -1109,68 +1101,6 @@ async function mvSingleFile(
       console.log(formatJsonMessage(`Moved ${srcRel} -> ${destRel}`));
     } else {
       console.log(`Moved ${srcRel} -> ${destRel}`);
-    }
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/require-await
-async function handleTrust(opts: Record<string, unknown>, cmd: Command): Promise<void> {
-  const globalOpts = getGlobalOpts(cmd);
-
-  if (opts.list) {
-    const repos = listTrustedRepos();
-    if (globalOpts.json) {
-      console.log(formatJson({ trusted: repos }));
-    } else if (repos.length === 0) {
-      console.log('No repos currently trusted.');
-    } else {
-      for (const r of repos) {
-        console.log(`  ${r.path}  (trusted ${r.trustedAt})`);
-      }
-    }
-    return;
-  }
-
-  const repoRoot = findRepoRoot();
-
-  if (opts.revoke) {
-    if (globalOpts.dryRun) {
-      if (globalOpts.json) {
-        console.log(formatJsonDryRun([`revoke trust for ${repoRoot}`]));
-      } else {
-        console.log(formatDryRun(`revoke trust for ${repoRoot}`));
-      }
-      return;
-    }
-    const removed = revokeRepo(repoRoot);
-    if (!globalOpts.quiet) {
-      if (globalOpts.json) {
-        console.log(formatJsonMessage(removed ? `Revoked trust for ${repoRoot}` : 'Not trusted'));
-      } else {
-        console.log(
-          removed ? `Revoked trust for ${repoRoot}` : 'This repo is not currently trusted.',
-        );
-      }
-    }
-    return;
-  }
-
-  if (globalOpts.dryRun) {
-    if (globalOpts.json) {
-      console.log(formatJsonDryRun([`trust ${repoRoot}`]));
-    } else {
-      console.log(formatDryRun(`trust ${repoRoot}`));
-    }
-    return;
-  }
-
-  trustRepo(repoRoot);
-  if (!globalOpts.quiet) {
-    if (globalOpts.json) {
-      console.log(formatJsonMessage(`Trusted ${repoRoot}`));
-    } else {
-      console.log(`Trusted ${repoRoot}`);
-      console.log("Command backends in this repo's .blobsy.yml will now be executed.");
     }
   }
 }

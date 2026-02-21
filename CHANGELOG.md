@@ -13,7 +13,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   health, doctor, hooks, check-unpushed, pre-push-check
 - S3 backend with SHA-256 checksums, atomic downloads, and custom endpoint support
 - Local filesystem backend
-- Custom command backend with trust management (`blobsy trust`)
+- Custom command backend with shell-free execution model
 - Content-addressable storage with SHA-256 integrity
 - Compression support: zstd, gzip, brotli (configurable per-repo)
 - Externalization rules for directory scanning

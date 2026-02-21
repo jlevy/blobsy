@@ -1704,11 +1704,6 @@ SYNC
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
 
-SECURITY
-  blobsy trust                         Trust current repo for command backend execution
-       [--revoke]                    Remove trust for current repo
-       [--list]                      Show trusted repos
-
 AGENT INTEGRATION
   blobsy skill [--brief]               Output skill documentation for AI agents
   blobsy prime [--brief]               Output context primer for AI agents
@@ -2217,42 +2212,11 @@ branches are kept until those references are also gone.
 - **No config.** Config lives in `.blobsy.yml` files (hierarchical, placed anywhere).
 - **No manifests.** There are no manifests.
 
-## Security and Trust Model
-
-### Threat: Command Execution from Repo Config
-
-Repo-level `.blobsy.yml` can specify `command` backends with arbitrary shell commands.
-Running `blobsy pull` on a cloned repo could execute arbitrary commands from the repo’s
-config. This is a supply-chain risk.
-
-### Policy
-
-**`command` backends and any custom command execution are disallowed from repo-level
-config by default.** They are only permitted from:
-
-- User-level config (`~/.blobsy.yml`), or
-- Repos that have been explicitly trusted via `blobsy trust`.
-
-When a repo’s `.blobsy.yml` contains a `command` backend, blobsy refuses with a clear
-error:
-
-```
-Error: .blobsy.yml specifies a 'command' backend, which can execute
-arbitrary shell commands. This is not allowed from repo config by default.
-
-To trust this repo's config:
-  blobsy trust
-
-Or configure the backend in your user config:
-  ~/.blobsy.yml
-```
-
-`blobsy trust` creates a trust marker (stored in user-local config, not committed to
-git) that allows command execution for this specific repo.
+## Security Model
 
 ### Secure Command Execution
 
-Even for trusted repos, blobsy applies defense-in-depth to command execution:
+Blobsy applies defense-in-depth to command backend execution:
 
 1. **No shell.** Commands are executed via `execFileSync` with pre-parsed argument
    arrays. No shell interpreter (`/bin/sh`, `cmd.exe`) is involved, eliminating shell

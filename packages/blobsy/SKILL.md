@@ -29,7 +29,6 @@ blobsy mv <src> <dest>     # Move tracked files
 blobsy config [key] [val]  # Show/set configuration
 blobsy health              # Test backend connectivity
 blobsy doctor [--fix]      # Diagnostics and repair
-blobsy trust               # Trust repo for command backends
 ```
 
 ## Global Options
