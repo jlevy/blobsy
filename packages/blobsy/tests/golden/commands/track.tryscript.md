@@ -60,6 +60,7 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 ```console
 $ cat data/model.bin.yref
 # blobsy -- https://github.com/jlevy/blobsy
+# Run: blobsy status | blobsy --help
 
 format: blobsy-yref/0.1
 hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934
@@ -97,6 +98,7 @@ $ echo "updated content for model" > data/model.bin blobsy track data/model.bin
 ```console
 $ cat data/model.bin.yref
 # blobsy -- https://github.com/jlevy/blobsy
+# Run: blobsy status | blobsy --help
 
 format: blobsy-yref/0.1
 hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934

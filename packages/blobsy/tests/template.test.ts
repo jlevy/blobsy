@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateTemplate, formatIsoDateSecs, getCompressSuffix } from '../src/template.js';
+import {
+  evaluateTemplate,
+  formatIsoDateSecs,
+  getCompressSuffix,
+  sanitizeKeyComponent,
+} from '../src/template.js';
 
 describe('getCompressSuffix', () => {
   it('returns .gz for gzip', () => {
@@ -33,6 +38,46 @@ describe('formatIsoDateSecs', () => {
   it('zero-pads single digit months and days', () => {
     const date = new Date('2026-01-05T03:07:09Z');
     expect(formatIsoDateSecs(date)).toBe('20260105T030709Z');
+  });
+});
+
+describe('sanitizeKeyComponent', () => {
+  it('passes through clean paths unchanged', () => {
+    expect(sanitizeKeyComponent('data/model.bin')).toBe('data/model.bin');
+  });
+
+  it('replaces backslashes with underscores', () => {
+    expect(sanitizeKeyComponent('data\\model.bin')).toBe('data_model.bin');
+  });
+
+  it('replaces whitespace with hyphens', () => {
+    expect(sanitizeKeyComponent('my file name.bin')).toBe('my-file-name.bin');
+  });
+
+  it('collapses consecutive special chars', () => {
+    expect(sanitizeKeyComponent('a__b--c')).toBe('a_b_c');
+  });
+
+  it('replaces control characters', () => {
+    expect(sanitizeKeyComponent('file\x00name\x1f.bin')).toBe('file_name_.bin');
+  });
+
+  it('removes S3-problematic characters', () => {
+    expect(sanitizeKeyComponent('path/{branch}/[tag]#1')).toBe('path/_branch_/_tag_1');
+  });
+
+  it('strips leading dots from path segments', () => {
+    expect(sanitizeKeyComponent('.hidden/file')).toBe('hidden/file');
+    expect(sanitizeKeyComponent('dir/..sneaky')).toBe('dir/sneaky');
+  });
+
+  it('preserves forward slashes', () => {
+    expect(sanitizeKeyComponent('a/b/c/d.bin')).toBe('a/b/c/d.bin');
+  });
+
+  it('handles branch names with special chars', () => {
+    expect(sanitizeKeyComponent('feature/my-branch')).toBe('feature/my-branch');
+    expect(sanitizeKeyComponent('user/name@host')).toBe('user/name@host');
   });
 });
 

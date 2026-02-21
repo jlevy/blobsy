@@ -55,6 +55,7 @@ import {
   resolveTrackedFiles,
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
+import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
 import { trustRepo, revokeRepo, listTrustedRepos } from './trust.js';
 import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
 import { BlobsyError, FILE_STATE_SYMBOLS, YREF_FORMAT, ValidationError } from './types.js';
@@ -138,35 +139,46 @@ function createProgram(): Command {
           lines.push('');
         }
 
+        // Epilog
+        if (cmd.name() === 'blobsy') {
+          lines.push('Get started:');
+          lines.push('  blobsy init s3://bucket/prefix/');
+          lines.push('  blobsy track <file>');
+          lines.push('  blobsy push');
+          lines.push('');
+          lines.push('Docs: https://github.com/jlevy/blobsy');
+          lines.push('');
+        }
+
         return lines.join('\n');
       },
     });
 
   program
     .command('init')
-    .description('Initialize blobsy in a git repo')
+    .description('Initialize blobsy in a git repo with a backend URL')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
-    .option('--endpoint <endpoint>', 'Custom endpoint URL')
+    .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
     .action(wrapAction(handleInit));
 
   program
     .command('track')
-    .description('Start tracking files or directories')
+    .description('Start tracking files or directories with .yref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option('--force', 'Skip confirmation for destructive operations')
     .action(wrapAction(handleTrack));
 
   program
     .command('untrack')
-    .description('Stop tracking (keep local files)')
+    .description('Stop tracking files (keeps local files, moves .yref to trash)')
     .argument('<path...>', 'Files or directories to untrack')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleUntrack));
 
   program
     .command('rm')
-    .description('Remove from tracking and delete local file')
+    .description('Remove tracked files: delete local + move .yref to trash')
     .argument('<path...>', 'Files or directories to remove')
     .option('--local', 'Delete local file only, keep .yref and remote')
     .option('--recursive', 'Required for directory removal')
@@ -174,62 +186,62 @@ function createProgram(): Command {
 
   program
     .command('mv')
-    .description('Rename or move a tracked file')
+    .description('Rename or move a tracked file (updates .yref + .gitignore)')
     .argument('<source>', 'Source tracked file')
     .argument('<dest>', 'Destination path')
     .action(wrapAction(handleMv));
 
   program
     .command('push')
-    .description('Upload local blobs to remote')
-    .argument('[path...]', 'Files or directories to push (default: all tracked)')
-    .option('--force', 'Override hash mismatch (updates .yref to match file)')
+    .description('Upload local blobs to the configured backend')
+    .argument('[path...]', 'Files or directories (default: all tracked)')
+    .option('--force', 'Re-push even if remote exists')
     .action(wrapAction(handlePush));
 
   program
     .command('pull')
-    .description('Download remote blobs to local')
-    .argument('[path...]', 'Files or directories to pull (default: all tracked)')
+    .description('Download blobs from the configured backend')
+    .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--force', 'Overwrite local modifications')
     .action(wrapAction(handlePull));
 
   program
     .command('sync')
-    .description('Bidirectional sync (push + pull)')
-    .argument('[path...]', 'Files or directories to sync (default: all tracked)')
+    .description('Bidirectional sync: push unpushed + pull missing')
+    .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--skip-health-check', 'Skip backend health check')
     .option('--force', 'Force sync (overwrite conflicts)')
     .action(wrapAction(handleSync));
 
   program
     .command('status')
-    .description('Show state of tracked files')
-    .argument('[path...]', 'Files or directories to check (default: all tracked)')
+    .description('Show sync state of tracked files')
+    .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--json', 'Structured JSON output')
     .action(wrapAction(handleStatus));
 
   program
     .command('verify')
-    .description('Verify local files match ref hashes')
-    .argument('[path...]', 'Files or directories to verify (default: all tracked)')
+    .description('Verify local files match their .yref hashes')
+    .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--json', 'Structured JSON output')
     .action(wrapAction(handleVerify));
 
   program
     .command('config')
-    .description('Get or set configuration')
-    .argument('[key]', 'Configuration key')
+    .description('Show, get, or set .blobsy.yml values')
+    .argument('[key]', 'Config key (dot-separated, e.g. compress.algorithm)')
     .argument('[value]', 'Value to set')
     .action(wrapAction(handleConfig));
 
   program
     .command('health')
-    .description('Check backend connectivity')
+    .description('Test backend connectivity and permissions')
     .action(wrapAction(handleHealth));
 
   program
     .command('doctor')
-    .description('Diagnostics and health check')
+    .description('Run diagnostics and optionally auto-fix issues')
     .option('--fix', 'Attempt to automatically fix detected issues')
     .option('--json', 'Structured JSON output')
     .option('--verbose', 'Show detailed diagnostic logs')
@@ -237,18 +249,18 @@ function createProgram(): Command {
 
   program
     .command('hooks')
-    .description('Manage pre-commit hook')
+    .description('Install or uninstall the blobsy pre-commit hook')
     .argument('<action>', 'install or uninstall')
     .action(wrapAction(handleHooks));
 
   program
     .command('check-unpushed')
-    .description('Find committed refs with missing blobs')
+    .description('List committed .yref files whose blobs are not yet pushed')
     .action(wrapAction(handleCheckUnpushed));
 
   program
     .command('pre-push-check')
-    .description('Verify all refs have remote blobs (CI)')
+    .description('CI guard: fail if any .yref is missing its remote blob')
     .action(wrapAction(handlePrePushCheck));
 
   program
@@ -259,10 +271,32 @@ function createProgram(): Command {
 
   program
     .command('trust')
-    .description('Trust current repo for command backend execution')
+    .description('Trust this repo to run command backends from .blobsy.yml')
     .option('--revoke', 'Remove trust for current repo')
-    .option('--list', 'Show trusted repos')
+    .option('--list', 'Show all trusted repos')
     .action(wrapAction(handleTrust));
+
+  program
+    .command('skill')
+    .description('Output blobsy skill documentation (for AI agents)')
+    .option('--brief', 'Short summary only')
+    .action(
+      // eslint-disable-next-line @typescript-eslint/require-await
+      wrapAction(async (opts: Record<string, unknown>) => {
+        console.log(opts.brief ? SKILL_BRIEF : SKILL_FULL);
+      }),
+    );
+
+  program
+    .command('prime')
+    .description('Output context primer for AI agents working in this repo')
+    .option('--brief', 'Short summary only')
+    .action(
+      // eslint-disable-next-line @typescript-eslint/require-await
+      wrapAction(async (opts: Record<string, unknown>) => {
+        console.log(opts.brief ? SKILL_BRIEF : PRIME_TEXT);
+      }),
+    );
 
   return program;
 }

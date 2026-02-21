@@ -143,6 +143,47 @@ installed).
 - Coverage via `@vitest/coverage-v8`
 - Reporters: text, json, json-summary
 
+<!-- BEGIN BLOBSY -->
+
+## Blobsy CLI
+
+Blobsy is a Git-native large file storage CLI.
+Track large files with `.yref` pointer files committed to Git, while blobs live in S3,
+local directories, or custom command backends.
+
+### Key Commands
+
+| Command | Purpose |
+| --- | --- |
+| `blobsy init <url>` | Initialize with backend URL |
+| `blobsy track <path...>` | Track files (creates .yref pointers) |
+| `blobsy push` | Upload blobs to backend |
+| `blobsy pull` | Download blobs from backend |
+| `blobsy sync` | Bidirectional push + pull |
+| `blobsy status --json` | Show tracked file states |
+| `blobsy doctor --fix` | Diagnostics and repair |
+
+### Global Options
+
+All commands accept: `--json`, `--quiet`, `--verbose`, `--dry-run`.
+Use `--json` for machine-parseable output.
+Use `--dry-run` to preview without side effects.
+
+### Testing
+
+- Unit tests: `pnpm test`
+- Golden tests: `cd packages/blobsy && npx tryscript run 'tests/golden/**/*.tryscript.md'`
+- E2E tests: `pnpm --filter blobsy test:e2e` (requires Docker/MinIO)
+
+### Architecture
+
+- Backends implement the `Backend` interface (push/pull/exists/healthCheck)
+- Errors use `BlobsyError`/`ValidationError` with actionable `suggestions`
+- Remote keys generated via `evaluateTemplate` with `sanitizeKeyComponent` for S3 safety
+- `.yref` files include self-documenting comment header
+
+<!-- END BLOBSY -->
+
 ## <!-- BEGIN TBD INTEGRATION -->
 
 ## title: tbd Workflow

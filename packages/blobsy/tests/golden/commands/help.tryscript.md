@@ -18,24 +18,34 @@ Options:
   -h, --help             Display help for command
 
 Commands:
-  init <url>             Initialize blobsy in a git repo
-  track <path...>        Start tracking files or directories
-  untrack <path...>      Stop tracking (keep local files)
-  rm <path...>           Remove from tracking and delete local file
-  mv <source> <dest>     Rename or move a tracked file
-  push [path...]         Upload local blobs to remote
-  pull [path...]         Download remote blobs to local
-  sync [path...]         Bidirectional sync (push + pull)
-  status [path...]       Show state of tracked files
-  verify [path...]       Verify local files match ref hashes
-  config [key] [value]   Get or set configuration
-  health                 Check backend connectivity
-  doctor                 Diagnostics and health check
-  hooks <action>         Manage pre-commit hook
-  check-unpushed         Find committed refs with missing blobs
-  pre-push-check         Verify all refs have remote blobs (CI)
-  trust                  Trust current repo for command backend execution
+  init <url>             Initialize blobsy in a git repo with a backend URL
+  track <path...>        Start tracking files or directories with .yref pointers
+  untrack <path...>      Stop tracking files (keeps local files, moves .yref to trash)
+  rm <path...>           Remove tracked files: delete local + move .yref to trash
+  mv <source> <dest>     Rename or move a tracked file (updates .yref + .gitignore)
+  push [path...]         Upload local blobs to the configured backend
+  pull [path...]         Download blobs from the configured backend
+  sync [path...]         Bidirectional sync: push unpushed + pull missing
+  status [path...]       Show sync state of tracked files
+  verify [path...]       Verify local files match their .yref hashes
+  config [key] [value]   Show, get, or set .blobsy.yml values
+  health                 Test backend connectivity and permissions
+  doctor                 Run diagnostics and optionally auto-fix issues
+  hooks <action>         Install or uninstall the blobsy pre-commit hook
+  check-unpushed         List committed .yref files whose blobs are not yet pushed
+  pre-push-check         CI guard: fail if any .yref is missing its remote blob
+  trust                  Trust this repo to run command backends from .blobsy.yml
+  skill                  Output blobsy skill documentation (for AI agents)
+  prime                  Output context primer for AI agents working in this repo
   help [command]         Display help for command
+
+Get started:
+  blobsy init s3://bucket/prefix/
+  blobsy track <file>
+  blobsy push
+
+Docs: https://github.com/jlevy/blobsy
+
 ? 0
 ```
 
@@ -45,7 +55,7 @@ Commands:
 $ blobsy track --help
 Usage: blobsy track [options] <path...>
 
-Start tracking files or directories
+Start tracking files or directories with .yref pointers
 
 Arguments:
   path                   Files or directories to track
@@ -62,13 +72,13 @@ Options:
 $ blobsy push --help
 Usage: blobsy push [options] [path...]
 
-Upload local blobs to remote
+Upload local blobs to the configured backend
 
 Arguments:
-  path                   Files or directories to push (default: all tracked)
+  path                   Files or directories (default: all tracked)
 
 Options:
-  --force                Override hash mismatch (updates .yref to match file)
+  --force                Re-push even if remote exists
   -h, --help             Display help for command
 ? 0
 ```
@@ -79,10 +89,10 @@ Options:
 $ blobsy pull --help
 Usage: blobsy pull [options] [path...]
 
-Download remote blobs to local
+Download blobs from the configured backend
 
 Arguments:
-  path                   Files or directories to pull (default: all tracked)
+  path                   Files or directories (default: all tracked)
 
 Options:
   --force                Overwrite local modifications
@@ -96,10 +106,10 @@ Options:
 $ blobsy status --help
 Usage: blobsy status [options] [path...]
 
-Show state of tracked files
+Show sync state of tracked files
 
 Arguments:
-  path                   Files or directories to check (default: all tracked)
+  path                   Files or directories (default: all tracked)
 
 Options:
   --json                 Structured JSON output
@@ -113,10 +123,10 @@ Options:
 $ blobsy sync --help
 Usage: blobsy sync [options] [path...]
 
-Bidirectional sync (push + pull)
+Bidirectional sync: push unpushed + pull missing
 
 Arguments:
-  path                   Files or directories to sync (default: all tracked)
+  path                   Files or directories (default: all tracked)
 
 Options:
   --skip-health-check    Skip backend health check
@@ -131,10 +141,10 @@ Options:
 $ blobsy verify --help
 Usage: blobsy verify [options] [path...]
 
-Verify local files match ref hashes
+Verify local files match their .yref hashes
 
 Arguments:
-  path                   Files or directories to verify (default: all tracked)
+  path                   Files or directories (default: all tracked)
 
 Options:
   --json                 Structured JSON output
@@ -148,7 +158,7 @@ Options:
 $ blobsy rm --help
 Usage: blobsy rm [options] <path...>
 
-Remove from tracking and delete local file
+Remove tracked files: delete local + move .yref to trash
 
 Arguments:
   path                   Files or directories to remove
@@ -166,7 +176,7 @@ Options:
 $ blobsy doctor --help
 Usage: blobsy doctor [options]
 
-Diagnostics and health check
+Run diagnostics and optionally auto-fix issues
 
 Options:
   --fix                  Attempt to automatically fix detected issues

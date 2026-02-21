@@ -31,7 +31,8 @@ export const YREF_FIELD_ORDER = [
 ] as const;
 
 export const YREF_FORMAT = 'blobsy-yref/0.1';
-export const YREF_COMMENT_HEADER = '# blobsy -- https://github.com/jlevy/blobsy\n\n';
+export const YREF_COMMENT_HEADER =
+  '# blobsy -- https://github.com/jlevy/blobsy\n# Run: blobsy status | blobsy --help\n\n';
 export const YREF_EXTENSION = '.yref';
 
 /** Per-file stat cache entry for fast change detection and three-way merge. */

@@ -69,6 +69,7 @@ compressed_size: 512
 
     const content = await readFile(refPath, 'utf-8');
     expect(content).toContain('# blobsy -- https://github.com/jlevy/blobsy');
+    expect(content).toContain('# Run: blobsy status | blobsy --help');
     expect(content.indexOf('format:')).toBeLessThan(content.indexOf('hash:'));
     expect(content.indexOf('hash:')).toBeLessThan(content.indexOf('size:'));
     expect(content.indexOf('size:')).toBeLessThan(content.indexOf('remote_key:'));

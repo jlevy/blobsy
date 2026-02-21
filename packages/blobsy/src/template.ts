@@ -17,6 +17,27 @@ export interface TemplateVars {
   timestamp?: Date;
 }
 
+/**
+ * Sanitize a string for safe use as an S3 key component.
+ * Replaces characters that are problematic in S3/GCS/R2 keys
+ * while preserving forward slashes for path structure.
+ */
+export function sanitizeKeyComponent(value: string): string {
+  return (
+    value
+      // Collapse runs of whitespace to single hyphen
+      .replace(/\s+/g, '-')
+      // Remove characters unsafe in S3 keys: backslash, {, }, ^, `, [, ], #, |, ~, <, >, non-ASCII
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\\{}^`[\]#|~<>\x00-\x1f\x7f-\x9f]/g, '_')
+      // Collapse consecutive underscores/hyphens
+      .replace(/[_-]{2,}/g, '_')
+      // Strip leading/trailing dots per path segment (problematic on some backends)
+      .replace(/(^|\/)\.+/g, '$1')
+      .replace(/\.+(\/|$)/g, '$1')
+  );
+}
+
 /** Evaluate a key template with the given variables. */
 export function evaluateTemplate(template: string, vars: TemplateVars): string {
   const hexHash = parseHash(vars.hash);
@@ -32,9 +53,9 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     iso_date_secs: isoDateSecs,
     content_sha256: hexHash,
     content_sha256_short: shortHash,
-    repo_path: repoPath,
-    filename: filename,
-    dirname: dirWithSlash,
+    repo_path: sanitizeKeyComponent(repoPath),
+    filename: sanitizeKeyComponent(filename),
+    dirname: sanitizeKeyComponent(dirWithSlash),
     compress_suffix: vars.compressSuffix,
   };
 

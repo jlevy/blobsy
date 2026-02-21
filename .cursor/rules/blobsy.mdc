@@ -1,0 +1,41 @@
+---
+description: Blobsy CLI conventions for large file tracking in Git repos
+globs: packages/blobsy/src/**/*.ts, packages/blobsy/tests/**/*.ts
+alwaysApply: false
+---
+
+# Blobsy Development Rules
+
+## Architecture
+
+- Blobsy is a standalone CLI (Commander.js) for Git-native large file storage.
+- `.yref` pointer files (YAML) are committed to Git; blobs live in remote backends.
+- Backends: S3, local filesystem, custom commands. Defined via `Backend` interface.
+- Content-addressable storage using SHA-256 hashes.
+
+## Code Conventions
+
+- All commands support `--json`, `--quiet`, `--verbose`, `--dry-run` global flags.
+- Use `BlobsyError` / `ValidationError` / `ConflictError` for all user-facing errors.
+- Errors should include `suggestions` array with actionable next steps.
+- Use `formatDryRun()` / `formatJsonDryRun()` for dry-run output.
+- Backends implement the `Backend` interface (push/pull/exists/healthCheck).
+- Remote keys are generated via template evaluation (`evaluateTemplate`).
+- Key components are sanitized via `sanitizeKeyComponent` for S3 safety.
+
+## Testing
+
+- Unit tests: `pnpm test` (vitest)
+- Golden tests: `npx tryscript run 'tests/golden/**/*.tryscript.md'` (from packages/blobsy/)
+- E2E tests: `pnpm --filter blobsy test:e2e` (requires Docker/MinIO)
+- Always run golden tests after changing CLI output or error messages.
+
+## File Structure
+
+- `src/cli.ts` - CLI entry, command definitions, Stage 1 handlers
+- `src/commands-stage2.ts` - Push/pull/sync/doctor/hooks handlers
+- `src/transfer.ts` - Backend orchestration, compression, key generation
+- `src/backend-*.ts` - Backend implementations (local, command, s3)
+- `src/types.ts` - Shared types, error classes, constants
+- `src/ref.ts` - .yref file I/O
+- `src/template.ts` - Remote key template evaluation
