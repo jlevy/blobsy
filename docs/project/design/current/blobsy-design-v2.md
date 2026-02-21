@@ -215,7 +215,7 @@ is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 | `{repo_path}` | Repository-relative path | `data/research/model.bin` |
 | `{filename}` | Filename only | `model.bin` |
 | `{dirname}` | Directory path only | `data/research/` |
-| `{git_branch}` | Current git branch | `main`, `feature/x` |
+| `{git_branch}` (V2) | Current git branch | `main`, `feature/x` |
 | `{compress_suffix}` | Compression suffix based on algorithm | `.zst`, `.gz`, `.br`, or empty string |
 
 Any text outside `{...}` is kept as-is (literal prefix/suffix).
@@ -325,9 +325,13 @@ s3://my-datasets/project-alpha/
 organization. Good for ML model versioning where the same model file appears in many
 contexts.
 
-##### Pattern 3: Branch-Isolated Storage
+##### Pattern 3: Branch-Isolated Storage (V2)
 
 **Separate namespaces per branch, with dedup within each branch.**
+
+**Note:** The `{git_branch}` template variable and branch-isolated storage are deferred
+to V2. V1 supports timestamp+hash (Pattern 1), pure CAS (Pattern 2), and shared storage
+(Pattern 4) only.
 
 ```yaml
 # .blobsy.yml
@@ -1216,14 +1220,29 @@ warnings).
    - See [Transport Health Check](#transport-health-check) section
 
 2. **For each `.yref` file:**
-   - **Read the ref** from working tree -- get `sha256`, `size`, `remote_key`
-   - **Check local file** -- hash it (using stat cache for speed)
-   - **If local file changed:** update `.yref` with new hash (like `blobsy track`)
-   - **If local matches ref and remote has the blob:** nothing to do (✓)
-   - **If local matches ref but remote doesn’t have it:** push (upload blob, set
-     `remote_key` in ref) (becomes ◑)
-   - **If local is missing but remote has the blob:** pull (download blob)
-   - **If local differs from ref:** update ref, then push (combined track + push)
+   - **Read the ref** from working tree -- get `hash`, `size`, `remote_key`
+   - **Check stat cache** for last-known state (mtime, size, hash)
+   - **Check local file** -- stat it (size, mtime), conditionally hash it
+
+   **Decision tree:**
+
+   - **If local file matches stat cache** (mtime and size match):
+     - **And `.yref` hash matches cache:** File unchanged, check remote
+       - If remote has blob: nothing to do (✓)
+       - If remote missing: push
+     - **And `.yref` hash differs from cache:** Git updated `.yref` underneath us
+       - **Action:** Pull new blob from remote (update local file)
+
+   - **If local file differs from stat cache** (mtime or size changed):
+     - Hash the local file
+     - **And hash matches `.yref`:** Coincidental match (edited back to same content)
+       - Update cache, check remote, push if missing
+     - **And hash differs from `.yref`:** User edited the file
+       - **Action:** Update `.yref` with new hash, push new blob
+
+   - **If local file is missing:**
+     - **And remote has the blob:** Pull (download blob)
+     - **And remote missing:** Error (both local and remote missing)
 
 **Important:** Sync can modify `.yref` files (update hash, set `remote_key`). These
 modifications are in the working tree - user must commit them.
