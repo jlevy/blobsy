@@ -33,7 +33,15 @@
   "bugs": {
     "url": "https://github.com/jlevy/blobsy/issues"
   },
-  "keywords": [],
+  "keywords": [
+    "git",
+    "large-files",
+    "blob-storage",
+    "s3",
+    "cli",
+    "git-lfs-alternative",
+    "content-addressable"
+  ],
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
@@ -58,7 +66,6 @@
     "@aws-sdk/client-s3": "^3.995.0",
     "atomically": "^2.1.1",
     "commander": "^14.0.3",
-    "picocolors": "^1.1.1",
     "picomatch": "^4.0.3",
     "yaml": "^2.8.2"
   }

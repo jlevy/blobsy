@@ -1669,6 +1669,10 @@ SECURITY
   blobsy trust                         Trust current repo for command backend execution
        [--revoke]                    Remove trust for current repo
        [--list]                      Show trusted repos
+
+AGENT INTEGRATION
+  blobsy skill [--brief]               Output skill documentation for AI agents
+  blobsy prime [--brief]               Output context primer for AI agents
 ```
 
 ### Flags (Global)
@@ -1678,9 +1682,11 @@ SECURITY
 --quiet         Suppress all output except errors
 --dry-run       Show what would happen without doing it
 --verbose       Detailed progress output
---force         Skip confirmation for destructive operations
 --help          Command help with usage examples
 ```
+
+Note: `--force` is command-specific (push: re-push even if remote exists; pull:
+overwrite local modifications; sync: force overwrite conflicts).
 
 ### Exit Codes
 
