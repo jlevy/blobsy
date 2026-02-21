@@ -37,6 +37,39 @@ Every major hook tool uses the thin-shim-delegates-to-real-tool pattern:
 | Git LFS | Shell script calls `git lfs pre-push` | Go binary |
 | lint-staged | Called via `npx lint-staged` from hook | Node.js |
 
+### Installation Model
+
+Blobsy is a system tool, not a project dependency.
+The primary installation is global, like Git LFS:
+
+```bash
+npm install -g blobsy    # npm
+```
+
+This makes `blobsy` available on PATH for any repo, regardless of project language
+(Python, Rust, Go, data science, etc.). No `node_modules` required.
+
+Node.js projects may optionally add blobsy as a devDependency for version pinning, but
+this is not required and not the default setup path.
+
+**Setup flow:**
+
+| Step | Who | When |
+| --- | --- | --- |
+| `npm install -g blobsy` | Each developer (once per machine) | Before first use |
+| `blobsy init` | Every developer (once per clone) | After `git clone` or on first setup |
+
+`blobsy init` is idempotent.
+The first developer to run it creates the config (`.blobsy.yml`) and installs hooks.
+Subsequent developers run the same command — it detects the existing config, skips
+setup, and just installs hooks.
+This means there is one command for everyone to remember, whether they are the first
+developer or the tenth.
+
+Projects can automate `blobsy init` via their existing setup mechanism (Makefile,
+`prepare` script, setup.sh, etc.)
+but blobsy does not require or assume any particular project type.
+
 ### The Shim Script
 
 Installed by `blobsy hooks install` (and by `blobsy init`) at `.git/hooks/pre-commit`.
@@ -55,22 +88,18 @@ else
 fi
 ```
 
+The shim delegates entirely to the `blobsy` CLI on PATH. If blobsy is not installed, the
+shell reports “command not found” and blocks the commit -- a clear signal to install
+blobsy.
+
 **Cross-platform notes:**
 
 - Uses `#!/bin/sh` (POSIX), not `#!/bin/bash`. Git executes hooks via its bundled shell
   on all platforms, including Windows (Git for Windows bundles MSYS2 with `/bin/sh`).
-- `node_modules/.bin/blobsy` exists as a POSIX shell script on all platforms.
-  npm and pnpm both generate POSIX shell scripts alongside `.cmd` and `.ps1` variants.
-  The POSIX variant runs correctly in Git’s MSYS2 environment on Windows.
-- The `npx` fallback handles cases where blobsy is installed globally or via `npx`
-  one-off usage. The `--yes` flag suppresses the install prompt.
-- `exec` replaces the shell process to avoid an extra process layer and ensure the exit
-  code propagates correctly.
-
-**Performance:** Direct `node_modules/.bin/` invocation avoids the `npx` cold start
-penalty, which is well-documented at ~5 seconds even for cached packages.
-Since blobsy hooks may trigger blob uploads (already slow), the `npx` fallback overhead
-is acceptable but not ideal for the common case.
+- `exec` replaces the shell process so the exit code propagates correctly.
+- No `npx`, no `node_modules/.bin/` lookup, no auto-bootstrapping.
+  The hook assumes blobsy is installed as a system tool, the same way `git lfs` hooks
+  assume `git-lfs` is installed.
 
 ### The `blobsy hook pre-commit` Command
 
@@ -118,12 +147,13 @@ async function hookPreCommit(): Promise<void> {
 
 ### Coexistence with Hook Managers
 
-Many Node.js projects already use Lefthook, Husky, or simple-git-hooks.
-Blobsy must not conflict with existing hook infrastructure.
+Projects may already use a hook manager (Lefthook, Husky, simple-git-hooks, Python’s
+pre-commit framework, etc.). Blobsy must not conflict with existing hook infrastructure.
 
-**Projects using Lefthook:** Add blobsy as a command in `lefthook.yml` instead of
-installing a standalone shim.
-`blobsy hooks install` should detect Lefthook’s presence and print instructions:
+**Projects with a hook manager:** Add `blobsy hook pre-commit` as a command in the
+existing hook configuration.
+Since blobsy is on PATH, this works the same way regardless of project type or hook
+manager. Examples:
 
 ```yaml
 # lefthook.yml
@@ -131,17 +161,28 @@ pre-commit:
   commands:
     blobsy:
       glob: "*.yref"
-      run: npx blobsy hook pre-commit
-      # Or: node_modules/.bin/blobsy hook pre-commit
+      run: blobsy hook pre-commit
 ```
-
-**Projects using Husky v9:** Add the command to `.husky/pre-commit`. Husky v9 does not
-add `node_modules/.bin/` to PATH (older versions did), so use `npx` or a direct path:
 
 ```sh
 # .husky/pre-commit
-npx blobsy hook pre-commit
+blobsy hook pre-commit
 ```
+
+```yaml
+# .pre-commit-config.yaml (Python pre-commit framework)
+repos:
+  - repo: local
+    hooks:
+      - id: blobsy
+        name: blobsy push
+        entry: blobsy hook pre-commit
+        language: system
+        pass_filenames: false
+```
+
+`blobsy hooks install` detects existing hook managers and prints the appropriate
+integration instructions instead of installing a standalone shim.
 
 **Projects without a hook manager:** `blobsy hooks install` writes the standalone shim
 to `.git/hooks/pre-commit`. If an existing hook is present, blobsy warns and offers to
@@ -152,9 +193,11 @@ append rather than overwrite.
 1. Check for `lefthook.yml` in repo root -- if found, print Lefthook integration
    instructions instead of installing a shim.
 2. Check for `.husky/` directory -- if found, print Husky integration instructions.
-3. Check for existing `.git/hooks/pre-commit` -- if found and not blobsy-owned (no
+3. Check for `.pre-commit-config.yaml` -- if found, print pre-commit framework
+   integration instructions.
+4. Check for existing `.git/hooks/pre-commit` -- if found and not blobsy-owned (no
    `Installed by: blobsy` marker), warn and offer to append.
-4. Otherwise, install the standalone shim.
+5. Otherwise, install the standalone shim.
 
 ### `blobsy hooks install` and `blobsy hooks uninstall`
 
@@ -173,7 +216,11 @@ Consistent with the design doc’s `blobsy hooks` section.
 - Removes `.git/hooks/pre-commit` only if it contains the `Installed by: blobsy` marker.
 - If the hook was modified or isn’t blobsy-owned, warns and exits without deleting.
 
-**`blobsy init`** calls `blobsy hooks install` automatically as its final step.
+**`blobsy init`** calls `blobsy hooks install` as its final step.
+Since `blobsy init` is idempotent and subsumes hook installation, most developers only
+need to know `blobsy init`. `blobsy hooks install` remains available as a standalone
+command for cases where only hook management is needed (e.g., after switching hook
+managers).
 
 ## Push Verification Logic (Pseudocode)
 

@@ -1,7 +1,7 @@
 {
   "name": "blobsy",
   "version": "0.1.0",
-  "description": "A simple, serverless CLI for large file storage in Git that uses S3, R2, or any other backend",
+  "description": "Store large files anywhere. Track them in Git.",
   "license": "MIT",
   "author": "Joshua Levy <joshua@cal.berkeley.edu>",
   "type": "module",

@@ -959,15 +959,28 @@ find data -name "*.bin" -exec blobsy track {} +
 ### `blobsy init`
 
 Initialize blobsy in a git repo.
+Idempotent — every developer runs this after cloning.
+
+**First run (no config exists):** Creates `.blobsy.yml`, prompts for backend settings
+(or accepts flags), and installs the pre-commit hook.
 
 ```bash
 $ blobsy init
 Created .blobsy.yml
 ? Bucket: my-datasets
 ? Region: us-east-1
+Installed pre-commit hook
 ```
 
-Interactive when run without flags.
+**Subsequent runs (config already exists):** Skips config setup, installs hooks only.
+
+```bash
+$ blobsy init
+Found existing .blobsy.yml — skipping config setup
+Installed pre-commit hook
+```
+
+Interactive when run without flags on first setup.
 Supports fully non-interactive usage via flags:
 `blobsy init --bucket my-data --region us-east-1`.
 
