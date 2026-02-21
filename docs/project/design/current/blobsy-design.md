@@ -120,7 +120,7 @@ shells) without setup, and never has stale state from a crashed daemon.
 
 ### Transparent Testing via Local Backend
 
-The `local` backend (`local:./some-dir`) makes the entire system testable without cloud
+The `local` backend (`local:../some-dir`) makes the entire system testable without cloud
 credentials. Integration tests use a temp directory as the “remote” -- push writes files
 there, pull reads them back.
 Every code path (compression, hashing, atomic writes, conflict detection) exercises
@@ -973,7 +973,7 @@ Created .blobsy.yml
 Installed pre-commit hook
 
 # Local backend (for dev/testing)
-$ blobsy init local:./remote
+$ blobsy init local:../blobsy-remote
 Created .blobsy.yml
 Installed pre-commit hook
 ```
@@ -1004,8 +1004,8 @@ for full parsing rules and validation.
 On first run without a URL, `blobsy init` prints a usage error with examples (not a
 prompt). On subsequent runs, the URL is optional -- the existing config is used.
 
-**Relative paths** in `local:` URLs (e.g., `local:./remote`) are always relative to the
-git repo root, not the current working directory.
+**Relative paths** in `local:` URLs (e.g., `local:../blobsy-remote`) are always relative
+to the git repo root, not the current working directory.
 This matches the convention Git uses for `.gitignore` and submodule paths.
 See
 [Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)

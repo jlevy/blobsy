@@ -305,7 +305,7 @@ tests/
       small-file.txt                       # "hello blobsy\n" (known content, 13 B)
       another-file.txt                     # "second file\n" (known content, 12 B)
       binary-file.bin                      # Binary content for compression tests
-      local-backend.blobsy.yml             # Config: url: local:./remote
+      local-backend.blobsy.yml             # Config: url: local:../remote
       echo-backend.blobsy.yml              # Config: type: command with echo
 ```
 
@@ -345,7 +345,7 @@ The fixture `local-backend.blobsy.yml`:
 ```yaml
 backends:
   default:
-    url: local:./remote
+    url: local:../remote
 ```
 
 The fixture `echo-backend.blobsy.yml`:
@@ -796,7 +796,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
   blobsy track data/model.bin
@@ -1011,14 +1011,14 @@ fixtures:
 
 ```console
 $ git init -q -b main
-$ mkdir -p data remote
+$ mkdir -p data ../remote
 ? 0
 ```
 
 # Initialize blobsy with local backend
 
 ```console
-$ blobsy init local:./remote
+$ blobsy init local:../remote
 Created .blobsy.yml
 Installed pre-commit hook (.git/hooks/pre-commit)
 ? 0
@@ -1030,7 +1030,7 @@ Installed pre-commit hook (.git/hooks/pre-commit)
 $ cat .blobsy.yml
 backends:
   default:
-    url: local:./remote
+    url: local:../remote
 ? 0
 ```
 
@@ -1179,7 +1179,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track model"
@@ -1272,7 +1272,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track model"
@@ -1286,7 +1286,7 @@ before: |
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local:./remote
+Backend: local:../remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1320,7 +1320,7 @@ $ echo "" > .gitignore
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local:./remote
+Backend: local:../remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1348,7 +1348,7 @@ Stat cache: 1 entry, 0 stale
 $ blobsy doctor --fix
 
 === CONFIGURATION ===
-Backend: local:./remote
+Backend: local:../remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1379,7 +1379,7 @@ data/model.bin
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local:./remote
+Backend: local:../remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1418,7 +1418,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track model"
@@ -1521,7 +1521,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model-v1.bin
   cp another-file.txt data/old-data.csv
   blobsy track data/model-v1.bin
@@ -1662,7 +1662,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track"
@@ -1711,7 +1711,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track"
@@ -1764,7 +1764,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/good-file.bin
   cp another-file.txt data/bad-file.bin
   blobsy track data/good-file.bin
@@ -1826,7 +1826,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
-  mkdir -p data remote
+  mkdir -p data ../remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   git add -A && git commit -q -m "track"

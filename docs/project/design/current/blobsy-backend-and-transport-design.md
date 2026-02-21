@@ -28,7 +28,7 @@ tools.
 | `s3://` | `s3` | `s3://<bucket>/<prefix>` | `s3://my-datasets/project-v1/` |
 | `gs://` | `gcs` | `gs://<bucket>/<prefix>` | `gs://my-data/prefix/` |
 | `azure://` | `azure` | `azure://<container>/<prefix>` | `azure://mycontainer/blobs/` |
-| `local:` | `local` | `local:<path>` | `local:./remote`, `local:/tmp/blobsy-store` |
+| `local:` | `local` | `local:<path>` | `local:../blobsy-remote`, `local:/tmp/blobsy-store` |
 
 Every backend has an explicit scheme.
 There are no bare paths -- `local:` is required for local directory backends.
@@ -52,7 +52,7 @@ the bucket or container, and the path to determine the directory or prefix.
 DVC and rclone use bare paths for local remotes.
 Blobsy uses `local:` instead because:
 
-1. **Clarity.** `blobsy init local:./remote` is unambiguous.
+1. **Clarity.** `blobsy init local:../blobsy-remote` is unambiguous.
    A bare `./remote` argument to `init` could be mistaken for a repo-relative path or
    config file.
 2. **Validation.** The `local:` prefix signals “this is a directory backend” and
@@ -73,7 +73,7 @@ The URL is parsed as follows:
 | `azure://mycontainer/blobs/` | `azure` | `mycontainer` | `blobs/` |
 | `s3://my-bucket` | **error** | -- | -- |
 | `local:/tmp/blobsy-remote` | `local` | -- | `/tmp/blobsy-remote` |
-| `local:./remote` | `local` | -- | `./remote` |
+| `local:../blobsy-remote` | `local` | -- | `./remote` |
 | `local:../shared-store` | `local` | -- | `../shared-store` |
 | `local:~/blobsy-data` | `local` | -- | `~/blobsy-data` (expanded) |
 
@@ -98,12 +98,30 @@ It can be absolute, relative, or home-relative (`~`).
 `.git/`), not relative to the current working directory or to `.blobsy.yml`. This is the
 same convention Git uses for `.gitignore` patterns and submodule paths.
 The path is stored as-is in `.blobsy.yml` and resolved against the repo root at runtime.
-This means `local:./remote` always refers to `<repo-root>/remote/` regardless of where
-`blobsy` is invoked from within the repo.
+This means `local:../blobsy-remote` always refers to `<repo-root>/../blobsy-remote/`
+regardless of where `blobsy` is invoked from within the repo.
 
 Rationale: making paths repo-root-relative avoids surprises when running blobsy from
-subdirectories. If `local:./remote` meant “relative to cwd,” the same config would
-resolve to different directories depending on where the user runs the command.
+subdirectories. If `local:../blobsy-remote` meant “relative to cwd,” the same config
+would resolve to different directories depending on where the user runs the command.
+
+**The resolved path must be outside the repo root.** A local backend path that resolves
+to a directory inside the git repository is rejected.
+Storing blobs inside the repo would cause git to track them (bloating the repo), and
+blobsy could recursively encounter its own store.
+Use `../` to place the backend alongside the repo, or use an absolute path.
+
+```
+Error: Local backend path is inside the git repository
+
+  Resolved path: /Users/alice/projects/ml-research/remote
+  Repository root: /Users/alice/projects/ml-research
+
+The local backend directory must be outside the git repo to avoid
+git tracking blob files. Use a path outside the repo:
+  blobsy init local:../blobsy-remote
+  blobsy init local:/tmp/blobsy-remote
+```
 
 ### URL Validation
 
@@ -139,7 +157,7 @@ For S3-compatible stores like R2, use s3:// with --endpoint:
   blobsy init s3://my-bucket/blobs/ --endpoint https://ACCT_ID.r2.cloudflarestorage.com
 
 For local directories:
-  blobsy init local:./remote
+  blobsy init local:../blobsy-remote
   blobsy init local:/tmp/blobsy-store
 ```
 
@@ -149,7 +167,7 @@ Bare paths are explicitly rejected with a hint to use `local:`:
 Error: Unrecognized backend URL: "./remote"
 
 Did you mean a local directory backend?
-  blobsy init local:./remote
+  blobsy init local:../blobsy-remote
 ```
 
 **Per-scheme validation rules:**
@@ -159,7 +177,7 @@ Did you mean a local directory backend?
 | `s3://` | Must have non-empty bucket name (the host component). Bucket must match S3 naming rules: 3-63 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen, no `..`. Must have a non-empty prefix (path after bucket). Prefix must not contain `//` or backslashes. | `Invalid S3 URL: bucket name "AB" is invalid (must be 3-63 lowercase chars)` or `Missing prefix in URL: "s3://my-bucket"` |
 | `gs://` | Must have non-empty bucket name. Bucket: 3-63 chars, lowercase alphanumeric + hyphens + dots, no leading/trailing dot/hyphen. Must have a non-empty prefix. No `//` in path. | `Invalid GCS URL: missing bucket name` or `Missing prefix in URL: "gs://my-bucket"` |
 | `azure://` | Must have non-empty container name. Container: 3-63 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen. Must have a non-empty prefix. No `//` in path. | `Invalid Azure URL: container name "--bad" starts with hyphen` or `Missing prefix in URL: "azure://mycontainer"` |
-| `local:` | Path after colon must not be empty. Must not contain null bytes. Must resolve to a directory (not a file). Relative paths are relative to git repo root. If absolute, parent directory must exist at init time. At runtime, target directory must exist (or is created by the first push). | `Invalid local URL: path is empty (use local:./remote)` or `Invalid local URL: "./data.csv" is a file, not a directory` |
+| `local:` | Path after colon must not be empty. Must not contain null bytes. Must resolve to a directory (not a file). Relative paths are relative to git repo root. Resolved absolute path must be outside the repo root. At runtime, target directory must exist (or is created by the first push). | `Invalid local URL: path is empty (use local:../blobsy-remote)` or `Local backend path is inside the git repository` |
 
 **S3 bucket naming rules** (per
 [AWS S3 docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html)):
@@ -240,7 +258,7 @@ blobsy init gs://my-bucket/prefix/
 blobsy init azure://mycontainer/blobs/
 
 # Local (relative to repo root)
-blobsy init local:./remote
+blobsy init local:../blobsy-remote
 
 # Local (absolute)
 blobsy init local:/tmp/blobsy-store
@@ -281,7 +299,7 @@ backends:
 # Local backend
 backends:
   default:
-    url: local:./remote
+    url: local:../blobsy-remote
 ```
 
 The `url` field replaces the previous `type`, `bucket`, `path`, and `prefix` fields.
@@ -311,7 +329,7 @@ The URL is the canonical way blobsy refers to a backend in output:
 
 ```
 ✓ Backend reachable (s3://my-datasets/project-v1/)
-✗ Backend unreachable (local:./remote)
+✗ Backend unreachable (local:../blobsy-remote)
 ```
 
 ## Backend Types
@@ -331,7 +349,7 @@ Deferred to a future version.
 **`local`:** Directory-to-directory copy.
 For development and testing.
 No cloud account needed.
-Specified as `local:<path>` (e.g. `local:./remote`).
+Specified as `local:<path>` (e.g. `local:../blobsy-remote`).
 
 **`command`:** Arbitrary shell commands for push/pull.
 This serves two purposes:
@@ -434,7 +452,7 @@ backends:
     endpoint: https://ACCT_ID.r2.cloudflarestorage.com
 
   dev:
-    url: local:./remote
+    url: local:../blobsy-remote
 ```
 
 The AWS CLI and rclone support `--endpoint-url` for S3-compatible stores.
