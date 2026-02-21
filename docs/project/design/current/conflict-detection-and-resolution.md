@@ -301,14 +301,8 @@ async function push(filePath: string, options: PushOptions = {}): Promise<void> 
   ref.remote_key = remoteKey;
   await writeYRef(yrefPath, ref);
 
-  // 6. Update stat cache
-  const stats = await stat(filePath);
-  await statCache.set(filePath, {
-    hash: ref.hash,
-    size: ref.size,
-    mtimeNs: stats.mtimeNs.toString(),  // BigInt to string for JSON
-    cachedAt: Date.now()
-  });
+  // 6. Update stat cache (see stat-cache-design.md for updateCacheEntry)
+  await updateCacheEntry(cacheDir, filePath, ref.hash);
 
   console.log(`✓ Pushed ${filePath} (${formatSize(ref.size)})`);
 }

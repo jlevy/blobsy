@@ -1,4 +1,4 @@
-# Stat Cache Design
+# Blobsy: Stat Cache Design
 
 **Date:** 2026-02-21
 
