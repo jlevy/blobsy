@@ -41,6 +41,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run --dir tests/e2e",
     "publint": "publint",
     "prepack": "pnpm build"
   },
