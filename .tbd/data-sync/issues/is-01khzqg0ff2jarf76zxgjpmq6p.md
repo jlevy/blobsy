@@ -3,9 +3,9 @@ type: is
 id: is-01khzqg0ff2jarf76zxgjpmq6p
 title: "Phase 2: Backend + Sync Commands (local/echo backend, push/pull/sync, stat cache, hooks, doctor, health, check-unpushed, pre-push-check)"
 kind: feature
-status: open
+status: closed
 priority: 1
-version: 14
+version: 15
 spec_path: docs/project/specs/active/plan-2026-02-21-blobsy-v1-implementation.md
 labels: []
 dependencies:
@@ -25,5 +25,7 @@ child_order_hints:
   - is-01khzy14n9zvh4app5pnsb7y4x
   - is-01khzy14t5qepgghrp8nakrqbp
 created_at: 2026-02-21T09:11:37.197Z
-updated_at: 2026-02-21T11:05:50.148Z
+updated_at: 2026-02-21T18:00:54.536Z
+closed_at: 2026-02-21T18:00:54.534Z
+close_reason: "All Stage 2 modules and commands implemented: backends, transfer, compression, sync commands. 115 unit tests + 271 golden tests pass."
 ---
