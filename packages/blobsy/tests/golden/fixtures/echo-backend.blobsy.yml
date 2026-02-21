@@ -1,0 +1,8 @@
+backends:
+  default:
+    type: command
+    push_command: npx tsx echo-backend.ts push {local} {bucket}/{remote}
+    pull_command: npx tsx echo-backend.ts pull {bucket}/{remote} {local}
+    exists_command: npx tsx echo-backend.ts exists {bucket}/{remote}
+    bucket: test-bucket
+    prefix: ''
