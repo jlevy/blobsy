@@ -5,9 +5,8 @@
 **Status:** Draft
 
 **Supersedes:** Stat cache sections previously in `blobsy-design-v2.md` ("Local Stat
-Cache"), `conflict-detection-and-resolution.md` ("Layer 2: Detection via Stat Cache
-Three-Way Merge"), and `conflict-integration-plan.md` ("Integrity Model Section"). Those
-docs now cross-reference this file.
+Cache") and `conflict-detection-and-resolution.md` ("Layer 2: Detection via Stat Cache
+Three-Way Merge"). Those docs now cross-reference this file.
 
 ## Overview
 

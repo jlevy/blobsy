@@ -88,6 +88,68 @@ Git is the manifest.
     This determinism enables reliable team collaboration, reproducible builds, and
     predictable storage costs.
 
+## Design Decisions
+
+These are cross-cutting decisions that shape the implementation and testing strategy.
+
+### Idempotent Operations
+
+Every operation that reasonably can be idempotent is idempotent.
+Re-running any sync operation is always safe and converges to the same state:
+
+- `blobsy track` on an already-tracked file: updates hash if content changed, no-op if
+  unchanged.
+- `blobsy push` when the remote already has the blob: no-op (content-addressable = same
+  hash = same key = already exists).
+- `blobsy pull` when the local file already matches the ref: no-op.
+- `blobsy sync` when everything is in sync: no-op.
+- `blobsy status`, `blobsy verify`, `blobsy doctor`: read-only, trivially idempotent.
+
+Structural commands (`untrack`, `rm`, `mv`) are not repeatable by nature, but fail
+safely on a second invocation rather than causing damage.
+
+This matters for reliability: interrupted operations can always be retried.
+Scripts, CI pipelines, and agent tool loops can call blobsy without worrying about
+double-execution.
+
+### No Daemon, No Lock Files
+
+Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
+files, exits. No background processes, no lock files, no coordination between
+invocations. The only persistent local state is the stat cache (see
+[stat-cache-design.md](stat-cache-design.md)), which is machine-local and gitignored.
+
+This simplicity means blobsy works in any environment (containers, CI runners, remote
+shells) without setup, and never has stale state from a crashed daemon.
+
+### Transparent Testing via Local Backend
+
+The `local` backend (`type: local`, `path: /some/dir/`) makes the entire system testable
+without cloud credentials.
+Integration tests use a temp directory as the “remote” -- push writes files there, pull
+reads them back. Every code path (compression, hashing, atomic writes, conflict
+detection) exercises identically to production S3 usage, just with a filesystem
+destination.
+
+This means development and CI require zero cloud infrastructure.
+
+### Golden Tests for All User-Facing Output
+
+Blobsy uses golden/snapshot tests for **all user-facing output**, not just error
+messages. Status output, sync summaries, doctor diagnostics, `--json` output shapes, and
+error messages are all snapshot-tested.
+This ensures:
+
+- Output formats remain stable across releases (no accidental breakage for scripts
+  parsing `--json`).
+- Error messages stay helpful and consistent (error UX is critical).
+- Human-readable formatting doesn’t regress.
+- CI fails on any unintentional output change; intentional changes require explicit
+  snapshot updates.
+
+See the [Testing](#testing) section for the specific error scenario test cases and
+implementation patterns.
+
 ## Related Work
 
 A survey of existing tools shows no single solution cleanly fills this role.
@@ -2941,16 +3003,6 @@ An agent encountering a `.yref` file for the first time can read this header, vi
 URL or run `npx blobsy --help`, and understand the system without external
 documentation.
 
-### Idempotency
-
-All commands are safe to run repeatedly:
-
-- `blobsy pull` when already up-to-date: no-op.
-- `blobsy push` when remote matches: no-op.
-- `blobsy track` on already-tracked path: updates ref if content changed, no-op if
-  unchanged.
-- `blobsy sync` when fully synced: no-op.
-
 ### Non-Interactive by Default
 
 All sync operations (`push`, `pull`, `sync`, `status`, `verify`) are fully
@@ -2994,23 +3046,21 @@ support). Older versions can still use gzip or brotli compression.
 
 ### No Daemon
 
-Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
-files, exits. No background processes, no lock files.
-The only persistent local state is the stat cache (see
-[stat-cache-design.md](stat-cache-design.md)), which is mandatory for conflict detection
-during sync. If missing, blobsy auto-rebuilds it where unambiguous and errors with
+See [Design Decisions](#design-decisions).
+Pure CLI with no background processes.
+If the stat cache is missing, blobsy auto-rebuilds it where unambiguous and errors with
 resolution guidance where ambiguous.
 
 ### Testing
 
-The `local` backend makes testing trivial.
-Integration tests use a temp directory as the “remote.”
-No cloud account needed for development.
+See [Design Decisions](#design-decisions) for the local backend testing approach and
+golden test philosophy.
 
-#### Golden Tests for Error Conditions
+#### Golden Tests for User-Facing Output
 
-Blobsy includes comprehensive golden/snapshot tests for all transport error scenarios.
-Error messages are critical UX -- they must be helpful, consistent, and tested.
+Blobsy uses golden/snapshot tests for all user-facing output (status, sync summaries,
+doctor diagnostics, `--json` shapes, and error messages).
+Error messages in particular are critical UX and must be tested for every scenario.
 
 **Required error test cases:**
 
