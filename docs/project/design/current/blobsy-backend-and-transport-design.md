@@ -14,17 +14,324 @@ path + remote key, pull a blob by remote key + local path.
 The backend handles tool selection, authentication, error formatting, health checks, and
 atomic writes. The frontend never talks directly to S3, rclone, or any transport tool.
 
+## Backend URL Convention
+
+Backends are identified by a URL. The URL scheme determines the backend type, and the
+path encodes bucket/container and prefix.
+This follows the same convention used by DVC, rclone, AWS CLI, gsutil, and other data
+tools.
+
+### Supported URL Schemes
+
+| Scheme | Backend type | URL format | Example |
+| --- | --- | --- | --- |
+| `s3://` | `s3` | `s3://<bucket>/<prefix>` | `s3://my-datasets/project-v1/` |
+| `gs://` | `gcs` | `gs://<bucket>/<prefix>` | `gs://my-data/prefix/` |
+| `azure://` | `azure` | `azure://<container>/<prefix>` | `azure://mycontainer/blobs/` |
+| `local:` | `local` | `local:<path>` | `local:./remote`, `local:/tmp/blobsy-store` |
+
+Every backend has an explicit scheme.
+There are no bare paths -- `local:` is required for local directory backends.
+This avoids ambiguity (a path argument to `init` could be mistaken for something else)
+and makes it clear that the target is a directory used as a blob store, not something
+inside the repo.
+
+The URL is the primary way to specify a backend on the CLI and in config.
+Blobsy parses the scheme to determine the backend type, the authority/host to determine
+the bucket or container, and the path to determine the directory or prefix.
+
+### Precedent: How Other Tools Handle This
+
+| Tool | S3 | GCS | Azure | Local |
+| --- | --- | --- | --- | --- |
+| DVC | `s3://bucket/path` | `gs://bucket/path` | `azure://container/path` | `/path` (bare) |
+| rclone | `remote:bucket/path` | `remote:bucket/path` | `remote:container/path` | `/path` (bare) |
+| AWS CLI | `s3://bucket/key` | -- | -- | -- |
+| gsutil/gcloud | -- | `gs://bucket/path` | -- | -- |
+
+DVC and rclone use bare paths for local remotes.
+Blobsy uses `local:` instead because:
+
+1. **Clarity.** `blobsy init local:./remote` is unambiguous.
+   A bare `./remote` argument to `init` could be mistaken for a repo-relative path or
+   config file.
+2. **Validation.** The `local:` prefix signals “this is a directory backend” and
+   triggers directory-specific validation (must be a directory, not a file; parent must
+   exist).
+3. **Consistency.** Every backend type has a scheme.
+   No special-casing for “no scheme means local.”
+
+### URL Parsing Rules
+
+The URL is parsed as follows:
+
+| URL | Parsed type | Parsed bucket/container | Parsed prefix/path |
+| --- | --- | --- | --- |
+| `s3://my-bucket/project-v1/` | `s3` | `my-bucket` | `project-v1/` |
+| `s3://my-bucket/a/b/c/` | `s3` | `my-bucket` | `a/b/c/` |
+| `gs://my-bucket/prefix/` | `gcs` | `my-bucket` | `prefix/` |
+| `azure://mycontainer/blobs/` | `azure` | `mycontainer` | `blobs/` |
+| `s3://my-bucket` | **error** | -- | -- |
+| `local:/tmp/blobsy-remote` | `local` | -- | `/tmp/blobsy-remote` |
+| `local:./remote` | `local` | -- | `./remote` |
+| `local:../shared-store` | `local` | -- | `../shared-store` |
+| `local:~/blobsy-data` | `local` | -- | `~/blobsy-data` (expanded) |
+
+For cloud schemes (`s3://`, `gs://`, `azure://`), a prefix is **required**. A URL with
+only a bucket and no prefix (e.g. `s3://my-bucket`) is rejected:
+
+```
+Error: Missing prefix in URL: "s3://my-bucket"
+
+A prefix is required to avoid writing blobs to the root of the bucket.
+Add a prefix path after the bucket name:
+  blobsy init s3://my-bucket/my-project/
+```
+
+A trailing slash on the prefix is optional and normalized (blobsy always appends one
+internally).
+
+For `local:`, the path after the colon is the directory path.
+It can be absolute, relative, or home-relative (`~`).
+
+**Relative paths are always relative to the git repo root** (the directory containing
+`.git/`), not relative to the current working directory or to `.blobsy.yml`. This is the
+same convention Git uses for `.gitignore` patterns and submodule paths.
+The path is stored as-is in `.blobsy.yml` and resolved against the repo root at runtime.
+This means `local:./remote` always refers to `<repo-root>/remote/` regardless of where
+`blobsy` is invoked from within the repo.
+
+Rationale: making paths repo-root-relative avoids surprises when running blobsy from
+subdirectories. If `local:./remote` meant “relative to cwd,” the same config would
+resolve to different directories depending on where the user runs the command.
+
+### URL Validation
+
+Blobsy validates backend URLs strictly.
+Unrecognized schemes are rejected at parse time with a clear error, not silently
+accepted.
+
+**Scheme recognition:**
+
+Blobsy recognizes exactly these URL forms:
+
+| Input pattern | Recognized as | Notes |
+| --- | --- | --- |
+| `s3://...` | S3 backend | Case-insensitive scheme matching |
+| `gs://...` | GCS backend |  |
+| `azure://...` | Azure backend |  |
+| `local:...` | Local directory | Path after colon; absolute, relative, or `~` |
+
+Anything else -- `http://`, `ftp://`, `hdfs://`, `r2://`, `file://`, a bare path like
+`./remote`, a bare word like `mybucket`, or a misspelled scheme like `S3://` -- is
+rejected:
+
+```
+Error: Unrecognized backend URL: "r2://my-bucket/prefix/"
+
+Supported URL schemes:
+  s3://bucket/prefix/       Amazon S3 and S3-compatible (R2, MinIO, B2, etc.)
+  gs://bucket/prefix/       Google Cloud Storage
+  azure://container/prefix/ Azure Blob Storage
+  local:path                Local directory
+
+For S3-compatible stores like R2, use s3:// with --endpoint:
+  blobsy init s3://my-bucket/blobs/ --endpoint https://ACCT_ID.r2.cloudflarestorage.com
+
+For local directories:
+  blobsy init local:./remote
+  blobsy init local:/tmp/blobsy-store
+```
+
+Bare paths are explicitly rejected with a hint to use `local:`:
+
+```
+Error: Unrecognized backend URL: "./remote"
+
+Did you mean a local directory backend?
+  blobsy init local:./remote
+```
+
+**Per-scheme validation rules:**
+
+| Scheme | Validation | Error on failure |
+| --- | --- | --- |
+| `s3://` | Must have non-empty bucket name (the host component). Bucket must match S3 naming rules: 3-63 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen, no `..`. Must have a non-empty prefix (path after bucket). Prefix must not contain `//` or backslashes. | `Invalid S3 URL: bucket name "AB" is invalid (must be 3-63 lowercase chars)` or `Missing prefix in URL: "s3://my-bucket"` |
+| `gs://` | Must have non-empty bucket name. Bucket: 3-63 chars, lowercase alphanumeric + hyphens + dots, no leading/trailing dot/hyphen. Must have a non-empty prefix. No `//` in path. | `Invalid GCS URL: missing bucket name` or `Missing prefix in URL: "gs://my-bucket"` |
+| `azure://` | Must have non-empty container name. Container: 3-63 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen. Must have a non-empty prefix. No `//` in path. | `Invalid Azure URL: container name "--bad" starts with hyphen` or `Missing prefix in URL: "azure://mycontainer"` |
+| `local:` | Path after colon must not be empty. Must not contain null bytes. Must resolve to a directory (not a file). Relative paths are relative to git repo root. If absolute, parent directory must exist at init time. At runtime, target directory must exist (or is created by the first push). | `Invalid local URL: path is empty (use local:./remote)` or `Invalid local URL: "./data.csv" is a file, not a directory` |
+
+**S3 bucket naming rules** (per
+[AWS S3 docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html)):
+
+- 3 to 63 characters
+- Lowercase letters, numbers, hyphens only
+- Must start and end with a letter or number
+- No consecutive periods (`..`)
+- Must not be formatted as an IP address (`192.168.1.1`)
+
+Blobsy enforces these at URL parse time so that typos like `s3://My-Bucket` or `s3://ab`
+are caught immediately with a specific message, not deferred to a cryptic AWS API error.
+
+**Prefix validation (all cloud schemes):**
+
+- Must not be empty (writing blobs to bucket root is disallowed)
+- Must not start with `/` (the scheme already separates bucket from prefix)
+- Must not contain `//` (likely a typo)
+- Must not contain `\` (not valid in object keys)
+- Must not contain null bytes or control characters
+
+**Query parameters and fragments:**
+
+URLs must not contain query strings (`?key=value`) or fragments (`#section`). These are
+not meaningful for blob storage URLs and indicate a likely mistake:
+
+```
+Error: Unexpected query string in URL: "s3://bucket/prefix/?region=us-east-1"
+
+Region should be specified as a flag:
+  blobsy init s3://bucket/prefix/ --region us-east-1
+```
+
+**Flag compatibility checks:**
+
+After URL parsing, blobsy validates that flags are compatible with the parsed backend
+type:
+
+| Flag | Valid with | Error if used with |
+| --- | --- | --- |
+| `--region` | `s3` | `local`, `gcs`, `azure` |
+| `--endpoint` | `s3` | `local`, `gcs`, `azure` |
+
+```
+Error: --region is not applicable to local backends
+
+  blobsy init local:/tmp/remote --region us-east-1
+                                ^^^^^^^^^^^^^^^^^^
+```
+
+**Config file validation:**
+
+The same validation runs when loading `.blobsy.yml`. Invalid URLs in config produce the
+same clear errors, with the added context of which config file and which backend name
+contains the problem:
+
+```
+Error: Invalid backend URL in .blobsy.yml (backends.default.url)
+
+  url: "s3://AB/prefix/"
+
+  S3 bucket name "AB" is too short (minimum 3 characters).
+```
+
+### CLI Usage
+
+```bash
+# S3
+blobsy init s3://my-datasets/project-v1/ --region us-east-1
+
+# S3-compatible (R2, MinIO, etc.)
+blobsy init s3://my-r2-data/project/ --endpoint https://ACCT_ID.r2.cloudflarestorage.com
+
+# GCS (future)
+blobsy init gs://my-bucket/prefix/
+
+# Azure (future)
+blobsy init azure://mycontainer/blobs/
+
+# Local (relative to repo root)
+blobsy init local:./remote
+
+# Local (absolute)
+blobsy init local:/tmp/blobsy-store
+
+# Subsequent runs (config exists) -- no URL needed
+blobsy init
+```
+
+The URL is a positional argument.
+Additional backend-specific parameters are flags:
+
+| Flag | Applies to | Description |
+| --- | --- | --- |
+| `--region <region>` | `s3` | AWS region (or S3-compatible region) |
+| `--endpoint <url>` | `s3` | Custom S3-compatible endpoint URL |
+
+On first run without a URL, `blobsy init` prints a usage error with examples (not a
+prompt).
+
+### Config File Format
+
+The URL is stored in `.blobsy.yml` as a `url` field.
+Additional parameters sit alongside it:
+
+```yaml
+# S3 backend
+backends:
+  default:
+    url: s3://my-datasets/project-v1/
+    region: us-east-1
+
+# S3-compatible (R2)
+backends:
+  default:
+    url: s3://my-r2-data/blobs/
+    endpoint: https://ACCT_ID.r2.cloudflarestorage.com
+
+# Local backend
+backends:
+  default:
+    url: local:./remote
+```
+
+The `url` field replaces the previous `type`, `bucket`, `path`, and `prefix` fields.
+Blobsy derives all of those from the URL at parse time.
+This is a simpler, more readable format that matches what users see in error messages,
+health output, and status displays.
+
+### What the URL Does NOT Encode
+
+Some parameters don’t fit in a URL and remain as separate config fields or flags:
+
+- **Region** -- not part of the S3 URI convention (AWS CLI also takes `--region`
+  separately). DVC handles this the same way:
+  `dvc remote modify myremote region us-east-2`.
+- **Endpoint** -- for S3-compatible stores, the endpoint is a separate HTTPS URL, not
+  part of the `s3://` path.
+  DVC: `dvc remote modify myremote endpointurl https://...`.
+- **Credentials** -- never in the URL. Uses standard credential chains (AWS profiles,
+  env vars, IAM roles, Azure CLI, gcloud CLI).
+- **Command templates** -- no URI representation.
+  Command backends are configured with explicit `push_command` / `pull_command` fields
+  (see below).
+
+### Display Convention
+
+The URL is the canonical way blobsy refers to a backend in output:
+
+```
+✓ Backend reachable (s3://my-datasets/project-v1/)
+✗ Backend unreachable (local:./remote)
+```
+
 ## Backend Types
 
 **`s3`:** Any S3-compatible store.
 This single type covers AWS S3, Cloudflare R2, MinIO, Backblaze B2, Tigris, DigitalOcean
-Spaces, and others.
-R2 and other S3-compatible stores are configured as `type: s3` with a
-custom `endpoint`.
+Spaces, and others. R2 and other S3-compatible stores use `s3://` URLs with a separate
+`--endpoint` flag.
+
+**`gcs`:** Google Cloud Storage.
+Uses `gs://` URLs. Deferred to a future version (after Phase 1).
+
+**`azure`:** Azure Blob Storage.
+Uses `azure://` URLs following DVC’s convention.
+Deferred to a future version.
 
 **`local`:** Directory-to-directory copy.
 For development and testing.
 No cloud account needed.
+Specified as `local:<path>` (e.g. `local:./remote`).
 
 **`command`:** Arbitrary shell commands for push/pull.
 This serves two purposes:
@@ -33,6 +340,16 @@ This serves two purposes:
 2. **Template-based transfer layer** -- a powerful alternative to named tools.
    Because each command template runs once per file with variable expansion, a `command`
    backend is functionally equivalent to a custom transfer tool.
+
+Command backends have no URL. They are configured with explicit fields:
+
+```yaml
+backends:
+  my-scp:
+    type: command
+    push_command: scp {local} myhost:/data/{remote}
+    pull_command: scp myhost:/data/{remote} {local}
+```
 
 Template variables:
 
@@ -55,16 +372,10 @@ Transport tools vary in where they write error messages -- some use stderr, some
 stdout, some use both.
 Blobsy does not discard either stream.
 
-**Examples:**
+**More command backend examples:**
 
 ```yaml
 backends:
-  # SCP to a remote server
-  ssh-server:
-    type: command
-    push_command: scp {local} myhost:/data/{remote}
-    pull_command: scp myhost:/data/{remote} {local}
-
   # rsync with compression
   rsync-remote:
     type: command
@@ -113,19 +424,17 @@ tools.
 
 ## S3-Compatible Backends
 
-R2, MinIO, Backblaze B2, Tigris, and other S3-compatible stores all use the same
-`type: s3` backend with a custom endpoint:
+R2, MinIO, Backblaze B2, Tigris, and other S3-compatible stores all use `s3://` URLs
+with a custom endpoint:
 
 ```yaml
 backends:
   r2:
-    type: s3
+    url: s3://my-r2-data/blobs/
     endpoint: https://ACCT_ID.r2.cloudflarestorage.com
-    bucket: my-r2-data
 
   dev:
-    type: local
-    path: /tmp/blobsy-test-remote/
+    url: local:./remote
 ```
 
 The AWS CLI and rclone support `--endpoint-url` for S3-compatible stores.
@@ -528,7 +837,7 @@ Aborting sync. Fix backend configuration and try again.
 
 ```bash
 $ blobsy push
-✓ Backend healthy (s3://my-bucket/)
+✓ Backend healthy (s3://my-bucket/project/)
 Pushing 42 files...
   ✓ data/file1.bin (1.2 GB) - ok
   ✓ data/file2.bin (500 MB) - ok

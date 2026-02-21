@@ -120,12 +120,11 @@ shells) without setup, and never has stale state from a crashed daemon.
 
 ### Transparent Testing via Local Backend
 
-The `local` backend (`type: local`, `path: /some/dir/`) makes the entire system testable
-without cloud credentials.
-Integration tests use a temp directory as the “remote” -- push writes files there, pull
-reads them back. Every code path (compression, hashing, atomic writes, conflict
-detection) exercises identically to production S3 usage, just with a filesystem
-destination.
+The `local` backend (`local:./some-dir`) makes the entire system testable without cloud
+credentials. Integration tests use a temp directory as the “remote” -- push writes files
+there, pull reads them back.
+Every code path (compression, hashing, atomic writes, conflict detection) exercises
+identically to production S3 usage, just with a filesystem destination.
 
 This means development and CI require zero cloud infrastructure.
 
@@ -320,9 +319,7 @@ Each optimizes for different needs.
 # .blobsy.yml
 backends:
   default:
-    type: s3
-    bucket: my-datasets
-    prefix: project-alpha/
+    url: s3://my-datasets/project-alpha/
     region: us-east-1
 
 remote:
@@ -405,9 +402,7 @@ shared storage (Pattern 4) only.
 # .blobsy.yml
 backends:
   default:
-    type: s3
-    bucket: my-datasets
-    prefix: project-alpha/
+    url: s3://my-datasets/project-alpha/
     region: us-east-1
 
 remote:
@@ -450,9 +445,7 @@ experimental/temporary branches that should be cleanly removed.
 # .blobsy.yml
 backends:
   default:
-    type: s3
-    bucket: my-datasets
-    prefix: project-alpha/
+    url: s3://my-datasets/project-alpha/
     region: us-east-1
 
 remote:
@@ -961,14 +954,27 @@ find data -name "*.bin" -exec blobsy track {} +
 Initialize blobsy in a git repo.
 Idempotent — every developer runs this after cloning.
 
-**First run (no config exists):** Creates `.blobsy.yml`, prompts for backend settings
-(or accepts flags), and installs the pre-commit hook.
+Fully non-interactive.
+Backend is specified as a URL (positional argument).
+Fails with a helpful error if required arguments are missing (never prompts).
+
+**First run (no config exists):** Creates `.blobsy.yml` and installs the pre-commit
+hook.
 
 ```bash
-$ blobsy init
+# S3 backend
+$ blobsy init s3://my-datasets/project-v1/ --region us-east-1
 Created .blobsy.yml
-? Bucket: my-datasets
-? Region: us-east-1
+Installed pre-commit hook
+
+# S3-compatible (R2)
+$ blobsy init s3://my-r2-data/project/ --endpoint https://ACCT_ID.r2.cloudflarestorage.com
+Created .blobsy.yml
+Installed pre-commit hook
+
+# Local backend (for dev/testing)
+$ blobsy init local:./remote
+Created .blobsy.yml
 Installed pre-commit hook
 ```
 
@@ -976,13 +982,34 @@ Installed pre-commit hook
 
 ```bash
 $ blobsy init
-Found existing .blobsy.yml — skipping config setup
+Found existing .blobsy.yml -- skipping config setup
 Installed pre-commit hook
 ```
 
-Interactive when run without flags on first setup.
-Supports fully non-interactive usage via flags:
-`blobsy init --bucket my-data --region us-east-1`.
+**Arguments and flags:**
+
+| Argument/Flag | Required | Description |
+| --- | --- | --- |
+| `<url>` | Yes (first run) | Backend URL: `s3://bucket/prefix/`, `gs://bucket/prefix/`, or `local:path` |
+| `--region <region>` | For `s3` | AWS region (or S3-compatible region) |
+| `--endpoint <url>` | For S3-compatible | Custom endpoint URL (R2, MinIO, etc.) |
+
+The URL scheme determines the backend type (`s3://` -> s3, `gs://` -> gcs, `azure://` ->
+azure, `local:` -> local).
+Bucket/prefix or directory path are parsed from the URL. Cloud schemes require a prefix.
+See
+[Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
+for full parsing rules and validation.
+
+On first run without a URL, `blobsy init` prints a usage error with examples (not a
+prompt). On subsequent runs, the URL is optional -- the existing config is used.
+
+**Relative paths** in `local:` URLs (e.g., `local:./remote`) are always relative to the
+git repo root, not the current working directory.
+This matches the convention Git uses for `.gitignore` and submodule paths.
+See
+[Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
+for details.
 
 Also installs a pre-commit hook that auto-pushes blobs when committing `.yref` files.
 See [Conflict Detection](#conflict-detection) and `blobsy hooks` below.
@@ -1374,7 +1401,7 @@ Show aggregate statistics across all tracked files.
 $ blobsy stats
 
 Repository: /Users/alice/projects/ml-research
-Backend: s3 (bucket: my-datasets, prefix: ml-research/)
+Backend: s3://my-datasets/ml-research/
 
 Tracked files by status:
   ✓ Fully synced (committed + uploaded):        8 files    (2.1 GB)
@@ -1442,7 +1469,7 @@ advice, and integration validation.
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: s3 (bucket: my-datasets, prefix: project-v1/, region: us-east-1)
+Backend: s3://my-datasets/project-v1/ (region: us-east-1)
 Key template: {iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}
 Remote layout: Timestamp+Hash (default, recommended)
 
@@ -1834,9 +1861,7 @@ backend: default
 
 backends:
   default:
-    type: s3
-    bucket: my-datasets
-    prefix: project-v1/          # global prefix for all blobs
+    url: s3://my-datasets/project-v1/
     region: us-east-1
 
 remote:
@@ -1858,9 +1883,7 @@ A repo with sensible defaults at the root and an override for a data-heavy subdi
 backend: default
 backends:
   default:
-    type: s3
-    bucket: my-datasets
-    prefix: my-project/
+    url: s3://my-datasets/my-project/
     region: us-east-1
 
 remote:
@@ -2455,18 +2478,20 @@ An agent encountering a `.yref` file for the first time can read this header, vi
 URL or run `npx blobsy --help`, and understand the system without external
 documentation.
 
-### Non-Interactive by Default
+### Fully Non-Interactive
 
-All sync operations (`push`, `pull`, `sync`, `status`, `verify`) are fully
-non-interactive. They succeed or fail without prompts.
-`--force` for destructive operations.
-`--dry-run` for preview.
-This makes `blobsy` safe to call from scripts, CI pipelines, and agent tool loops.
+Every command is non-interactive.
+No command ever prompts for input.
+This makes blobsy safe to call from scripts, CI pipelines, and agent tool loops.
 
-`blobsy init` is interactive when run without flags (prompts for backend type, bucket,
-region). For non-interactive usage, pass flags directly:
-`blobsy init --bucket my-data --region us-east-1`. All other commands are always
-non-interactive.
+- `--force` for destructive operations.
+- `--dry-run` for preview.
+- Missing required flags produce a usage error with examples (not a prompt).
+
+`blobsy init` requires a URL on first run (e.g.,
+`blobsy init s3://my-data/prefix/ --region us-east-1`). This is deliberate: explicit
+arguments are more reliable for agents and scripts, and produce a clear audit trail in
+shell history.
 
 ## Implementation Notes
 

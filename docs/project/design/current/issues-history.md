@@ -46,7 +46,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
-| `blobsy-suqh` | R1 C3, R3 4.9 | Interactive init contradiction | **Resolved.** `init` is interactive without flags; all sync ops are non-interactive. See Non-Interactive by Default. |
+| `blobsy-suqh` | R1 C3, R3 4.9 | Interactive init contradiction | **Resolved.** `init` is fully non-interactive and requires explicit flags on first run. Missing required flags produce a usage error (not a prompt). See Fully Non-Interactive. |
 | `blobsy-br1a` | R1 C4, R3 5 | `blobsy sync` bidirectional danger | **Simplified.** Sync = push missing + pull missing. No delete cascades. No `--strategy` flag in the initial release. |
 | `blobsy-jlcn` | R1 M1, R3 4.1 | Pointer field types | **Resolved.** hash = content identifier (sha256:64-char-hex), size = bytes. See Ref File Format. |
 | `blobsy-n23z` | R1 M2 | Format versioning | **Resolved.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. |

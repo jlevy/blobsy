@@ -93,7 +93,7 @@ assertions.
 Golden tests use three different backend configurations, each serving a distinct
 purpose:
 
-1. **Local backend** (`type: local`) -- Full end-to-end testing against a real
+1. **Local backend** (`local:../local-path`) -- Full end-to-end testing against a real
    filesystem. Files are actually copied, hashes verified, stat cache updated.
    This tests the complete system behavior.
    Used for all workflow scenarios.
@@ -305,7 +305,7 @@ tests/
       small-file.txt                       # "hello blobsy\n" (known content, 13 B)
       another-file.txt                     # "second file\n" (known content, 12 B)
       binary-file.bin                      # Binary content for compression tests
-      local-backend.blobsy.yml             # Config: type: local, path: ./remote
+      local-backend.blobsy.yml             # Config: url: local:./remote
       echo-backend.blobsy.yml              # Config: type: command with echo
 ```
 
@@ -345,8 +345,7 @@ The fixture `local-backend.blobsy.yml`:
 ```yaml
 backends:
   default:
-    type: local
-    path: ./remote
+    url: local:./remote
 ```
 
 The fixture `echo-backend.blobsy.yml`:
@@ -365,6 +364,23 @@ backends:
     bucket: test-bucket
     prefix: ""
 ```
+
+### Deterministic Git Harness
+
+Golden tests that use `git init` must configure the local repo before any `git commit`
+calls so that output is deterministic across environments (CI, local dev, different
+user.name/email). Use `git init -q -b main` to set the initial branch, then configure
+user identity:
+
+```bash
+git init -q -b main
+git config user.name "Blobsy Test"
+git config user.email "blobsy-test@example.com"
+```
+
+Apply this in both frontmatter `before: |` blocks and inline console command blocks.
+This ensures commit metadata (author, branch names) is stable and avoids environment
+drift in golden output.
 
 ### Filesystem Inspection Convention
 
@@ -411,7 +427,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data
   cp small-file.txt data/model.bin
 ---
@@ -569,7 +588,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
@@ -700,7 +722,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data
   cp small-file.txt data/model.bin
   cp small-file.txt data/weights.bin
@@ -767,7 +792,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
@@ -910,7 +938,10 @@ fixtures:
   - source: fixtures/echo-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data .mock-remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -979,7 +1010,7 @@ fixtures:
 # Set up a git repository
 
 ```console
-$ git init -q
+$ git init -q -b main
 $ mkdir -p data remote
 ? 0
 ```
@@ -987,7 +1018,7 @@ $ mkdir -p data remote
 # Initialize blobsy with local backend
 
 ```console
-$ blobsy init --backend local --path ./remote
+$ blobsy init local:./remote
 Created .blobsy.yml
 Installed pre-commit hook (.git/hooks/pre-commit)
 ? 0
@@ -999,8 +1030,7 @@ Installed pre-commit hook (.git/hooks/pre-commit)
 $ cat .blobsy.yml
 backends:
   default:
-    type: local
-    path: ./remote
+    url: local:./remote
 ? 0
 ```
 
@@ -1145,7 +1175,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -1235,7 +1268,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -1250,7 +1286,7 @@ before: |
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local (path: ./remote)
+Backend: local:./remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1284,7 +1320,7 @@ $ echo "" > .gitignore
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local (path: ./remote)
+Backend: local:./remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1312,7 +1348,7 @@ Stat cache: 1 entry, 0 stale
 $ blobsy doctor --fix
 
 === CONFIGURATION ===
-Backend: local (path: ./remote)
+Backend: local:./remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1343,7 +1379,7 @@ data/model.bin
 $ blobsy doctor
 
 === CONFIGURATION ===
-Backend: local (path: ./remote)
+Backend: local:./remote
 
 === REPOSITORY STATE ===
 Git repository: [CWD]
@@ -1378,7 +1414,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -1478,7 +1517,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model-v1.bin
   cp another-file.txt data/old-data.csv
@@ -1571,12 +1613,11 @@ sandbox: true
 fixtures:
   - fixtures/small-file.txt
 before: |
-  git init -q
+  git init -q -b main
   cat > .blobsy.yml << 'EOF'
   backends:
     default:
-      type: s3
-      bucket: my-bucket
+      url: s3://my-bucket/blobs/
       region: us-east-1
   EOF
   git add -A && git commit -q -m "init"
@@ -1617,7 +1658,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -1663,7 +1707,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -1713,7 +1760,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/good-file.bin
   cp another-file.txt data/bad-file.bin
@@ -1772,7 +1822,10 @@ fixtures:
   - source: fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
-  git init -q && git add -A && git commit -q -m "init"
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  git add -A && git commit -q -m "init"
   mkdir -p data remote
   cp small-file.txt data/model.bin
   blobsy track data/model.bin

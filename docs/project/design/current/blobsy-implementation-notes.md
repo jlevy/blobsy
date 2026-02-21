@@ -80,12 +80,7 @@ Installed by `blobsy hooks install` (and by `blobsy init`) at `.git/hooks/pre-co
 # Installed by: blobsy hooks install
 # To bypass: git commit --no-verify
 
-# Prefer local install (fast) over npx (adds ~5s cold start overhead).
-if [ -x node_modules/.bin/blobsy ]; then
-  exec node_modules/.bin/blobsy hook pre-commit
-else
-  exec npx --yes blobsy hook pre-commit
-fi
+exec blobsy hook pre-commit
 ```
 
 The shim delegates entirely to the `blobsy` CLI on PATH. If blobsy is not installed, the
