@@ -437,6 +437,31 @@ s3://my-datasets/project-alpha/
 **Use when:** You want clear separation between branches, or are working with
 experimental/temporary branches that should be cleanly removed.
 
+**Error behavior (V2 specification):**
+
+- **Detached HEAD:** If `{git_branch}` is used but the working tree is in detached HEAD
+  state, `blobsy push` MUST fail with a clear error: `Error: Cannot resolve
+  {git_branch}: HEAD is detached.
+  Use a named branch or switch to a template without {git_branch}.` Rationale: pushing
+  to a namespace derived from a commit hash would create un-discoverable, un-manageable
+  blobs.
+- **Unnamed branch:** Same error if HEAD points to a branch that has no name (orphan
+  branch state).
+- **Branch name sanitization:** The resolved branch name is passed through
+  `sanitizeKeyComponent()` to handle characters problematic for S3 keys (e.g.,
+  `feature/model-v2` becomes `feature/model-v2` -- forward slashes are preserved).
+
+**Explicit cleanup semantics (V2 specification):**
+
+- After `git merge feature/X` into `main`, the feature branch blobs remain accessible at
+  their original `feature/X/sha256/...` keys (stored in each `.yref`’s `remote_key`).
+- `blobsy gc --branch-cleanup feature/X` would:
+  1. Verify no live `.yref` in any reachable branch references `feature/X/...` keys.
+  2. List and delete all remote objects under the `feature/X/` prefix.
+  3. Remove corresponding `.blobsy/trash/` entries.
+- Without explicit cleanup, feature branch blobs persist indefinitely (safe default).
+- `blobsy gc --dry-run --branch-cleanup feature/X` previews what would be deleted.
+
 ##### Pattern 4: Global Shared Backing Store
 
 **Single flat namespace, last-write-wins semantics (like rsync or network drives).**
@@ -838,6 +863,20 @@ approach that works consistently across all providers.
 When using the built-in SDK, blobsy can provide `x-amz-checksum-sha256` with the upload
 and S3 verifies server-side -- but this uses the same SHA-256 blobsy already computes,
 not an additional algorithm.
+
+**V2: Remote Checksum Support (Deferred).** A future version may store provider-native
+checksums (ETags, CRC32C, etc.)
+in `.yref` files as an optional `remote_checksum` field.
+This would enable fast remote verification (`blobsy verify --remote`) without
+downloading the file -- just compare the stored checksum against the provider’s current
+metadata. Design constraints:
+- The field is informational and provider-specific; it cannot replace SHA-256 for
+  cross-provider portability.
+- Multipart upload ETags are composite and provider-specific; only single-part upload
+  checksums are usable for verification.
+- The backend interface would gain an optional
+  `getChecksum(remoteKey): Promise<string | undefined>` method.
+- Provider checksum is captured at push time and stored alongside `remote_key`.
 
 ### Why Hashing Is Essentially Free
 

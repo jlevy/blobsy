@@ -22,7 +22,7 @@ Commands:
   track <path...>        Start tracking files or directories with .yref pointers
   untrack <path...>      Stop tracking files (keeps local files, moves .yref to trash)
   rm <path...>           Remove tracked files: delete local + move .yref to trash
-  mv <source> <dest>     Rename or move a tracked file (updates .yref + .gitignore)
+  mv <source> <dest>     Rename or move tracked files or directories (updates .yref + .gitignore)
   push [path...]         Upload local blobs to the configured backend
   pull [path...]         Download blobs from the configured backend
   sync [path...]         Bidirectional sync: push unpushed + pull missing
@@ -227,10 +227,10 @@ Options:
 $ blobsy mv --help
 Usage: blobsy mv [options] <source> <dest>
 
-Rename or move a tracked file (updates .yref + .gitignore)
+Rename or move tracked files or directories (updates .yref + .gitignore)
 
 Arguments:
-  source                 Source tracked file
+  source                 Source tracked file or directory
   dest                   Destination path
 
 Options:

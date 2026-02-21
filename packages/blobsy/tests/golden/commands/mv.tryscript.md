@@ -104,3 +104,82 @@ $ blobsy mv data/nonexistent.bin data/somewhere.bin 2>&1
 Error: Not tracked: data/nonexistent.bin (no .yref file found)
 ? 1
 ```
+
+# Set up for directory move test
+
+```console
+$ mkdir -p data/research
+? 0
+```
+
+```console
+$ echo "research model" > data/research/model.bin
+? 0
+```
+
+```console
+$ echo "research data" > data/research/data.bin
+? 0
+```
+
+```console
+$ blobsy track data/research/
+...
+2 files tracked.
+? 0
+```
+
+# Move a directory of tracked files
+
+```console
+$ blobsy mv data/research archive/research
+...
+? 0
+```
+
+# Verify files moved to new location
+
+```console
+$ cat archive/research/model.bin
+research model
+? 0
+```
+
+```console
+$ cat archive/research/data.bin
+research data
+? 0
+```
+
+# Verify refs moved
+
+```console
+$ test -f archive/research/model.bin.yref && echo "ref exists"
+ref exists
+? 0
+```
+
+```console
+$ test -f archive/research/data.bin.yref && echo "ref exists"
+ref exists
+? 0
+```
+
+# Verify old directory has no tracked files
+
+```console
+$ test -f data/research/model.bin.yref && echo "exists" || echo "gone"
+gone
+? 0
+```
+
+# Verify gitignore in new directory
+
+```console
+$ cat archive/research/.gitignore
+# >>> blobsy-managed (do not edit) >>>
+data.bin
+model.bin
+# <<< blobsy-managed <<<
+? 0
+```

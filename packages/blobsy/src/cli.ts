@@ -9,7 +9,7 @@
 
 import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 
 import type { Help } from 'commander';
 import { Command, Option } from 'commander';
@@ -186,8 +186,8 @@ function createProgram(): Command {
 
   program
     .command('mv')
-    .description('Rename or move a tracked file (updates .yref + .gitignore)')
-    .argument('<source>', 'Source tracked file')
+    .description('Rename or move tracked files or directories (updates .yref + .gitignore)')
+    .argument('<source>', 'Source tracked file or directory')
     .argument('<dest>', 'Destination path')
     .action(wrapAction(handleMv));
 
@@ -1008,15 +1008,70 @@ async function handleMv(
   const srcAbs = resolveFilePath(stripYrefExtension(source));
   const destAbs = resolveFilePath(stripYrefExtension(dest));
 
+  if (isDirectory(srcAbs)) {
+    await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts);
+    return;
+  }
+
+  const srcRel = toRepoRelative(srcAbs, repoRoot);
+
+  const srcRefPath = yrefPath(srcAbs);
+  if (!existsSync(srcRefPath)) {
+    throw new ValidationError(`Not tracked: ${srcRel} (no .yref file found)`);
+  }
+
+  await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts);
+}
+
+async function handleMvDirectory(
+  srcDir: string,
+  destDir: string,
+  repoRoot: string,
+  globalOpts: GlobalOptions,
+): Promise<void> {
+  const yrefFiles = findYrefFiles(srcDir, repoRoot);
+  if (yrefFiles.length === 0) {
+    throw new ValidationError(`No tracked files in ${toRepoRelative(srcDir, repoRoot)}`);
+  }
+
+  if (globalOpts.dryRun) {
+    const actions = yrefFiles.map((rel) => {
+      const filePath = rel.replace(/\.yref$/, '');
+      const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+      const destPath = join(toRepoRelative(destDir, repoRoot), relFromSrc);
+      return `move ${filePath} -> ${destPath}`;
+    });
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(actions));
+    } else {
+      for (const action of actions) {
+        console.log(formatDryRun(action));
+      }
+    }
+    return;
+  }
+
+  for (const relYref of yrefFiles) {
+    const filePath = relYref.replace(/\.yref$/, '');
+    const srcFileAbs = join(repoRoot, filePath);
+    const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+    const destFileAbs = join(destDir, relFromSrc);
+
+    await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts);
+  }
+}
+
+async function mvSingleFile(
+  srcAbs: string,
+  destAbs: string,
+  repoRoot: string,
+  globalOpts: GlobalOptions,
+): Promise<void> {
   const srcRel = toRepoRelative(srcAbs, repoRoot);
   const destRel = toRepoRelative(destAbs, repoRoot);
 
   const srcRefPath = yrefPath(srcAbs);
   const destRefPath = yrefPath(destAbs);
-
-  if (!existsSync(srcRefPath)) {
-    throw new ValidationError(`Not tracked: ${srcRel} (no .yref file found)`);
-  }
 
   if (globalOpts.dryRun) {
     if (globalOpts.json) {
@@ -1027,30 +1082,20 @@ async function handleMv(
     return;
   }
 
-  if (isDirectory(srcAbs)) {
-    throw new ValidationError('Directory move not supported yet. Move individual files.');
-  }
-
-  // Read existing ref (preserve remote_key)
   const ref = await readYRef(srcRefPath);
 
-  // Move payload file
   if (existsSync(srcAbs)) {
     await ensureDir(dirname(destAbs));
     await rename(srcAbs, destAbs);
   }
 
-  // Write new .yref
+  await ensureDir(dirname(destRefPath));
   await writeYRef(destRefPath, ref);
-
-  // Remove old .yref
   await unlink(srcRefPath);
 
-  // Update gitignore: remove from source dir, add to dest dir
   await removeGitignoreEntry(dirname(srcAbs), basename(srcAbs));
   await addGitignoreEntry(dirname(destAbs), basename(destAbs));
 
-  // Update stat cache
   const cacheDir = getStatCacheDir(repoRoot);
   const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, srcRel);
