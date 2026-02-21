@@ -7,10 +7,11 @@
 
 import { existsSync } from 'node:fs';
 import { rename, unlink } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type {
+  Backend,
   BackendConfig,
   BlobsyConfig,
   ResolvedBackendConfig,
@@ -19,10 +20,10 @@ import type {
 } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
-import { resolveLocalPath } from './backend-url.js';
-import { localPush, localPull, localBlobExists, localHealthCheck } from './backend-local.js';
-import { commandPush, commandPull, commandBlobExists } from './backend-command.js';
-import type { CommandTemplateVars } from './backend-command.js';
+import { parseBackendUrl, resolveLocalPath } from './backend-url.js';
+import { LocalBackend } from './backend-local.js';
+import { CommandBackend } from './backend-command.js';
+import { S3Backend } from './backend-s3.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
 import { getCompressConfig } from './config.js';
@@ -89,6 +90,42 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
   ]);
 }
 
+/** Create a Backend instance from resolved config. */
+export function createBackend(config: ResolvedBackendConfig, repoRoot: string): Backend {
+  switch (config.type) {
+    case 'local': {
+      const remotePath = resolveLocalPath(config.path ?? '', repoRoot);
+      return new LocalBackend(remotePath);
+    }
+    case 'command':
+      return new CommandBackend({
+        pushCommand: config.push_command,
+        pullCommand: config.pull_command,
+        existsCommand: config.exists_command,
+        bucket: config.bucket,
+      });
+    case 's3': {
+      const parsed = config.url ? parseBackendUrl(config.url) : undefined;
+      return new S3Backend({
+        bucket: config.bucket ?? parsed?.bucket ?? '',
+        prefix: config.prefix ?? parsed?.prefix,
+        region: config.region,
+        endpoint: config.endpoint,
+      });
+    }
+    case 'gcs':
+    case 'azure':
+      throw new BlobsyError(`Cloud backend not yet implemented: ${config.type}`, 'unknown');
+    default: {
+      const _exhaustive: never = config.type;
+      throw new BlobsyError(
+        `Unknown backend type: ${(_exhaustive as ResolvedBackendConfig).type}`,
+        'validation',
+      );
+    }
+  }
+}
+
 /** Push a single file to remote. Returns refUpdates for the caller to merge into the ref. */
 export async function pushFile(
   filePath: string,
@@ -97,7 +134,8 @@ export async function pushFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const backend = resolveBackend(config);
+  const resolvedBackend = resolveBackend(config);
+  const backend = createBackend(resolvedBackend, repoRoot);
   const compressConfig = getCompressConfig(config);
 
   // Determine compression
@@ -130,7 +168,7 @@ export async function pushFile(
     }
 
     // Upload
-    await pushToBackend(backend, uploadPath, remoteKey, repoPath, repoRoot);
+    await backend.push(uploadPath, remoteKey);
 
     return {
       path: repoPath,
@@ -169,7 +207,8 @@ export async function pullFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const backend = resolveBackend(config);
+  const resolvedBackend = resolveBackend(config);
+  const backend = createBackend(resolvedBackend, repoRoot);
 
   if (!ref.remote_key) {
     return {
@@ -190,7 +229,7 @@ export async function pullFile(
       const tmpDecompressed = `${localPath}.blobsy-pull-${tmpSuffix}`;
 
       try {
-        await pullFromBackend(backend, ref.remote_key, tmpCompressed, repoPath, repoRoot);
+        await backend.pull(ref.remote_key, tmpCompressed);
         await decompressFile(tmpCompressed, tmpDecompressed, ref.compressed);
 
         // Verify hash of decompressed content
@@ -217,7 +256,7 @@ export async function pullFile(
       }
     } else {
       // Download directly with hash verification
-      await pullFromBackend(backend, ref.remote_key, localPath, repoPath, repoRoot, ref.hash);
+      await backend.pull(ref.remote_key, localPath, ref.hash);
     }
 
     return {
@@ -237,170 +276,19 @@ export async function pullFile(
 }
 
 /** Check if a remote blob exists. */
-export function blobExists(remoteKey: string, config: BlobsyConfig, repoRoot: string): boolean {
-  const backend = resolveBackend(config);
-  return existsOnBackend(backend, remoteKey, repoRoot);
+export async function blobExists(
+  remoteKey: string,
+  config: BlobsyConfig,
+  repoRoot: string,
+): Promise<boolean> {
+  const resolvedBackend = resolveBackend(config);
+  const backend = createBackend(resolvedBackend, repoRoot);
+  return backend.exists(remoteKey);
 }
 
 /** Run a health check on the configured backend. */
 export async function runHealthCheck(config: BlobsyConfig, repoRoot: string): Promise<void> {
-  const backend = resolveBackend(config);
-
-  switch (backend.type) {
-    case 'local': {
-      const remotePath = resolveLocalPath(backend.path ?? '', repoRoot);
-      await localHealthCheck(remotePath);
-      break;
-    }
-    case 'command': {
-      // No health check for command backends
-      break;
-    }
-    case 's3':
-    case 'gcs':
-    case 'azure':
-      throw new BlobsyError(
-        `Cloud backend health check not yet implemented: ${backend.type}`,
-        'unknown',
-      );
-    default: {
-      const _exhaustive: never = backend.type;
-      throw new BlobsyError(
-        `Unknown backend type: ${(_exhaustive as ResolvedBackendConfig).type}`,
-        'validation',
-      );
-    }
-  }
-}
-
-async function pushToBackend(
-  backend: ResolvedBackendConfig,
-  localPath: string,
-  remoteKey: string,
-  repoPath: string,
-  repoRoot: string,
-): Promise<void> {
-  switch (backend.type) {
-    case 'local': {
-      const remotePath = resolveLocalPath(backend.path ?? '', repoRoot);
-      await localPush(localPath, remotePath, remoteKey);
-      break;
-    }
-    case 'command': {
-      if (!backend.push_command) {
-        throw new ValidationError('No push_command configured for command backend.');
-      }
-      const vars: CommandTemplateVars = {
-        local: resolve(localPath),
-        remote: `${backend.bucket ?? ''}/${remoteKey}`,
-        relative_path: repoPath,
-        bucket: backend.bucket ?? '',
-      };
-      commandPush(backend.push_command, vars);
-      break;
-    }
-    case 's3':
-    case 'gcs':
-    case 'azure':
-      throw new BlobsyError(`Cloud push not yet implemented: ${backend.type}`, 'unknown');
-    default: {
-      const _exhaustive: never = backend.type;
-      throw new BlobsyError(
-        `Unknown backend type: ${(_exhaustive as ResolvedBackendConfig).type}`,
-        'validation',
-      );
-    }
-  }
-}
-
-async function pullFromBackend(
-  backend: ResolvedBackendConfig,
-  remoteKey: string,
-  localPath: string,
-  repoPath: string,
-  repoRoot: string,
-  expectedHash?: string,
-): Promise<void> {
-  switch (backend.type) {
-    case 'local': {
-      const remotePath = resolveLocalPath(backend.path ?? '', repoRoot);
-      await localPull(remotePath, remoteKey, localPath, expectedHash);
-      break;
-    }
-    case 'command': {
-      if (!backend.pull_command) {
-        throw new ValidationError('No pull_command configured for command backend.');
-      }
-      const tmpSuffix = randomBytes(8).toString('hex');
-      const tempPath = `${localPath}.blobsy-cmd-${tmpSuffix}`;
-      const vars: CommandTemplateVars = {
-        local: resolve(tempPath),
-        remote: `${backend.bucket ?? ''}/${remoteKey}`,
-        relative_path: repoPath,
-        bucket: backend.bucket ?? '',
-      };
-      commandPull(backend.pull_command, vars, tempPath);
-
-      if (expectedHash) {
-        const actualHash = await computeHash(tempPath);
-        if (actualHash !== expectedHash) {
-          await unlink(tempPath);
-          throw new BlobsyError(
-            `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
-            'validation',
-          );
-        }
-      }
-
-      await rename(tempPath, localPath);
-      break;
-    }
-    case 's3':
-    case 'gcs':
-    case 'azure':
-      throw new BlobsyError(`Cloud pull not yet implemented: ${backend.type}`, 'unknown');
-    default: {
-      const _exhaustive: never = backend.type;
-      throw new BlobsyError(
-        `Unknown backend type: ${(_exhaustive as ResolvedBackendConfig).type}`,
-        'validation',
-      );
-    }
-  }
-}
-
-function existsOnBackend(
-  backend: ResolvedBackendConfig,
-  remoteKey: string,
-  repoRoot: string,
-): boolean {
-  switch (backend.type) {
-    case 'local': {
-      const remotePath = resolveLocalPath(backend.path ?? '', repoRoot);
-      return localBlobExists(remotePath, remoteKey);
-    }
-    case 'command': {
-      if (!backend.exists_command) {
-        return false;
-      }
-      const vars: CommandTemplateVars = {
-        local: '',
-        remote: `${backend.bucket ?? ''}/${remoteKey}`,
-        relative_path: '',
-        bucket: backend.bucket ?? '',
-      };
-      return commandBlobExists(backend.exists_command, vars);
-    }
-    case 's3':
-    case 'gcs':
-    case 'azure':
-      throw new BlobsyError(`Cloud exists check not yet implemented: ${backend.type}`, 'unknown');
-    default: {
-      const _exhaustive: never = backend.type;
-      throw new BlobsyError(
-        `Unknown backend type: ${(_exhaustive as ResolvedBackendConfig).type}`,
-        'validation',
-      );
-    }
-  }
+  const resolvedBackend = resolveBackend(config);
+  const backend = createBackend(resolvedBackend, repoRoot);
+  await backend.healthCheck();
 }

@@ -211,6 +211,18 @@ export interface ParsedBackendUrl {
   originalUrl: string;
 }
 
+/**
+ * Abstract backend interface. Each backend type (local, command, s3)
+ * implements this to provide push/pull/exists/health operations.
+ */
+export interface Backend {
+  readonly type: BackendType;
+  push(localPath: string, remoteKey: string): Promise<void>;
+  pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void>;
+  exists(remoteKey: string): Promise<boolean>;
+  healthCheck(): Promise<void>;
+}
+
 /** Global CLI options shared across all commands. */
 export interface GlobalOptions {
   json: boolean;

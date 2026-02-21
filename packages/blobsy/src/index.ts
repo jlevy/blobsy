@@ -5,6 +5,7 @@
  */
 
 export type {
+  Backend,
   BlobsyConfig,
   BackendConfig,
   BackendType,

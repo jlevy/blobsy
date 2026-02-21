@@ -6,14 +6,26 @@
  */
 
 import { execSync } from 'node:child_process';
+import { rename, unlink } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
 
-import { BlobsyError } from './types.js';
+import type { Backend } from './types.js';
+import { BlobsyError, ValidationError } from './types.js';
+import { computeHash } from './hash.js';
 
 export interface CommandTemplateVars {
   local: string;
   remote: string;
   relative_path: string;
   bucket: string;
+}
+
+export interface CommandBackendConfig {
+  pushCommand?: string;
+  pullCommand?: string;
+  existsCommand?: string;
+  bucket?: string;
 }
 
 /** Shell-escape a string by wrapping in single quotes. */
@@ -28,6 +40,74 @@ export function expandCommandTemplate(template: string, vars: CommandTemplateVar
     .replace(/\{remote\}/g, shellEscape(vars.remote))
     .replace(/\{relative_path\}/g, shellEscape(vars.relative_path))
     .replace(/\{bucket\}/g, shellEscape(vars.bucket));
+}
+
+export class CommandBackend implements Backend {
+  readonly type = 'command' as const;
+  private readonly config: CommandBackendConfig;
+
+  constructor(config: CommandBackendConfig) {
+    this.config = config;
+  }
+
+  push(localPath: string, remoteKey: string): Promise<void> {
+    if (!this.config.pushCommand) {
+      throw new ValidationError('No push_command configured for command backend.');
+    }
+    const vars: CommandTemplateVars = {
+      local: resolve(localPath),
+      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      relative_path: '',
+      bucket: this.config.bucket ?? '',
+    };
+    commandPush(this.config.pushCommand, vars);
+    return Promise.resolve();
+  }
+
+  async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
+    if (!this.config.pullCommand) {
+      throw new ValidationError('No pull_command configured for command backend.');
+    }
+    const tmpSuffix = randomBytes(8).toString('hex');
+    const tempPath = `${localPath}.blobsy-cmd-${tmpSuffix}`;
+    const vars: CommandTemplateVars = {
+      local: resolve(tempPath),
+      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      relative_path: '',
+      bucket: this.config.bucket ?? '',
+    };
+    commandPull(this.config.pullCommand, vars, tempPath);
+
+    if (expectedHash) {
+      const actualHash = await computeHash(tempPath);
+      if (actualHash !== expectedHash) {
+        await unlink(tempPath);
+        throw new BlobsyError(
+          `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
+          'validation',
+        );
+      }
+    }
+
+    await rename(tempPath, localPath);
+  }
+
+  exists(remoteKey: string): Promise<boolean> {
+    if (!this.config.existsCommand) {
+      return Promise.resolve(false);
+    }
+    const vars: CommandTemplateVars = {
+      local: '',
+      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      relative_path: '',
+      bucket: this.config.bucket ?? '',
+    };
+    return Promise.resolve(commandBlobExists(this.config.existsCommand, vars));
+  }
+
+  async healthCheck(): Promise<void> {
+    // No health check for command backends -- commands are user-defined
+  }
 }
 
 /** Execute a push command. */
@@ -92,7 +172,7 @@ function executeCommand(cmd: string, operation: string, extraEnv?: Record<string
   }
 }
 
-function categorizeCommandError(stderr: string): BlobsyError['category'] {
+export function categorizeCommandError(stderr: string): BlobsyError['category'] {
   const lower = stderr.toLowerCase();
   if (
     lower.includes('access denied') ||

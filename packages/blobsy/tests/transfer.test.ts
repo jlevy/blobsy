@@ -119,11 +119,11 @@ describe('push/pull integration with local backend', () => {
     const result = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
     const updatedRef = { ...ref, ...result.refUpdates };
 
-    expect(blobExists(updatedRef.remote_key!, config, repoRoot)).toBe(true);
+    await expect(blobExists(updatedRef.remote_key!, config, repoRoot)).resolves.toBe(true);
   });
 
-  it('blobExists returns false for missing key', () => {
-    expect(blobExists('nonexistent-key/file.bin', config, repoRoot)).toBe(false);
+  it('blobExists returns false for missing key', async () => {
+    await expect(blobExists('nonexistent-key/file.bin', config, repoRoot)).resolves.toBe(false);
   });
 
   it('runHealthCheck succeeds for valid local backend', async () => {
