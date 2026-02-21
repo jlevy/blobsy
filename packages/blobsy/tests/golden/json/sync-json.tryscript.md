@@ -21,7 +21,15 @@ before: |
 
 ```console
 $ blobsy sync --json
-...
+{
+  "schema_version": "0.1",
+  "sync": {
+    "pushed": 2,
+    "pulled": 0,
+    "errors": 0,
+    "total": 2
+  }
+}
 ? 0
 ```
 
@@ -34,6 +42,14 @@ $ git add -A && git commit -q -m "push"
 
 ```console
 $ blobsy sync --json
-...
+{
+  "schema_version": "0.1",
+  "sync": {
+    "pushed": 0,
+    "pulled": 0,
+    "errors": 0,
+    "total": 2
+  }
+}
 ? 0
 ```

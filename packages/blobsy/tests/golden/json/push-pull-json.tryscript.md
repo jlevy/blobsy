@@ -21,7 +21,36 @@ before: |
 
 ```console
 $ blobsy push --json
-...
+{
+  "schema_version": "0.1",
+  "pushed": [
+    {
+      "path": "data/dataset.csv",
+      "success": true,
+      "action": "push",
+      "bytesTransferred": [SIZE],
+      "refUpdates": {
+        "remote_key": "[REMOTE_KEY]",
+        "compressed": "zstd",
+        "compressed_size": [SIZE]
+      }
+    },
+    {
+      "path": "data/model.bin",
+      "success": true,
+      "action": "push",
+      "bytesTransferred": [SIZE],
+      "refUpdates": {
+        "remote_key": "[REMOTE_KEY]"
+      }
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 2,
+    "failed": 0
+  }
+}
 ? 0
 ```
 
@@ -39,7 +68,28 @@ $ rm data/model.bin data/dataset.csv
 
 ```console
 $ blobsy pull --json
-...
+{
+  "schema_version": "0.1",
+  "pulled": [
+    {
+      "path": "data/dataset.csv",
+      "success": true,
+      "action": "pull",
+      "bytesTransferred": [SIZE]
+    },
+    {
+      "path": "data/model.bin",
+      "success": true,
+      "action": "pull",
+      "bytesTransferred": [SIZE]
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 2,
+    "failed": 0
+  }
+}
 ? 0
 ```
 
@@ -47,6 +97,14 @@ $ blobsy pull --json
 
 ```console
 $ blobsy push --json
-...
+{
+  "schema_version": "0.1",
+  "pushed": [],
+  "summary": {
+    "total": 0,
+    "succeeded": 0,
+    "failed": 0
+  }
+}
 ? 0
 ```

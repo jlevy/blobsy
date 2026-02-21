@@ -20,7 +20,15 @@ before: |
 
 ```console
 $ blobsy doctor --json
-...
+{
+  "schema_version": "0.1",
+  "issues": [],
+  "summary": {
+    "total": 0,
+    "fixed": 0,
+    "unfixed": 0
+  }
+}
 ? 0
 ```
 
@@ -33,6 +41,20 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor --json
-...
+{
+  "schema_version": "0.1",
+  "issues": [
+    {
+      "type": "gitignore",
+      "message": "data/model.bin: missing from .gitignore",
+      "fixed": false
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "fixed": 0,
+    "unfixed": 1
+  }
+}
 ? 1
 ```

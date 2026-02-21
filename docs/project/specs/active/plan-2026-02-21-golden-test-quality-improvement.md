@@ -76,7 +76,7 @@ Issues are classified by impact:
 
 ### Issue 1: Pervasive Output Suppression (P0)
 
-**Affected files:** ~25 of 39 test files
+**Affected files:** ~21 of 39 test files (about 71 `...` elisions remain)
 
 The most common pattern across the test suite is:
 
@@ -120,58 +120,24 @@ A format change becomes a visible diff.
 - `workflows/doctor-fix.tryscript.md` -- all output suppressed
 - `errors/conflict-errors.tryscript.md` -- error output suppressed
 - `errors/partial-failure.tryscript.md` -- error output suppressed
-- All 5 `json/` tests -- JSON output fully suppressed
 - All 4 `echo-backend/` tests -- echo transport output suppressed
 
 **Resolution:** Replace every `...` with the actual expected output, using `[HASH]`,
 `[REMOTE_KEY]`, `[TIMESTAMP]`, `[..]`, and `[CWD]` patterns for genuinely unstable
 fields. Run `tryscript run --update` to capture actual output, then review and commit.
 
-### Issue 2: JSON Tests Verify No JSON Structure (P0)
+### Issue 2: JSON Coverage Breadth Is Still Limited (P1)
 
-**Affected files:** All 5 files in `json/`
+**Current status:** The dedicated files in `tests/golden/json/` now capture concrete
+JSON output (good improvement).
 
-- `json/status-json.tryscript.md`
-- `json/verify-json.tryscript.md`
-- `json/push-pull-json.tryscript.md`
-- `json/sync-json.tryscript.md`
-- `json/doctor-json.tryscript.md`
+**Remaining gap:** JSON coverage is still limited to a subset of commands and mostly
+success paths. Error-path schema coverage and simple-message command JSON coverage are
+still incomplete.
 
-These tests exist specifically to capture the `--json` API contract, yet every one
-suppresses the JSON output with `...`. The testing design doc has an explicit example
-showing full JSON capture:
-
-```console
-$ blobsy status --json
-{
-  "schema_version": "0.1",
-  "files": [
-    {
-      "path": "data/model.bin",
-      "state": "synced",
-      "committed": true,
-      "synced": true,
-      "size": 13,
-      "hash": "[HASH]",
-      "remote_key": "[REMOTE_KEY]"
-    }
-  ],
-  "summary": {
-    "total": 1,
-    "synced": 1,
-    "needs_push": 0,
-    "needs_commit": 0,
-    "modified": 0,
-    "missing": 0
-  }
-}
-? 0
-```
-
-**Resolution:** Capture full JSON output in every JSON test.
-Use `[HASH]`, `[REMOTE_KEY]`, etc.
-for dynamic fields. Every JSON key, value type, and nesting level should be visible.
-Test multiple states (fully synced, modified, missing, errors) with full JSON.
+**Resolution:** Keep strict full-JSON snapshots for the existing files, and extend JSON
+coverage across the full command surface and error categories (see Issue 24 and Issue
+29).
 
 ### Issue 3: Echo Backend Tests Hide Transport Commands (P0)
 
@@ -499,81 +465,200 @@ sets up files of varying sizes and types, configures explicit externalization ru
 runs `blobsy track <dir>`, and shows which files were externalized vs.
 kept in git.
 
-## Implementation Plan
+## Additional Findings (Second Senior Review)
 
-### Phase 1: Fix Output Suppression (Highest Impact)
+### Issue 21: Malformed Command Blocks in `track` Test (P0)
 
-Replace `...` with full expected output across all test files.
-This is mechanical but must be done carefully.
+**Affected file:** `commands/track.tryscript.md`
 
-- [ ] Run `tryscript run --update` on all files to capture current actual output
-- [ ] Review each file and replace `...` with the captured output, adding `[HASH]`,
-  `[REMOTE_KEY]`, `[TIMESTAMP]`, and `[..]` patterns for genuinely unstable fields
-- [ ] Verify all tests pass with `tryscript run`
-- [ ] Priority files (P0 -- completely empty assertions):
-  - [ ] All 5 `json/` tests
-  - [ ] All 4 `echo-backend/` tests
-  - [ ] `commands/push-pull.tryscript.md`
-  - [ ] `commands/sync.tryscript.md`
-  - [ ] `commands/doctor.tryscript.md`
-  - [ ] `commands/health.tryscript.md`
-  - [ ] `commands/check-unpushed.tryscript.md`
-  - [ ] `commands/pre-push-check.tryscript.md`
-  - [ ] `errors/conflict-errors.tryscript.md`
-  - [ ] `errors/partial-failure.tryscript.md`
-  - [ ] All 7 `workflows/` tests
+Several blocks accidentally merged multiple commands into one shell line (for example:
+`echo ... > data/model.bin blobsy track ...`). This means the test labels claim behavior
+that is not actually being exercised.
+In practice this turns a “re-track” scenario into a plain `echo` redirection.
 
-### Phase 2: Add Filesystem Inspections
+**Resolution:** Split merged commands into separate `$` lines, regenerate expected
+output, and verify the intended scenario semantics (especially hash/size updates and
+directory tracking behavior).
 
-Add `find` and `cat` commands after state-changing operations.
+### Issue 22: Harness-Level Backend Override Masks Backend Resolution (P1)
 
-- [ ] After every `blobsy track`: show filesystem with `find` and `cat .yref`
-- [ ] After every `blobsy push`: show `find remote/ -type f | sort` and
-  `cat <file>.yref` to verify `remote_key`
-- [ ] After every `blobsy pull`: show `cat <file>` to verify content
-- [ ] After every `blobsy untrack`/`blobsy rm`: show `find .blobsy/trash/` and verify
-  `.gitignore` was updated
-- [ ] After every `blobsy mv`: show filesystem state of both source (gone) and dest
-  (present)
-- [ ] After every `blobsy doctor --fix`: show `cat .gitignore` or relevant fixed file
+**Affected file:** `packages/blobsy/tryscript.config.ts`
 
-### Phase 3: Close Coverage Gaps
+The suite-wide `BLOBSY_BACKEND_URL` override means most tests are not exercising backend
+selection from `.blobsy.yml`. This makes backend resolution behavior effectively
+untested except in files that manually clear the variable.
 
-Add missing scenarios to existing test files.
+**Resolution:** Use backend override only in tests that explicitly validate env override
+behavior.
+All other tests should resolve backend through `.blobsy.yml` so config behavior
+is actually tested.
 
-- [ ] **Issue 5:** Extend `status.tryscript.md` to exercise all 7 state symbols
-- [ ] **Issue 6:** Rewrite `conflict-errors.tryscript.md` with real conflict scenarios
-- [ ] **Issue 6:** Rewrite `two-user-conflict.tryscript.md` with stat-cache conflict
-- [ ] **Issue 7:** Add missing commands to `help.tryscript.md`
-- [ ] **Issue 8:** Expand `doctor.tryscript.md` with multiple issue types
-- [ ] **Issue 9:** Add config set tests to `config.tryscript.md`
-- [ ] **Issue 10:** Add URL scheme and error tests to `init.tryscript.md`
-- [ ] **Issue 11:** Add missing push/pull scenarios
-- [ ] **Issue 12:** Add missing sync scenarios
-- [ ] **Issue 13:** Add malformed .yref and format version tests to
-  `validation-errors.tryscript.md`
-- [ ] **Issue 14:** Add missing-blob pull test to `not-found-errors.tryscript.md`
-- [ ] **Issue 15:** Add hook execution test to `hooks.tryscript.md`
-- [ ] **Issue 16:** Show full trust command output
-- [ ] **Issue 17:** Extend quiet/dry-run tests
-- [ ] **Issue 18:** Add compression edge cases
-- [ ] **Issue 19:** Add remote state verification to all workflows
-- [ ] **Issue 20:** Add externalization rules test
+### Issue 23: Shared Suite-Wide Remote Reduces Determinism (P1)
 
-## Testing Strategy
+**Affected file:** `packages/blobsy/tryscript.config.ts`
 
-After each phase:
+A shared remote directory across all test files creates cross-test coupling.
+This is one root cause of weak assertions (`...`, `wc -l`) in remote-inspection steps.
 
-1. Run `tryscript run tests/golden/` -- all tests must pass
-2. Run `pnpm test` -- unit tests must still pass
-3. Review `git diff tests/golden/` to confirm changes are intentional
+**Resolution:** Isolate remote state per test file (or per scenario) so full remote
+listing assertions become stable and strict.
 
-After all phases, run `pnpm ci` to verify the full pipeline.
+### Issue 24: JSON Coverage Is Incomplete Across Command Surface (P1)
+
+Current JSON tests only cover `status`, `verify`, `push/pull`, `sync`, and `doctor`. But
+the design contract says all commands support `--json`. The simple-schema commands
+(`track`, `mv`, `untrack`, `rm`, `config`, `health`, `hooks`, `check-unpushed`,
+`pre-push-check`, `trust`) need JSON golden coverage too.
+
+**Resolution:** Add a JSON contract pass for all remaining commands (success and at
+least one error case each).
+
+### Issue 25: Missing Golden Tests for Shipped Commands (P1)
+
+`blobsy skill` and `blobsy prime` are present in CLI command registration but have no
+golden tests. This leaves agent-facing command output unversioned.
+
+**Resolution:** Add `commands/skill.tryscript.md` and `commands/prime.tryscript.md`, and
+include both in `help.tryscript.md` per-command help coverage.
+
+### Issue 26: Trust Security Path Not Tested End-to-End (P1)
+
+Echo backend tests use `BLOBSY_TRUST_ALL=1`, and `commands/trust.tryscript.md` only
+tests list/trust/revoke output.
+There is no test that command backend execution is blocked when untrusted, and allowed
+after trust.
+
+**Resolution:** Add a dedicated security workflow:
+1. untrusted repo + command backend -> refusal,
+2. `blobsy trust` -> allowed,
+3. `blobsy trust --revoke` -> refusal restored.
+
+### Issue 27: Global Flag Matrix Is Incomplete (P2)
+
+`--verbose` has no positive behavior golden tests.
+`--json`+error shape coverage is sparse outside the existing five JSON files.
+`--force` and `--skip-health-check` are not exercised in a matrix style.
+
+**Resolution:** Add a global-flag matrix test suite covering: `--json`, `--verbose`,
+`--quiet`, `--dry-run`, `--force`, `--skip-health-check`, and invalid flag combinations.
+
+### Issue 28: Path Form and Scope Matrix Is Incomplete (P2)
+
+Only a subset of commands exercise both path forms (`file` vs `file.yref`) and scopes
+(`file`, `directory`, `all`). This is a high-regression area in CLI path normalization.
+
+**Resolution:** Add an explicit path normalization matrix for mutating and read
+commands.
+
+### Issue 29: Failure-Path JSON Assertions Are Missing (P2)
+
+Even where human-readable errors are tested, equivalent JSON error objects are not
+consistently covered.
+This risks breaking machine consumers while human output still looks fine.
+
+**Resolution:** Add JSON-mode error tests for validation, conflict, not-found,
+permission, auth, and network categories.
+
+### Issue 30: No Guardrail for Coverage Drift (P2)
+
+There is no machine-checkable mapping from command inventory -> required golden
+scenarios. As commands evolve, test completeness can silently regress.
+
+**Resolution:** Add a maintained coverage matrix artifact plus a CI check that fails
+when command/scenario entries are missing.
+
+## Sequencing Relative to Phase 1 and Phase 2 Specs
+
+### Immediate: Phase 1 Correction Sprint (Now)
+
+These are corrections to Phase 1 deliverables and should happen before further feature
+work:
+
+- [ ] Fix Issue 21 (malformed command blocks)
+- [ ] Complete Issue 1 + Issue 2 + Issue 3 (remove `...` from P0 files)
+- [ ] Begin Issue 4 (filesystem inspection standards)
+- [ ] Implement Issue 22 + Issue 23 (harness determinism and backend resolution
+  fidelity)
+
+### Phase 2 Stage 1 Alignment (CLI Polish)
+
+As `--dry-run`, quiet semantics, and error text are finalized:
+
+- [ ] Issue 17 global polish tests (quiet/dry-run)
+- [ ] Issue 27 global flag matrix
+- [ ] Issue 29 JSON error-path coverage for CLI-polish errors
+- [ ] Refresh snapshots affected by error quality pass from
+  `plan-2026-02-21-blobsy-phase2-v1-completion.md`
+
+### Phase 2 Stage 2 Alignment (S3 Backend + Trust)
+
+As trust and backend logic evolve:
+
+- [ ] Issue 26 trust enforcement workflow tests
+- [ ] Issue 22 backend resolution tests (including explicit env override behavior)
+- [ ] Add S3/trust-specific golden scenarios planned in Phase 2 Stage 2
+
+### Phase 2 Stage 3 Alignment (E2E / MinIO)
+
+- [ ] Extend error golden coverage for auth/permission/network using MinIO-backed
+  scenarios
+- [ ] Expand sync partial-failure and conflict scenarios under realistic backend
+  conditions
+
+### Phase 2 Stage 4 Alignment (Docs + Agent Integration)
+
+- [ ] Issue 25 add `skill`/`prime` command goldens
+- [ ] Issue 7 complete per-command help snapshots including newly shipped commands
+- [ ] Validate agent-facing output stability in markdown-heavy commands
+
+### Phase 2 Stage 5 Alignment (Release Readiness)
+
+- [ ] Issue 30 command-to-scenario coverage matrix and CI guardrail
+- [ ] Final golden baseline update and diff review before publishing
+
+## Updated Implementation Plan
+
+### Track A: Signal Restoration (P0/P1, do first)
+
+- [ ] Remove high-risk output elisions (`...`) from all P0 files
+- [ ] Replace line-count/surgical checks with full output where practical
+- [ ] Fix malformed command blocks and rerun impacted tests
+- [ ] Stabilize harness to allow strict output assertions
+
+### Track B: Scenario Completeness (P1/P2)
+
+- [ ] Complete missing command-state scenarios (`status`, `sync`, `push/pull`, `doctor`)
+- [ ] Add missing command coverage (`skill`, `prime`, trust enforcement)
+- [ ] Add JSON contract coverage across the full command surface
+- [ ] Add path/scoping matrix and global-flag matrix
+
+### Track C: Governance and Drift Prevention (P2)
+
+- [ ] Add coverage matrix doc (`command x scenario x output mode`)
+- [ ] Add CI check to detect missing entries as command inventory changes
+- [ ] Enforce a rule: any CLI output or option change requires golden review/update
+
+## Testing Strategy and Gates
+
+For every tranche above:
+
+1. Run `npx tryscript run tests/golden/` from `packages/blobsy/`
+2. Run `pnpm test` in `packages/blobsy/`
+3. Review golden diffs manually (no blind `--update` commits)
+4. Ensure no new `...` elisions are introduced except where explicitly justified
+5. Confirm harness isolation assumptions still hold
+
+Release gate:
+
+- [ ] All command help and JSON contracts are snapshot-covered
+- [ ] Trust/security behavior has explicit deny/allow tests
+- [ ] Coverage matrix is complete for all shipped commands in CLI registration
 
 ## References
 
 - [blobsy-testing-design.md](../../design/current/blobsy-testing-design.md)
 - [blobsy-design.md](../../design/current/blobsy-design.md)
 - [plan-2026-02-21-blobsy-phase1-implementation.md](plan-2026-02-21-blobsy-phase1-implementation.md)
+- [plan-2026-02-21-blobsy-phase2-v1-completion.md](plan-2026-02-21-blobsy-phase2-v1-completion.md)
 - `tbd guidelines golden-testing-guidelines`
 - `npx tryscript@latest docs`

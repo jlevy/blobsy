@@ -23,7 +23,24 @@ before: |
 
 ```console
 $ blobsy status --json
-...
+{
+  "schema_version": "0.1",
+  "files": [
+    {
+      "path": "data/dataset.csv",
+      "state": "synced",
+      "details": "synced"
+    },
+    {
+      "path": "data/model.bin",
+      "state": "synced",
+      "details": "synced"
+    }
+  ],
+  "summary": {
+    "total": 2
+  }
+}
 ? 0
 ```
 
@@ -36,7 +53,24 @@ $ echo "modified" > data/model.bin
 
 ```console
 $ blobsy status --json
-...
+{
+  "schema_version": "0.1",
+  "files": [
+    {
+      "path": "data/dataset.csv",
+      "state": "synced",
+      "details": "synced"
+    },
+    {
+      "path": "data/model.bin",
+      "state": "modified",
+      "details": "modified"
+    }
+  ],
+  "summary": {
+    "total": 2
+  }
+}
 ? 0
 ```
 
@@ -49,6 +83,12 @@ $ rm data/model.bin.yref data/dataset.csv.yref
 
 ```console
 $ blobsy status --json
-...
+{
+  "schema_version": "0.1",
+  "files": [],
+  "summary": {
+    "total": 0
+  }
+}
 ? 0
 ```

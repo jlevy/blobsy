@@ -22,7 +22,20 @@ before: |
 
 ```console
 $ blobsy verify --json
-...
+{
+  "schema_version": "0.1",
+  "files": [
+    {
+      "path": "data/model.bin",
+      "status": "ok"
+    },
+    {
+      "path": "data/weights.bin",
+      "status": "ok"
+    }
+  ],
+  "ok": true
+}
 ? 0
 ```
 
@@ -40,6 +53,21 @@ $ rm data/weights.bin
 
 ```console
 $ blobsy verify --json
-...
+{
+  "schema_version": "0.1",
+  "files": [
+    {
+      "path": "data/model.bin",
+      "status": "mismatch",
+      "expected": "[HASH]",
+      "actual": "[HASH]"
+    },
+    {
+      "path": "data/weights.bin",
+      "status": "missing"
+    }
+  ],
+  "ok": false
+}
 ? 1
 ```
