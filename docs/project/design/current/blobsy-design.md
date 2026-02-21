@@ -143,7 +143,8 @@ This ensures:
 - CI fails on any unintentional output change; intentional changes require explicit
   snapshot updates.
 
-See the [Testing](#testing) section for the specific error scenario test cases and
+See [blobsy-testing-design.md](blobsy-testing-design.md) for the full testing plan,
+including error scenario test cases, integration test structure, and golden test
 implementation patterns.
 
 ## Related Work
@@ -2491,104 +2492,9 @@ resolution guidance where ambiguous.
 
 ### Testing
 
-See [Design Decisions](#design-decisions) for the local backend testing approach and
-golden test philosophy.
-
-#### Golden Tests for User-Facing Output
-
-Blobsy uses golden/snapshot tests for all user-facing output (status, sync summaries,
-doctor diagnostics, `--json` shapes, and error messages).
-Error messages in particular are critical UX and must be tested for every scenario.
-
-**Required error test cases:**
-
-1. **Authentication failures:**
-   - Missing credentials (AWS_ACCESS_KEY_ID unset)
-   - Invalid credentials (wrong access key)
-   - Expired credentials (temporary credentials past expiry)
-
-2. **Permission errors:**
-   - IAM policy missing s3:PutObject
-   - IAM policy missing s3:GetObject
-   - Bucket policy denying access
-
-3. **Resource not found:**
-   - Bucket doesn’t exist
-   - Wrong region configured
-   - Blob missing on pull (committed ref but data not pushed)
-
-4. **Network errors:**
-   - Connection timeout (simulated with unreachable endpoint)
-   - DNS resolution failure
-   - Connection refused
-
-5. **Storage errors:**
-   - Disk full on pull (local filesystem)
-   - Bucket quota exceeded (S3 quota)
-
-6. **Command failures:**
-   - Transfer tool not installed (aws-cli missing from PATH)
-   - Transfer tool returns unexpected output
-   - Malformed command template (missing {local} variable)
-
-7. **Health check failures:**
-   - Health check detects auth failure before starting sync
-   - Health check detects bucket doesn’t exist before starting sync
-   - Health check detects network timeout before starting sync
-   - `blobsy health` command shows detailed diagnostics
-   - `--skip-health-check` flag bypasses health check when needed
-
-**Golden test implementation pattern:**
-
-```typescript
-// tests/golden/transport-errors.test.ts
-describe('transport error messages', () => {
-  it('shows helpful message for missing AWS credentials', async () => {
-    // Setup: unset AWS credentials, track a file
-    const result = await runBlobsy(['push', 'data/model.bin'], {
-      env: { ...process.env, AWS_ACCESS_KEY_ID: undefined }
-    })
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toMatchSnapshot()
-    // Snapshot includes:
-    // - "Unable to locate credentials"
-    // - "aws configure" suggestion
-    // - Link to AWS docs
-  })
-
-  it('shows helpful message for wrong bucket/region', async () => {
-    // Setup: configure backend with non-existent bucket
-    const result = await runBlobsy(['pull', 'data/model.bin'])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toMatchSnapshot()
-    // Snapshot includes:
-    // - "NoSuchBucket" error
-    // - Bucket name and region from config
-    // - Suggestion to verify with aws s3 ls
-  })
-
-  // ... tests for all error scenarios listed above
-})
-```
-
-**Snapshot maintenance:**
-- Error message snapshots are committed to the repo
-- CI fails if error messages change unexpectedly
-- Intentional error message improvements require explicit snapshot updates
-- Ensures error UX remains consistent and helpful across releases
-
-**Error message quality checklist:**
-
-Every error message must:
-- ✓ Show the failed file path and size
-- ✓ Show the exact command that failed (with variables expanded)
-- ✓ Show the full error output (both stdout and stderr)
-- ✓ Categorize the error (authentication, network, permission, etc.)
-- ✓ Suggest concrete next steps for resolution
-- ✓ Link to relevant documentation
-- ✓ Work correctly in both human-readable and `--json` output modes
+See [blobsy-testing-design.md](blobsy-testing-design.md) for the full testing plan: unit
+tests, integration tests, golden/snapshot tests, conflict detection tests, and CI
+configuration.
 
 ## Initial Release Scope
 
@@ -2783,79 +2689,5 @@ From the original design, the following concepts are no longer needed:
 
 ## Review Issues Resolution
 
-This section maps all issues raised across the design reviews to their resolution in
-this consolidated design.
-
-**Review sources:**
-
-- [Round 1: General review](blobsy-design-review-round1-general.md) (C1-C4, S1-S7,
-  M1-M11)
-- [Round 2: Checksum deep-dive](blobsy-design-review-round2-checksums.md)
-- [Round 3: GPT5Pro architecture review](blobsy-design-review-round3-gpt5pro.md)
-- [Round 4: GPT5Pro incorporation guide](blobsy-design-review-round4-gpt5pro.md)
-
-### Resolved by Per-File `.yref` Architecture
-
-These issues are eliminated by the architectural shift to per-file refs and
-content-addressable storage.
-
-| Bead | Review IDs | Issue | Resolution |
-| --- | --- | --- | --- |
-| `blobsy-cx82` | R3 P0-1 | Versioning semantics: “latest mirror” vs “immutable snapshots” | **Resolved.** Content-addressable storage = immutable blobs. Git history of `.yref` files = full versioning. Old commits can be checked out and pulled (blobs are never overwritten). No contradiction. |
-| `blobsy-mlv9` | R3 P0-3 | `manifest_sha256` for directory pointers | **Eliminated.** No manifests, no directory pointers. Each file has its own `.yref` with its own `hash`. Git diff is meaningful per-file. |
-| `blobsy-a64l` | R3 P0-2 | Post-merge promotion workflow | **Eliminated.** Content-addressable blobs are not prefix-bound. After merge, `.yref` files on main point to the same blobs that were pushed from the feature branch. No promotion needed. |
-| `blobsy-05j8` | R3 P0-4.2 | Delete semantics contradiction | **Eliminated.** Content-addressable storage never deletes or overwrites during sync. Old blobs remain until GC. No delete flags needed for push/pull. |
-| `blobsy-7h13` | R1 C2, R3 P0-4 | Single-file remote conflict detection | **Eliminated.** No “remote hash Z” needed. `.yref` merge conflicts handled by git. Payload-vs-ref desync detected by stat cache three-way merge (see [Conflict Detection](#conflict-detection)). Content-addressable = concurrent pushes of different content produce different keys (no overwrite). |
-| `blobsy-lsu9` | R3 P0-5 | Compression + transfer mechanics | **Resolved.** File-by-file orchestration (compress -> copy -> cleanup). Transfer tools used as copy engines, not diff engines. No staging directory needed. Compression is supported in the initial release via Node.js built-in `node:zlib`. |
-
-### Resolved in Spec (Carried Forward)
-
-These issues were resolved in the original spec and remain resolved in this design.
-
-| Bead | Review IDs | Issue | Resolution |
-| --- | --- | --- | --- |
-| `blobsy-suqh` | R1 C3, R3 4.9 | Interactive init contradiction | **Resolved.** `init` is interactive without flags; all sync ops are non-interactive. See Non-Interactive by Default. |
-| `blobsy-br1a` | R1 C4, R3 5 | `blobsy sync` bidirectional danger | **Simplified.** Sync = push missing + pull missing. No delete cascades. No `--strategy` flag in the initial release. |
-| `blobsy-jlcn` | R1 M1, R3 4.1 | Pointer field types | **Resolved.** hash = content identifier (sha256:64-char-hex), size = bytes. See Ref File Format. |
-| `blobsy-n23z` | R1 M2 | Format versioning | **Resolved.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. |
-| `blobsy-0a9e` | R1 M3, R3 4.10 | Command backend template variables | **Resolved.** `{local}`, `{remote}`, `{relative_path}`, `{bucket}` specified. See Backend System. |
-| `blobsy-srme` | R1 M4, R3 4.8 | Which `.gitignore` to modify | **Resolved.** Same directory as tracked path. See Gitignore Management. |
-| `blobsy-v9py` | R1 M5, R3 4.3 | Detached HEAD SHA length | **Mostly eliminated.** No namespace prefixes in content-addressable mode. Detached HEAD is not special -- `.yref` files reference content hashes, not branch prefixes. |
-| `blobsy-bnku` | R1 M7, R3 4.4 | Push idempotency | **Resolved.** Content-addressable = inherently idempotent. Same hash = same key = no-op PUT. |
-| `blobsy-q6xr` | R3 4.4 | Pull behavior on local mods | **Resolved.** Default: error on modified files unless `--force`. See Pull section. |
-| `blobsy-txou` | R3 4.2 | Manifest canonicalization | **Eliminated.** No manifests. `.yref` files use stable key ordering. |
-| `blobsy-v6eb` | R3 4.1 | Stable pointer key ordering | **Resolved.** Keys written in documented fixed order. See Ref File Format. |
-| `blobsy-mg0y` | R3 4.9 | `--json` schema version | **Resolved.** `schema_version` field in all JSON output. |
-| `blobsy-pice` | R3 4 | SDK endpoint wording | **Resolved.** Correct wording: SDK uses config object, not CLI flags. |
-| `blobsy-r34j` | R1 S2 | gc safety (remote branches) | **Simplified.** Content-addressable GC scans all branches/tags for referenced hashes. No branch-prefix-based GC. |
-
-### Still Relevant (Addressed in This Doc)
-
-| Bead | Review IDs | Issue | Resolution |
-| --- | --- | --- | --- |
-| `blobsy-rel2` | R3 4.5 | Atomic writes for built-in transport | **Addressed.** Temp-file-then-rename for ALL backends (built-in SDK, external tools, command backends). Blobsy manages atomicity; does not rely on transport. See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#atomic-writes). |
-| `blobsy-vj6p` | R3 4.10 | Security: command execution from repo config | **Addressed.** `command` backends disallowed from repo config by default. See Security and Trust Model. |
-| `blobsy-y72s` | R1 S7, R3 4.6 | Auto tool detection robustness | **Addressed.** Ordered `sync.tools` list with capability check + fallthrough + `blobsy doctor`. See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#transfer-delegation). |
-
-### Eliminated by Architecture Change
-
-| Bead | Review IDs | Issue | Status |
-| --- | --- | --- | --- |
-| `blobsy-u4cs` | R1 S1, R3 4.3 | Branch name sanitization | **Eliminated.** No namespace prefixes in content-addressable mode. Branch names never appear in remote keys. |
-| `blobsy-q2dd` | R1 S4, R3 4.3 | Version namespace mode | **Eliminated.** No namespace modes. Versioning = git history. |
-| `blobsy-p8c4` | R3 4.2 | `stored_as` in manifest | **Eliminated.** No manifests. Compression state stored in `.yref`. |
-| `blobsy-fjqj` | R3 4.7 | Compression skip list in repo config | **Addressed.** Compression rules in `.blobsy.yml`. See Compression Rules. |
-
-### Deferred (P2 / Future Versions)
-
-| Review IDs | Issue | Status |
-| --- | --- | --- |
-| R1 M8 | Dictionary compression | Deferred to a future version. |
-| R1 M6 | Export/import specification | Deferred to a future version. |
-| R1 M9 | Team adoption workflow docs | Deferred. |
-| R1 M10, R3 7 | Integration surface (library vs CLI) | Stated: standalone CLI + npm package. |
-| R3 4.8 | Mixed directories: ignore vs include patterns | Resolved by externalization rules. |
-| R1 M11 | `command` backend as integration point | See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#backend-types). |
-| R3 5 | s5cmd as future transport engine | Deferred to a future version. The initial release ships with aws-cli + rclone + template commands. |
-| R1 S6, R3 4.7 | Compression suffix convention | Accepted: `.zst` suffix in remote; compression state in `.yref`. |
-| R3 4.7 | Small-file compression threshold | Built in: `compress.min_size: 100kb` default. |
+See [issues-history.md](issues-history.md) for the full mapping of design review issues
+to their resolution in this design.
