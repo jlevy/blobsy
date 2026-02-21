@@ -18,8 +18,10 @@ import { parseBackendUrl, validateBackendUrl } from './backend-url.js';
 import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
 import { shouldExternalize } from './externalize.js';
 import {
+  formatDryRun,
   formatError,
   formatJson,
+  formatJsonDryRun,
   formatJsonError,
   formatJsonMessage,
   formatSize,
@@ -69,6 +71,11 @@ function createProgram(): Command {
       new Option('--quiet', 'Suppress all output except errors').hideHelp(false).preset(true),
     )
     .addOption(new Option('--verbose', 'Detailed progress output').hideHelp(false).preset(true))
+    .addOption(
+      new Option('--dry-run', 'Show what would happen without doing it')
+        .hideHelp(false)
+        .preset(true),
+    )
     .configureHelp({
       helpWidth: 80,
       showGlobalOptions: false,
@@ -265,10 +272,19 @@ type ActionHandler = (...args: any[]) => Promise<void>;
 function wrapAction(handler: ActionHandler): ActionHandler {
   return async (...args: unknown[]) => {
     try {
+      const cmd = args.find((a) => a instanceof Command);
+      if (cmd) {
+        const g = getGlobalOpts(cmd);
+        if (g.quiet && g.verbose) {
+          throw new ValidationError('--quiet and --verbose cannot be used together.');
+        }
+      }
       await handler(...args);
     } catch (err) {
       const cmd = args.find((a) => a instanceof Command);
-      const globalOpts = cmd ? getGlobalOpts(cmd) : { json: false, quiet: false, verbose: false };
+      const globalOpts = cmd
+        ? getGlobalOpts(cmd)
+        : { json: false, quiet: false, verbose: false, dryRun: false };
 
       if (err instanceof BlobsyError) {
         if (globalOpts.json) {
@@ -299,6 +315,22 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
 
   const parsed = parseBackendUrl(url);
   validateBackendUrl(parsed, repoRoot);
+
+  if (globalOpts.dryRun) {
+    const actions = [];
+    if (!existsSync(configPath)) {
+      actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
+    }
+    actions.push('install pre-commit hook');
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(actions));
+    } else {
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
+    }
+    return;
+  }
 
   if (existsSync(configPath)) {
     if (!globalOpts.quiet) {
@@ -413,7 +445,17 @@ async function trackSingleFile(
   const fileName = basename(absPath);
 
   if (!existsSync(absPath)) {
-    throw new ValidationError(`File not found: ${relPath}`);
+    throw new ValidationError(`File not found: ${relPath}`, ['Check the file path and try again.']);
+  }
+
+  if (globalOpts.dryRun) {
+    const action = existsSync(refPath) ? `update ${refRelPath}` : `track ${relPath}`;
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([action]));
+    } else {
+      console.log(formatDryRun(action));
+    }
+    return;
   }
 
   const hash = await computeHash(absPath);
@@ -495,6 +537,24 @@ async function trackDirectory(
   const relDir = toRepoRelative(absDir, repoRoot);
   const files = findTrackableFiles(absDir);
   const extConfig = getExternalizeConfig(config);
+
+  if (globalOpts.dryRun) {
+    const trackable = files.filter((f) => {
+      const rel = toRepoRelative(f, repoRoot);
+      const sz = statSync(f).size;
+      return shouldExternalize(rel, sz, extConfig);
+    });
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(trackable.map((f) => `track ${toRepoRelative(f, repoRoot)}`)));
+    } else {
+      console.log(
+        formatDryRun(
+          `track ${trackable.length} file${trackable.length === 1 ? '' : 's'} in ${relDir}/`,
+        ),
+      );
+    }
+    return;
+  }
 
   if (!globalOpts.quiet && !globalOpts.json) {
     console.log(`Scanning ${relDir}/...`);
@@ -762,6 +822,15 @@ async function untrackFile(
     throw new ValidationError(`Not tracked: ${relPath} (no .yref file found)`);
   }
 
+  if (globalOpts.dryRun) {
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([`untrack ${relPath}`]));
+    } else {
+      console.log(formatDryRun(`untrack ${relPath}`));
+    }
+    return;
+  }
+
   // Move .yref to trash
   const trashDir = join(repoRoot, '.blobsy', 'trash');
   await ensureDir(trashDir);
@@ -825,6 +894,16 @@ async function rmFile(
   const refPath = yrefPath(absPath);
   const fileName = basename(absPath);
   const fileDir = dirname(absPath);
+
+  if (globalOpts.dryRun) {
+    const action = localOnly ? `delete local file ${relPath}` : `remove ${relPath}`;
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([action]));
+    } else {
+      console.log(formatDryRun(action));
+    }
+    return;
+  }
 
   if (localOnly) {
     // Just delete local file, keep .yref
@@ -895,6 +974,15 @@ async function handleMv(
 
   if (!existsSync(srcRefPath)) {
     throw new ValidationError(`Not tracked: ${srcRel} (no .yref file found)`);
+  }
+
+  if (globalOpts.dryRun) {
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([`move ${srcRel} -> ${destRel}`]));
+    } else {
+      console.log(formatDryRun(`move ${srcRel} -> ${destRel}`));
+    }
+    return;
   }
 
   if (isDirectory(srcAbs)) {
@@ -993,6 +1081,15 @@ async function handleConfig(
     throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
   }
 
+  if (globalOpts.dryRun) {
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([`set ${key} = ${value}`]));
+    } else {
+      console.log(formatDryRun(`set ${key} = ${value}`));
+    }
+    return;
+  }
+
   const { parse: parseYaml, stringify: stringifyYaml } = await import('yaml');
   const content = await readFile(configPath, 'utf-8');
   const config = (parseYaml(content) as Record<string, unknown>) ?? {};
@@ -1055,7 +1152,12 @@ export async function main(): Promise<void> {
   await program.parseAsync(process.argv);
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exitCode = 1;
+main().catch((err: unknown) => {
+  if (err instanceof BlobsyError) {
+    console.error(formatError(err));
+    process.exitCode = err.exitCode;
+  } else {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  }
 });

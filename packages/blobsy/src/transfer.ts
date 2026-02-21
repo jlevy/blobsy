@@ -84,7 +84,9 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
     return { ...backend, type: 'command' };
   }
 
-  throw new ValidationError('Cannot determine backend type from config.');
+  throw new ValidationError('Cannot determine backend type from config.', [
+    'Set a url (e.g. s3://bucket/prefix or local:../path) or explicit type in .blobsy.yml.',
+  ]);
 }
 
 /** Push a single file to remote. Returns refUpdates for the caller to merge into the ref. */

@@ -107,4 +107,14 @@ export function formatError(error: BlobsyError | Error): string {
   return lines.join('\n');
 }
 
+/** Format a dry-run action message. */
+export function formatDryRun(action: string): string {
+  return `Would ${action}`;
+}
+
+/** Format dry-run actions as JSON. */
+export function formatJsonDryRun(actions: string[]): string {
+  return formatJson({ dry_run: true, actions });
+}
+
 export { FILE_STATE_SYMBOLS, SCHEMA_VERSION };

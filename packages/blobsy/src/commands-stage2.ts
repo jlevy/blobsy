@@ -25,7 +25,13 @@ import {
 import { readYRef, writeYRef } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck } from './transfer.js';
-import { formatJson, formatJsonError, formatSize } from './format.js';
+import {
+  formatDryRun,
+  formatJson,
+  formatJsonDryRun,
+  formatJsonError,
+  formatSize,
+} from './format.js';
 import type { GlobalOptions, TransferResult } from './types.js';
 import { ValidationError } from './types.js';
 
@@ -36,6 +42,7 @@ export function getGlobalOpts(cmd: Command): GlobalOptions {
     json: Boolean(opts.json),
     quiet: Boolean(opts.quiet),
     verbose: Boolean(opts.verbose),
+    dryRun: Boolean(opts.dryRun),
   };
 }
 
@@ -87,6 +94,27 @@ export async function handlePush(
       console.log(formatJson({ pushed: [], summary: { total: 0 } }));
     } else {
       console.log('No tracked files to push.');
+    }
+    return;
+  }
+
+  if (globalOpts.dryRun) {
+    const needsPush = [];
+    for (const file of files) {
+      const ref = await readYRef(file.refPath);
+      if (!ref.remote_key || opts.force) {
+        needsPush.push(`push ${file.relPath}`);
+      }
+    }
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(needsPush));
+    } else {
+      for (const a of needsPush) {
+        console.log(formatDryRun(a));
+      }
+      console.log(
+        `${formatDryRun(`push ${needsPush.length} file${needsPush.length === 1 ? '' : 's'}`)}`,
+      );
     }
     return;
   }
@@ -170,6 +198,27 @@ export async function handlePull(
       console.log(formatJson({ pulled: [], summary: { total: 0 } }));
     } else {
       console.log('No tracked files to pull.');
+    }
+    return;
+  }
+
+  if (globalOpts.dryRun) {
+    const needsPull = [];
+    for (const file of files) {
+      const ref = await readYRef(file.refPath);
+      if (ref.remote_key) {
+        needsPull.push(`pull ${file.relPath}`);
+      }
+    }
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(needsPull));
+    } else {
+      for (const a of needsPull) {
+        console.log(formatDryRun(a));
+      }
+      console.log(
+        formatDryRun(`pull ${needsPull.length} file${needsPull.length === 1 ? '' : 's'}`),
+      );
     }
     return;
   }
@@ -259,6 +308,30 @@ export async function handleSync(
   }
 
   const files = resolveTrackedFiles(paths, repoRoot);
+
+  if (globalOpts.dryRun) {
+    const actions = [];
+    for (const file of files) {
+      const ref = await readYRef(file.refPath);
+      if (!ref.remote_key) {
+        actions.push(`push ${file.relPath}`);
+      } else if (!existsSync(file.absPath)) {
+        actions.push(`pull ${file.relPath}`);
+      }
+    }
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(actions));
+    } else {
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
+      if (actions.length === 0) {
+        console.log('Everything up to date.');
+      }
+    }
+    return;
+  }
+
   let pushed = 0;
   let pulled = 0;
   let errors = 0;
@@ -366,6 +439,15 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   const useJson = Boolean(opts.json) || globalOpts.json;
   const fix = Boolean(opts.fix);
   const repoRoot = findRepoRoot();
+
+  if (globalOpts.dryRun && fix) {
+    if (useJson) {
+      console.log(formatJsonDryRun(['run doctor diagnostics', 'fix detected issues']));
+    } else {
+      console.log(formatDryRun('run doctor diagnostics and fix detected issues'));
+    }
+    return;
+  }
   const config = await resolveConfig(repoRoot, repoRoot);
 
   const issues: { type: string; message: string; fixed: boolean }[] = [];
@@ -484,6 +566,15 @@ export async function handleHooks(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
   const hookPath = join(repoRoot, '.git', 'hooks', 'pre-commit');
+
+  if (globalOpts.dryRun) {
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun([`${action} pre-commit hook`]));
+    } else {
+      console.log(formatDryRun(`${action} pre-commit hook`));
+    }
+    return;
+  }
 
   if (action === 'install') {
     const hookDir = join(repoRoot, '.git', 'hooks');

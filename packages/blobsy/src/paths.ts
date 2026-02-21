@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
-import { YREF_EXTENSION } from './types.js';
+import { ValidationError, YREF_EXTENSION } from './types.js';
 
 /** Find the git repository root by walking up from cwd. */
 export function findRepoRoot(startDir?: string): string {
@@ -22,7 +22,9 @@ export function findRepoRoot(startDir?: string): string {
     }).trim();
     return root;
   } catch {
-    throw new Error('Not inside a git repository. Run this command from within a git repo.');
+    throw new ValidationError('Not inside a git repository.', [
+      'Run this command from within a git repo.',
+    ]);
   }
 }
 

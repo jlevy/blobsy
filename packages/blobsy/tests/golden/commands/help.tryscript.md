@@ -14,6 +14,7 @@ Options:
   --json                 Structured JSON output
   --quiet                Suppress all output except errors
   --verbose              Detailed progress output
+  --dry-run              Show what would happen without doing it
   -h, --help             Display help for command
 
 Commands:

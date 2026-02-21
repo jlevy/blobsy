@@ -18,6 +18,8 @@ before: |
 ```console
 $ blobsy track nonexistent.bin 2>&1
 Error: File not found: nonexistent.bin
+
+  Check the file path and try again.
 ? 1
 ```
 
