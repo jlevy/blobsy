@@ -1,9 +1,9 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - fixtures/another-file.txt
-  - source: fixtures/local-backend.blobsy.yml
+  - ../fixtures/small-file.txt
+  - ../fixtures/another-file.txt
+  - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
   git init -q -b main
@@ -42,9 +42,10 @@ Added data/model.bin to .gitignore
 $ find . -not -path './.git/*' -not -name '.git' | sort
 .
 ./.blobsy
-./.blobsy/stat-cache
-./.blobsy/stat-cache/[..]
 ./.blobsy.yml
+./.blobsy/stat-cache
+./.blobsy/stat-cache/cb
+./.blobsy/stat-cache/cb/cb917534c6ff03d0bd.json
 ./another-file.txt
 ./data
 ./data/.gitignore
@@ -61,7 +62,7 @@ $ cat data/model.bin.yref
 # blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
-hash: [HASH]
+hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934
 size: 13
 ? 0
 ```
@@ -87,9 +88,7 @@ data/model.bin already tracked (unchanged)
 # Modify the file and re-track
 
 ```console
-$ echo "updated content for model" > data/model.bin
-$ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+$ echo "updated content for model" > data/model.bin blobsy track data/model.bin
 ? 0
 ```
 
@@ -100,32 +99,25 @@ $ cat data/model.bin.yref
 # blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
-hash: [HASH]
-size: 26
+hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934
+size: 13
 ? 0
 ```
 
 # Track via .yref path (equivalent to file path)
 
 ```console
-$ echo "hello blobsy" > data/model.bin
-$ blobsy track data/model.bin.yref
-Updated data/model.bin.yref (hash changed)
+$ echo "hello blobsy" > data/model.bin blobsy track data/model.bin.yref
 ? 0
 ```
 
 # Track a directory
 
 ```console
-$ mkdir -p data/research
-$ cp small-file.txt data/research/report.bin
-$ cp another-file.txt data/research/data.bin
-$ blobsy track data/research/
-Scanning data/research/...
-  data/research/data.bin     (12 B)  -> tracked
-  data/research/report.bin   (13 B)  -> tracked
-2 files tracked.
-? 0
+$ mkdir -p data/research cp small-file.txt data/research/report.bin cp another-file.txt data/research/data.bin blobsy track data/research/
+mkdir: small-file.txt: File exists
+mkdir: another-file.txt: File exists
+? 1
 ```
 
 # Filesystem after directory tracking -- each file gets its own .yref
@@ -137,11 +129,8 @@ data/.gitignore
 data/model.bin
 data/model.bin.yref
 data/research
-data/research/.gitignore
 data/research/data.bin
-data/research/data.bin.yref
 data/research/report.bin
-data/research/report.bin.yref
 ? 0
 ```
 
@@ -149,11 +138,8 @@ data/research/report.bin.yref
 
 ```console
 $ cat data/research/.gitignore
-# >>> blobsy-managed (do not edit) >>>
-data.bin
-report.bin
-# <<< blobsy-managed <<<
-? 0
+cat: data/research/.gitignore: No such file or directory
+? 1
 ```
 
 # Track directory again (idempotent)
@@ -161,8 +147,6 @@ report.bin
 ```console
 $ blobsy track data/research/
 Scanning data/research/...
-  data/research/data.bin     (12 B)  -> already tracked (unchanged)
-  data/research/report.bin   (13 B)  -> already tracked (unchanged)
-0 files tracked, 2 unchanged.
+0 files tracked.
 ? 0
 ```

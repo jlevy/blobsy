@@ -1,26 +1,39 @@
 /**
- * blobsy
+ * blobsy -- Store large files anywhere. Track them in Git.
  *
- * A simple, serverless CLI for large file storage in Git that uses S3, R2, or any other backend
+ * Library exports for programmatic usage.
  */
 
-/**
- * A simple greeting function.
- *
- * @param name - The name to greet
- * @returns A greeting message
- */
-export function greet(name: string): string {
-  return `Hello, ${name}!`;
-}
+export type {
+  BlobsyConfig,
+  BackendConfig,
+  BackendType,
+  CompressConfig,
+  ErrorCategory,
+  ExternalizeConfig,
+  FileStateSymbol,
+  GlobalOptions,
+  ParsedBackendUrl,
+  StatCacheEntry,
+  SyncAction,
+  TransferResult,
+  YRef,
+} from './types.js';
 
-/**
- * Adds two numbers together.
- *
- * @param a - First number
- * @param b - Second number
- * @returns The sum of a and b
- */
-export function add(a: number, b: number): number {
-  return a + b;
-}
+export { BlobsyError, ConflictError, ValidationError, YREF_FORMAT, YREF_EXTENSION } from './types.js';
+
+export { computeHash, hashString, isValidHash } from './hash.js';
+export { readYRef, writeYRef } from './ref.js';
+export { resolveConfig, loadConfigFile, mergeConfigs, getBuiltinDefaults, parseSize } from './config.js';
+export { parseBackendUrl, validateBackendUrl, formatBackendUrl } from './backend-url.js';
+export {
+  findRepoRoot,
+  toRepoRelative,
+  stripYrefExtension,
+  yrefPath,
+  normalizePath,
+  getCacheEntryPath,
+} from './paths.js';
+export { addGitignoreEntry, removeGitignoreEntry, readBlobsyBlock } from './gitignore.js';
+export { shouldExternalize, filterFilesForExternalization } from './externalize.js';
+export { formatSize, formatJson, formatJsonMessage, formatJsonError } from './format.js';

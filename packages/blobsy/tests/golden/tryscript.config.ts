@@ -12,6 +12,7 @@ export default defineConfig({
     TIMESTAMP: '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z?',
     REMOTE_KEY: '\\d{8}T\\d{6}Z-[0-9a-f]+/.+',
     TMPFILE: '/tmp/blobsy-[a-z]+-[0-9a-f]+\\.tmp',
+    SIZE: '\\d+',
   },
-  path: ['$TRYSCRIPT_PACKAGE_BIN'],
+  path: ['$TRYSCRIPT_PACKAGE_BIN', '$TRYSCRIPT_PACKAGE_ROOT/bin'],
 });

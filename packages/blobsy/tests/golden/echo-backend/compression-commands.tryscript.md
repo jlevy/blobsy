@@ -1,8 +1,8 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - fixtures/echo-backend.ts
+  - ../fixtures/small-file.txt
+  - ../fixtures/echo-backend.ts
 before: |
   git init -q -b main
   git config user.name "Blobsy Test"

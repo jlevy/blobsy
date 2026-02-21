@@ -1,7 +1,7 @@
 ---
 sandbox: true
 fixtures:
-  - source: fixtures/local-backend.blobsy.yml
+  - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
   git init -q -b main
@@ -23,7 +23,7 @@ backends:
 
 ```console
 $ blobsy config backend
-default (url: local:../remote)
+(not set)
 ? 0
 ```
 
@@ -31,21 +31,20 @@ default (url: local:../remote)
 
 ```console
 $ blobsy config externalize
-externalize:
-  min_size: 1mb
-  always:
-    - "*.parquet"
-    - "*.bin"
-    - "*.weights"
-    - "*.onnx"
-    - "*.safetensors"
-    - "*.pkl"
-    - "*.pt"
-    - "*.h5"
-    - "*.arrow"
-    - "*.sqlite"
-    - "*.db"
-  never: []
+min_size: 1mb
+always:
+  - "*.parquet"
+  - "*.bin"
+  - "*.weights"
+  - "*.onnx"
+  - "*.safetensors"
+  - "*.pkl"
+  - "*.pt"
+  - "*.h5"
+  - "*.arrow"
+  - "*.sqlite"
+  - "*.db"
+never: []
 ? 0
 ```
 
@@ -53,29 +52,28 @@ externalize:
 
 ```console
 $ blobsy config compress
-compress:
-  min_size: 100kb
-  algorithm: zstd
-  always:
-    - "*.json"
-    - "*.csv"
-    - "*.tsv"
-    - "*.txt"
-    - "*.jsonl"
-    - "*.xml"
-    - "*.sql"
-  never:
-    - "*.gz"
-    - "*.zst"
-    - "*.zip"
-    - "*.tar.*"
-    - "*.parquet"
-    - "*.png"
-    - "*.jpg"
-    - "*.jpeg"
-    - "*.mp4"
-    - "*.webp"
-    - "*.avif"
+algorithm: zstd
+min_size: 100kb
+always:
+  - "*.json"
+  - "*.csv"
+  - "*.tsv"
+  - "*.txt"
+  - "*.jsonl"
+  - "*.xml"
+  - "*.sql"
+never:
+  - "*.gz"
+  - "*.zst"
+  - "*.zip"
+  - "*.tar.*"
+  - "*.parquet"
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.mp4"
+  - "*.webp"
+  - "*.avif"
 ? 0
 ```
 
@@ -83,7 +81,6 @@ compress:
 
 ```console
 $ blobsy config remote
-remote:
-  key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"
+key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"
 ? 0
 ```

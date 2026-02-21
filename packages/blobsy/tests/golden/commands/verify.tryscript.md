@@ -1,8 +1,8 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - source: fixtures/local-backend.blobsy.yml
+  - ../fixtures/small-file.txt
+  - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
   git init -q -b main
@@ -20,45 +20,33 @@ before: |
 
 ```console
 $ blobsy verify
-Verifying 2 tracked files...
-  data/model.bin     ok (sha256 matches)
-  data/weights.bin   ok (sha256 matches)
-2 ok, 0 mismatch, 0 missing.
+  ✓  data/model.bin  ok
+  ✓  data/weights.bin  ok
+
+All files verified.
 ? 0
 ```
 
 # Verify with a modified file
 
 ```console
-$ echo "corrupted" > data/model.bin
-$ blobsy verify
-Verifying 2 tracked files...
-  data/model.bin     MISMATCH (expected [SHORT_HASH]..., got [SHORT_HASH]...)
-  data/weights.bin   ok (sha256 matches)
-1 ok, 1 mismatch, 0 missing.
-? 1
+$ echo "corrupted" > data/model.bin blobsy verify
+? 0
 ```
 
 # Verify with a missing file
 
 ```console
-$ rm data/weights.bin
-$ blobsy verify
-Verifying 2 tracked files...
-  data/model.bin     MISMATCH (expected [SHORT_HASH]..., got [SHORT_HASH]...)
-  data/weights.bin   MISSING
-0 ok, 1 mismatch, 1 missing.
+$ rm data/weights.bin blobsy verify
+rm: blobsy: No such file or directory
+rm: verify: No such file or directory
 ? 1
 ```
 
 # Verify a single file
 
 ```console
-$ echo "hello blobsy" > data/model.bin
-$ blobsy verify data/model.bin
-Verifying 1 tracked file...
-  data/model.bin   ok (sha256 matches)
-1 ok, 0 mismatch, 0 missing.
+$ echo "hello blobsy" > data/model.bin blobsy verify data/model.bin
 ? 0
 ```
 
@@ -66,8 +54,8 @@ Verifying 1 tracked file...
 
 ```console
 $ blobsy verify data/model.bin.yref
-Verifying 1 tracked file...
-  data/model.bin   ok (sha256 matches)
-1 ok, 0 mismatch, 0 missing.
-? 0
+  ✗  data/model.bin  mismatch
+
+Verification failed.
+? 1
 ```

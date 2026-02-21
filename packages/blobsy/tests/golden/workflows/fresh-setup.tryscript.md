@@ -1,8 +1,8 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - fixtures/another-file.txt
+  - ../fixtures/small-file.txt
+  - ../fixtures/another-file.txt
 ---
 # Full lifecycle: init -> track -> push -> clone -> pull -> verify
 

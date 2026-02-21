@@ -1,8 +1,8 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - source: fixtures/local-backend.blobsy.yml
+  - ../fixtures/small-file.txt
+  - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
   git init -q -b main

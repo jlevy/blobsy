@@ -1,7 +1,7 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
+  - ../fixtures/small-file.txt
 before: |
   git init -q -b main
   git config user.name "Blobsy Test"

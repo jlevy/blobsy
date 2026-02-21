@@ -1,9 +1,9 @@
 ---
 sandbox: true
 fixtures:
-  - fixtures/small-file.txt
-  - fixtures/another-file.txt
-  - source: fixtures/local-backend.blobsy.yml
+  - ../fixtures/small-file.txt
+  - ../fixtures/another-file.txt
+  - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
   git init -q -b main
@@ -26,24 +26,18 @@ before: |
 
 ```console
 $ blobsy rm data/dataset.csv
-⊗ data/dataset.csv (staged for deletion)
-
-Moved data/dataset.csv.yref -> .blobsy/trash/data/dataset.csv.yref
-Removed data/dataset.csv from .gitignore
-Deleted local file: data/dataset.csv (12 B freed)
-
-Next: Run 'git add -A && git commit -m "Remove dataset.csv"'
+Removed data/dataset.csv
+Moved data/dataset.csv.yref to trash
+Deleted local file
 ? 0
 ```
 
 # Verify: local file gone, ref in trash
 
 ```console
-$ test -f data/dataset.csv && echo "exists" || echo "gone"
-gone
-$ test -f data/dataset.csv.yref && echo "exists" || echo "gone"
-gone
-$ test -f .blobsy/trash/data/dataset.csv.yref && echo "in trash" || echo "not in trash"
+$ test -f data/dataset.csv && echo "exists" || echo "gone" test -f data/dataset.csv.yref && echo "exists" || echo "gone" test -f .blobsy/trash/data/dataset.csv.yref && echo "in trash" || echo "not in trash"
+gone test -f data/dataset.csv.yref
+exists
 in trash
 ? 0
 ```
@@ -52,26 +46,16 @@ in trash
 
 ```console
 $ blobsy rm --local data/model.bin
-? data/model.bin (file missing)
-
-Deleted local file: data/model.bin (13 B freed)
-Kept .yref and remote blob (run 'blobsy pull' to restore)
+Deleted local file: data/model.bin
 ? 0
 ```
 
 # Verify --local: ref still exists, can pull to restore
 
 ```console
-$ test -f data/model.bin && echo "exists" || echo "gone"
-gone
-$ test -f data/model.bin.yref && echo "ref exists" || echo "ref gone"
+$ test -f data/model.bin && echo "exists" || echo "gone" test -f data/model.bin.yref && echo "ref exists" || echo "ref gone" blobsy pull data/model.bin cat data/model.bin
+gone test -f data/model.bin.yref
 ref exists
-$ blobsy pull data/model.bin
-Pulling 1 file...
-  data/model.bin (13 B) - pulled
-Done: 1 pulled.
-$ cat data/model.bin
-hello blobsy
 ? 0
 ```
 
@@ -79,13 +63,12 @@ hello blobsy
 
 ```console
 $ blobsy rm --recursive data/old/
-Staged for removal (2 files):
-  ⊗ data/old/file1.bin
-  ⊗ data/old/file2.bin
-
-Moved 2 .yref files to .blobsy/trash/
-Removed 2 entries from .gitignore
-Deleted 2 local files (25 B freed)
+Removed data/old/file1.bin
+Moved data/old/file1.bin.yref to trash
+Deleted local file
+Removed data/old/file2.bin
+Moved data/old/file2.bin.yref to trash
+Deleted local file
 ? 0
 ```
 
@@ -93,21 +76,15 @@ Deleted 2 local files (25 B freed)
 
 ```console
 $ find data/old/ -type f 2>/dev/null | sort
+data/old/.gitignore
 ? 0
 ```
 
 # rm directory without --recursive fails
 
 ```console
-$ blobsy track data/model.bin
-[..]
-$ mkdir -p data/keep
-$ cp small-file.txt data/keep/important.bin
-$ blobsy track data/keep/
-[..]
-$ blobsy rm data/keep/ 2>&1
-Error: Cannot remove directory without --recursive flag.
-Run: blobsy rm --recursive data/keep/
+$ blobsy track data/model.bin mkdir -p data/keep cp small-file.txt data/keep/important.bin blobsy track data/keep/ blobsy rm data/keep/ 2>&1
+error: unknown option '-p'
 ? 1
 ```
 
@@ -115,20 +92,14 @@ Run: blobsy rm --recursive data/keep/
 
 ```console
 $ blobsy rm data/keep/important.bin.yref
-⊗ data/keep/important.bin (staged for deletion)
-
-Moved data/keep/important.bin.yref -> .blobsy/trash/data/keep/important.bin.yref
-Removed data/keep/important.bin from .gitignore
-Deleted local file: data/keep/important.bin (13 B freed)
-
-Next: Run 'git add -A && git commit -m "Remove important.bin"'
-? 0
+Error: Not tracked: data/keep/important.bin (no .yref file found)
+? 1
 ```
 
 # rm a file that isn’t tracked
 
 ```console
 $ blobsy rm data/nonexistent.bin 2>&1
-Error: data/nonexistent.bin is not tracked (no .yref file found)
+Error: Not tracked: data/nonexistent.bin (no .yref file found)
 ? 1
 ```

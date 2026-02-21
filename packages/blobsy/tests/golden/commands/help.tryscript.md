@@ -17,7 +17,7 @@ Options:
   -h, --help             Display help for command
 
 Commands:
-  init                   Initialize blobsy in a git repo
+  init <url>             Initialize blobsy in a git repo
   track <path...>        Start tracking files or directories
   untrack <path...>      Stop tracking (keep local files)
   rm <path...>           Remove from tracking and delete local file
