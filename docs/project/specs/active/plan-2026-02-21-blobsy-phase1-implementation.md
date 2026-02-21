@@ -587,24 +587,27 @@ dev/testing. Same interface as cloud backends.
 
 #### `backend-command.ts` -- Command Template Backend
 
-**Responsibility:** Implement the `command` backend: execute arbitrary shell commands
-for push/pull with template variable expansion.
-Used by the echo backend test fixture.
+**Responsibility:** Implement the `command` backend: execute user-configured commands
+for push/pull/exists with template variable expansion.
+Used by the echo backend test fixture and custom backends.
 
 **Key exports:**
 
-- `commandPush(pushCommand: string, vars: CommandTemplateVars): Promise<void>`.
-- `commandPull(pullCommand: string, vars: CommandTemplateVars): Promise<void>`.
-- `expandCommandTemplate(template: string, vars: CommandTemplateVars): string`.
+- `parseAndExpandCommand(template: string, vars: CommandTemplateVars): string[]`.
+- `commandPush(pushCommand: string, vars: CommandTemplateVars): void`.
+- `commandPull(pullCommand: string, vars: CommandTemplateVars, tempOutPath: string): void`.
+- `commandBlobExists(existsCommand: string, vars: CommandTemplateVars): boolean`.
+- `CommandBackend` class implementing the `Backend` interface.
 
-**Depends on:** `node:child_process`, `types.ts`, `format.ts`.
+**Depends on:** `node:child_process` (`execFileSync`), `types.ts`, `hash.ts`.
 
 **Design constraints:**
 
 - Template variables: `{local}` (absolute local path), `{remote}` (full remote key),
   `{relative_path}` (repo-relative), `{bucket}`.
+- Environment variables: `$NAME` or `${NAME}` expanded from `process.env`.
 - One command invocation per file, up to `sync.parallel` concurrently.
-- On pull: blobsy sets `$BLOBSY_TEMP_OUT` env var pointing to temp file.
+- On pull: blobsy sets `$BLOBSY_TEMP_OUT` env var in subprocess environment.
   User template writes there.
   Blobsy verifies hash and renames on exit 0.
 - Capture both stdout and stderr.
@@ -612,8 +615,23 @@ Used by the echo backend test fixture.
 - Exit code 0 = success; non-zero = failure with categorized error.
 - Security: command backends from repo-level `.blobsy.yml` require explicit trust
   (`blobsy trust`). Only allowed from `~/.blobsy.yml` or trusted repos.
-  Note: `blobsy trust` command implementation is deferred to Phase 2.
-- Uses POSIX `/bin/sh` on Unix, `cmd.exe` on Windows.
+
+**Shell-free execution model:**
+
+Commands are never passed through a shell interpreter.
+Instead:
+
+1. Split template on whitespace into discrete tokens.
+2. Expand blobsy template variables (`{name}`) per token.
+   Uses negative lookbehind to avoid matching `${NAME}` env var syntax.
+3. Expand environment variables (`$NAME`, `${NAME}`) per token from `process.env`.
+4. Validate each expanded token against `[-a-zA-Z0-9 /_.+=:@~,%#]*`. Rejects quotes,
+   semicolons, pipes, backslashes, and other shell metacharacters with a
+   `ValidationError` listing the offending characters.
+5. Execute via `execFileSync(command, args)` -- no shell, no injection possible.
+
+Shell features (pipes, redirects, subshells, globbing) are not available in templates.
+For complex commands, use a wrapper script referenced in the template.
 
 #### `transfer.ts` -- Transfer Coordinator
 

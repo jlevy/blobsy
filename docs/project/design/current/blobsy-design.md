@@ -1966,7 +1966,7 @@ compress:
 
 Three backend types are supported: `s3` (any S3-compatible store including R2, MinIO,
 B2, Tigris), `local` (directory-to-directory for dev/testing), and `command` (arbitrary
-shell commands for unsupported backends like SCP, rsync, custom APIs).
+commands for unsupported backends like SCP, rsync, custom APIs).
 
 Blobsy delegates file transfers to external CLI tools (`aws-cli`, `rclone`) or falls
 back to the built-in `@aws-sdk/client-s3`. It uses these as copy engines (per-file
@@ -1989,6 +1989,49 @@ Key properties:
   Partial failures continue remaining files.
 - **Authentication:** No custom auth.
   Uses standard credential chains (env vars, AWS profiles, IAM roles, rclone config).
+
+### Command Backend Execution Model
+
+The `command` backend executes user-configured commands for push, pull, and exists
+checks. Templates use `{local}`, `{remote}`, `{relative_path}`, and `{bucket}` as
+placeholder variables, plus `$NAME` or `${NAME}` for environment variables.
+
+**Shell-free execution.** Blobsy never passes commands through a shell interpreter.
+Instead:
+
+1. The template string is split on whitespace into discrete tokens.
+2. Blobsy template variables (`{name}`) are expanded per token.
+3. Environment variables (`$NAME`, `${NAME}`) are expanded per token.
+4. Each fully expanded token is validated against a strict character allowlist
+   (alphanumeric, space, and `/ _ - . + = : @ ~ , % #`).
+5. The command and arguments are passed as a pre-parsed array to `execFileSync`,
+   bypassing shell interpretation entirely.
+
+This eliminates shell injection by construction -- there is no shell to inject into.
+If an expanded value contains any disallowed characters (quotes, semicolons, pipes,
+backslashes, etc.), blobsy rejects it with a `ValidationError` listing the specific
+offending characters and the full set of allowed characters.
+
+**Consequences of no-shell execution:**
+
+- Shell features (pipes, redirects, subshells, globbing) are not available in command
+  templates. If complex shell logic is needed, wrap it in a script and reference the
+  script in the template.
+- Environment variable values containing spaces are preserved as part of a single token
+  (no word splitting), which is safer than shell behavior.
+- Template variable names cannot contain spaces (they are `\w+` matches).
+
+Example:
+
+```yaml
+backends:
+  default:
+    type: command
+    bucket: my-bucket
+    push_command: aws s3 cp {local} s3://{remote}
+    pull_command: aws s3 cp s3://{remote} {local}
+    exists_command: aws s3 ls s3://{remote}
+```
 
 See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) for
 full details: backend configuration, S3-compatible endpoint setup, transfer tool
@@ -2206,6 +2249,28 @@ Or configure the backend in your user config:
 
 `blobsy trust` creates a trust marker (stored in user-local config, not committed to
 git) that allows command execution for this specific repo.
+
+### Secure Command Execution
+
+Even for trusted repos, blobsy applies defense-in-depth to command execution:
+
+1. **No shell.** Commands are executed via `execFileSync` with pre-parsed argument
+   arrays. No shell interpreter (`/bin/sh`, `cmd.exe`) is involved, eliminating shell
+   injection entirely.
+
+2. **Per-token expansion.** The template is split on whitespace before any variable
+   substitution. Template variables (`{local}`, etc.)
+   and environment variables (`$NAME`) are expanded within individual tokens, never
+   across token boundaries.
+
+3. **Strict character validation.** Each fully expanded token is validated against
+   `[-a-zA-Z0-9 /_.+=:@~,%#]*`. Tokens containing quotes, semicolons, pipes,
+   backslashes, or other shell metacharacters are rejected with a clear error listing
+   the offending characters and the allowed set.
+
+These three layers mean that even if an attacker controls a template variable’s value
+(e.g., via a crafted `.yref` file), they cannot escape the argument boundary or trigger
+shell interpretation.
 
 ### Backend Authentication
 

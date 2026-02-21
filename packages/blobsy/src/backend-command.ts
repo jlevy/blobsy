@@ -1,11 +1,13 @@
 /**
  * Command template backend.
  *
- * Execute arbitrary shell commands for push/pull with template variable
- * expansion. Used by echo backend test fixture and custom backends.
+ * Executes user-configured commands for push/pull/exists. Template variables
+ * ({local}, {remote}, etc.) and environment variables ($VAR) are expanded
+ * per-token, validated against a safe character allowlist, then executed via
+ * execFileSync — bypassing the shell entirely to prevent injection.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { rename, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -28,18 +30,85 @@ export interface CommandBackendConfig {
   bucket?: string;
 }
 
-/** Shell-escape a string by wrapping in single quotes. */
-function shellEscape(value: string): string {
-  return "'" + value.replace(/'/g, "'\\''") + "'";
+/**
+ * Allowed characters in fully expanded command tokens.
+ *
+ * Permits: alphanumeric, space, and common path/URL characters.
+ * Rejects: shell metacharacters, quotes, backslashes, control characters.
+ */
+const SAFE_TOKEN_PATTERN = /^[-a-zA-Z0-9 /_.+=:@~,%#]*$/;
+
+const KNOWN_TEMPLATE_VARS: ReadonlySet<string> = new Set([
+  'local',
+  'remote',
+  'relative_path',
+  'bucket',
+]);
+
+/**
+ * Parse a command template into argv tokens, expand variables, and validate.
+ *
+ * 1. Split template on whitespace into tokens
+ * 2. Expand blobsy template variables (`{name}`) per token
+ * 3. Expand environment variables (`$NAME` or `${NAME}`) per token
+ * 4. Validate each expanded token against a safe character allowlist
+ *
+ * The result is passed to `execFileSync` as pre-parsed arguments,
+ * bypassing the shell entirely to prevent injection.
+ */
+export function parseAndExpandCommand(template: string, vars: CommandTemplateVars): string[] {
+  const tokens = template.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    throw new ValidationError('Command template is empty.');
+  }
+
+  return tokens.map((token, i) => {
+    let expanded = token;
+
+    // 1. Expand blobsy template variables (skip ${...} which are env vars)
+    expanded = expanded.replace(/(?<!\$)\{(\w+)\}/g, (_match, key: string) => {
+      if (!KNOWN_TEMPLATE_VARS.has(key)) {
+        throw new ValidationError(`Unknown template variable {${key}} in command template.`, [
+          'Known variables: {local}, {remote}, {relative_path}, {bucket}',
+        ]);
+      }
+      return vars[key as keyof CommandTemplateVars];
+    });
+
+    // 2. Expand environment variables ($NAME or ${NAME})
+    expanded = expanded.replace(
+      /\$\{(\w+)\}|\$(\w+)/g,
+      (_match, braced: string | undefined, bare: string | undefined) => {
+        const name = (braced ?? bare)!;
+        const value = process.env[name];
+        if (value === undefined) {
+          throw new ValidationError(
+            `Undefined environment variable $${name} in command template.`,
+            ['Set the variable or remove it from the template.'],
+          );
+        }
+        return value;
+      },
+    );
+
+    // 3. Validate the fully expanded token
+    validateExpandedToken(expanded, i === 0 ? 'command' : `argument ${i}`);
+
+    return expanded;
+  });
 }
 
-/** Expand template variables in a command string with shell escaping. */
-export function expandCommandTemplate(template: string, vars: CommandTemplateVars): string {
-  return template
-    .replace(/\{local\}/g, shellEscape(vars.local))
-    .replace(/\{remote\}/g, shellEscape(vars.remote))
-    .replace(/\{relative_path\}/g, shellEscape(vars.relative_path))
-    .replace(/\{bucket\}/g, shellEscape(vars.bucket));
+function validateExpandedToken(token: string, context: string): void {
+  if (!SAFE_TOKEN_PATTERN.test(token)) {
+    const unsafeChars = [...new Set([...token].filter((c) => !SAFE_TOKEN_PATTERN.test(c)))];
+    throw new ValidationError(
+      `Unsafe characters in expanded command ${context}: ${JSON.stringify(token)}`,
+      [
+        `Disallowed characters: ${unsafeChars.map((c) => JSON.stringify(c)).join(', ')}`,
+        'Allowed: alphanumeric, space, and / _ - . + = : @ ~ , % #',
+      ],
+    );
+  }
 }
 
 export class CommandBackend implements Backend {
@@ -112,8 +181,8 @@ export class CommandBackend implements Backend {
 
 /** Execute a push command. */
 export function commandPush(pushCommand: string, vars: CommandTemplateVars): void {
-  const cmd = expandCommandTemplate(pushCommand, vars);
-  executeCommand(cmd, 'push');
+  const args = parseAndExpandCommand(pushCommand, vars);
+  executeCommandDirect(args, 'push');
 }
 
 /** Execute a pull command. Pull to a temp path, caller handles rename. */
@@ -122,50 +191,83 @@ export function commandPull(
   vars: CommandTemplateVars,
   tempOutPath: string,
 ): void {
-  const cmd = expandCommandTemplate(pullCommand, vars);
-  executeCommand(cmd, 'pull', { BLOBSY_TEMP_OUT: tempOutPath });
+  const args = parseAndExpandCommand(pullCommand, vars);
+  executeCommandDirect(args, 'pull', { BLOBSY_TEMP_OUT: tempOutPath });
 }
 
 /** Execute an exists check command. Returns true if exit code is 0. */
 export function commandBlobExists(existsCommand: string, vars: CommandTemplateVars): boolean {
-  const cmd = expandCommandTemplate(existsCommand, vars);
+  const args = parseAndExpandCommand(existsCommand, vars);
+  const [command, ...cmdArgs] = args;
+  if (!command) {
+    throw new ValidationError('Exists command template produced no command.');
+  }
   try {
-    execSync(cmd, {
-      shell: '/bin/sh',
+    execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30000,
     });
     return true;
   } catch (err) {
-    const execError = err as { status?: number | null; signal?: string | null; stderr?: Buffer };
+    const execError = err as {
+      status?: number | null;
+      signal?: string | null;
+      stderr?: Buffer;
+      code?: string;
+    };
     if (execError.status != null && execError.signal == null) {
       return false;
     }
+    if (execError.code === 'ENOENT') {
+      throw new BlobsyError(
+        `Command not found: ${command}. Ensure it is installed and in your PATH.`,
+        'not_found',
+      );
+    }
     const stderr = execError.stderr?.toString().trim() ?? '';
     throw new BlobsyError(
-      `Exists check command failed unexpectedly: ${cmd}\n${stderr}`,
+      `Exists check command failed unexpectedly: ${args.join(' ')}\n${stderr}`,
       categorizeCommandError(stderr),
     );
   }
 }
 
-function executeCommand(cmd: string, operation: string, extraEnv?: Record<string, string>): void {
+function executeCommandDirect(
+  args: string[],
+  operation: string,
+  extraEnv?: Record<string, string>,
+): void {
+  const [command, ...cmdArgs] = args;
+  if (!command) {
+    throw new ValidationError('Command template produced no command.');
+  }
   try {
-    execSync(cmd, {
-      shell: '/bin/sh',
+    execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 60000,
-      env: { ...process.env, ...extraEnv },
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
     });
   } catch (err) {
-    const execError = err as { status?: number; stdout?: Buffer; stderr?: Buffer };
+    const execError = err as {
+      status?: number;
+      stdout?: Buffer;
+      stderr?: Buffer;
+      code?: string;
+    };
+    if (execError.code === 'ENOENT') {
+      throw new BlobsyError(
+        `Command not found: ${command}. Ensure it is installed and in your PATH.`,
+        'not_found',
+      );
+    }
     const exitCode = execError.status ?? 1;
     const stderr = execError.stderr?.toString().trim() ?? '';
     const stdout = execError.stdout?.toString().trim() ?? '';
 
+    const cmdStr = args.join(' ');
     const details = [stdout, stderr].filter(Boolean).join('\n');
     throw new BlobsyError(
-      `Command ${operation} failed (exit ${exitCode}): ${cmd}\n${details}`,
+      `Command ${operation} failed (exit ${exitCode}): ${cmdStr}\n${details}`,
       categorizeCommandError(stderr),
       1,
     );

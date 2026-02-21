@@ -147,9 +147,9 @@ installed).
 
 ## Blobsy CLI
 
-Blobsy is a Git-native large file storage CLI.
-Track large files with `.yref` pointer files committed to Git, while blobs live in S3,
-local directories, or custom command backends.
+Blobsy is a Git-native large file storage CLI. Track large files with `.yref` pointer
+files committed to Git, while blobs live in S3, local directories, or custom command
+backends.
 
 ### Key Commands
 
@@ -165,14 +165,15 @@ local directories, or custom command backends.
 
 ### Global Options
 
-All commands accept: `--json`, `--quiet`, `--verbose`, `--dry-run`.
-Use `--json` for machine-parseable output.
+All commands accept: `--json`, `--quiet`, `--verbose`, `--dry-run`. Use `--json` for
+machine-parseable output.
 Use `--dry-run` to preview without side effects.
 
 ### Testing
 
 - Unit tests: `pnpm test`
-- Golden tests: `cd packages/blobsy && npx tryscript run 'tests/golden/**/*.tryscript.md'`
+- Golden tests:
+  `cd packages/blobsy && npx tryscript run 'tests/golden/**/*.tryscript.md'`
 - E2E tests: `pnpm --filter blobsy test:e2e` (requires Docker/MinIO)
 
 ### Architecture
