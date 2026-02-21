@@ -2373,14 +2373,6 @@ Let `L` = local file hash, `R` = ref hash (in git HEAD), `B` = blob exists in re
 | h | (none) | -- | **Untracked** | (not shown) | (ignored) |
 | (none) | (none) | old | **Orphaned remote** | (not shown) | `gc` candidate (V2) |
 
-### Key Invariant
-
-`blobsy sync` only operates on files whose `.yref` is committed to git.
-It never modifies `.yref` files (except to set `remote_key` after a successful push).
-The user controls the ref via `blobsy track` + `git commit`.
-
-Sync succeeds cleanly when all three layers agree.
-
 ## Conflict Model
 
 ### Why Conflicts Are Trivially Resolved
