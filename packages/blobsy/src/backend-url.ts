@@ -163,8 +163,11 @@ export function validateBackendUrl(parsed: ParsedBackendUrl, repoRoot: string): 
 
 /** Resolve a local backend path relative to repo root, with tilde expansion. */
 export function resolveLocalPath(localPath: string, repoRoot: string): string {
-  if (localPath.startsWith('~')) {
-    return resolve(localPath.replace('~', homedir()));
+  if (localPath === '~') {
+    return homedir();
+  }
+  if (localPath.startsWith('~/')) {
+    return resolve(homedir(), localPath.slice(2));
   }
   return resolve(repoRoot, localPath);
 }

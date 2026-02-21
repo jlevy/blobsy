@@ -40,6 +40,7 @@ import {
 } from './paths.js';
 import { readYRef, writeYRef } from './ref.js';
 import {
+  getGlobalOpts,
   handlePush,
   handlePull,
   handleSync,
@@ -49,6 +50,7 @@ import {
   handleCheckUnpushed,
   handlePrePushCheck,
   handleHook,
+  resolveTrackedFiles,
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
@@ -144,7 +146,6 @@ function createProgram(): Command {
     .command('track')
     .description('Start tracking files or directories')
     .argument('<path...>', 'Files or directories to track')
-    .option('--dry-run', 'Show what would happen without doing it')
     .option('--force', 'Skip confirmation for destructive operations')
     .action(wrapAction(handleTrack));
 
@@ -153,7 +154,6 @@ function createProgram(): Command {
     .description('Stop tracking (keep local files)')
     .argument('<path...>', 'Files or directories to untrack')
     .option('--recursive', 'Required for directory removal')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handleUntrack));
 
   program
@@ -162,7 +162,6 @@ function createProgram(): Command {
     .argument('<path...>', 'Files or directories to remove')
     .option('--local', 'Delete local file only, keep .yref and remote')
     .option('--recursive', 'Required for directory removal')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handleRm));
 
   program
@@ -170,7 +169,6 @@ function createProgram(): Command {
     .description('Rename or move a tracked file')
     .argument('<source>', 'Source tracked file')
     .argument('<dest>', 'Destination path')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handleMv));
 
   program
@@ -178,7 +176,6 @@ function createProgram(): Command {
     .description('Upload local blobs to remote')
     .argument('[path...]', 'Files or directories to push (default: all tracked)')
     .option('--force', 'Override hash mismatch (updates .yref to match file)')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handlePush));
 
   program
@@ -186,7 +183,6 @@ function createProgram(): Command {
     .description('Download remote blobs to local')
     .argument('[path...]', 'Files or directories to pull (default: all tracked)')
     .option('--force', 'Overwrite local modifications')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handlePull));
 
   program
@@ -195,7 +191,6 @@ function createProgram(): Command {
     .argument('[path...]', 'Files or directories to sync (default: all tracked)')
     .option('--skip-health-check', 'Skip backend health check')
     .option('--force', 'Force sync (overwrite conflicts)')
-    .option('--dry-run', 'Show what would happen without doing it')
     .action(wrapAction(handleSync));
 
   program
@@ -258,22 +253,7 @@ function createProgram(): Command {
 }
 
 function getVersion(): string {
-  try {
-    // Read version from package.json at build time
-    return '0.1.0';
-  } catch {
-    return '0.0.0';
-  }
-}
-
-function getGlobalOpts(cmd: Command): GlobalOptions {
-  const root = cmd.parent ?? cmd;
-  const opts = root.opts();
-  return {
-    json: Boolean(opts.json),
-    quiet: Boolean(opts.quiet),
-    verbose: Boolean(opts.verbose),
-  };
+  return '0.1.0';
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -600,30 +580,7 @@ async function handleStatus(
   const useJson = Boolean(opts.json) || globalOpts.json;
   const repoRoot = findRepoRoot();
 
-  // Find all .yref files
-  const targetPaths =
-    paths.length > 0 ? paths.map((p) => resolveFilePath(stripYrefExtension(p))) : [repoRoot];
-
-  const files: { relPath: string; absPath: string; refPath: string }[] = [];
-  for (const tp of targetPaths) {
-    if (isDirectory(tp)) {
-      const yrefFiles = findYrefFiles(tp, repoRoot);
-      for (const rel of yrefFiles) {
-        files.push({
-          relPath: rel,
-          absPath: join(repoRoot, rel),
-          refPath: join(repoRoot, yrefPath(rel)),
-        });
-      }
-    } else {
-      const rel = toRepoRelative(tp, repoRoot);
-      files.push({
-        relPath: rel,
-        absPath: tp,
-        refPath: join(repoRoot, yrefPath(rel)),
-      });
-    }
-  }
+  const files = resolveTrackedFiles(paths, repoRoot);
 
   if (files.length === 0) {
     if (useJson) {
@@ -708,29 +665,7 @@ async function handleVerify(
   const useJson = Boolean(opts.json) || globalOpts.json;
   const repoRoot = findRepoRoot();
 
-  const targetPaths =
-    paths.length > 0 ? paths.map((p) => resolveFilePath(stripYrefExtension(p))) : [repoRoot];
-
-  const files: { relPath: string; absPath: string; refPath: string }[] = [];
-  for (const tp of targetPaths) {
-    if (isDirectory(tp)) {
-      const yrefFiles = findYrefFiles(tp, repoRoot);
-      for (const rel of yrefFiles) {
-        files.push({
-          relPath: rel,
-          absPath: join(repoRoot, rel),
-          refPath: join(repoRoot, yrefPath(rel)),
-        });
-      }
-    } else {
-      const rel = toRepoRelative(tp, repoRoot);
-      files.push({
-        relPath: rel,
-        absPath: tp,
-        refPath: join(repoRoot, yrefPath(rel)),
-      });
-    }
-  }
+  const files = resolveTrackedFiles(paths, repoRoot);
 
   let hasIssues = false;
   const results: { path: string; status: string; expected?: string; actual?: string }[] = [];
@@ -1086,6 +1021,20 @@ function getNestedValue(obj: object, path: string): unknown {
   return current;
 }
 
+function coerceConfigValue(value: string): string | number | boolean {
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  const num = Number(value);
+  if (!Number.isNaN(num) && value.trim().length > 0) {
+    return num;
+  }
+  return value;
+}
+
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string): void {
   const parts = path.split('.');
   let current = obj;
@@ -1096,7 +1045,7 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: strin
     }
     current = current[part] as Record<string, unknown>;
   }
-  current[parts[parts.length - 1]!] = value;
+  current[parts[parts.length - 1]!] = coerceConfigValue(value);
 }
 
 // --- Main ---

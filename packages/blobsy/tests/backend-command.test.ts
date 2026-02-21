@@ -11,26 +11,37 @@ describe('expandCommandTemplate', () => {
     bucket: 'mybucket',
   };
 
-  it('expands all variables', () => {
+  it('expands all variables with shell escaping', () => {
     const template = 'aws s3 cp {local} s3://{remote}';
     expect(expandCommandTemplate(template, vars)).toBe(
-      'aws s3 cp /tmp/file.bin s3://mybucket/prefix/key',
+      "aws s3 cp '/tmp/file.bin' s3://'mybucket/prefix/key'",
     );
   });
 
   it('expands multiple occurrences', () => {
     const template = '{bucket}-{bucket}';
-    expect(expandCommandTemplate(template, vars)).toBe('mybucket-mybucket');
+    expect(expandCommandTemplate(template, vars)).toBe("'mybucket'-'mybucket'");
   });
 
   it('leaves unknown placeholders', () => {
     const template = '{local} {unknown}';
-    expect(expandCommandTemplate(template, vars)).toBe('/tmp/file.bin {unknown}');
+    expect(expandCommandTemplate(template, vars)).toBe("'/tmp/file.bin' {unknown}");
   });
 
   it('expands relative_path', () => {
     const template = 'echo {relative_path}';
-    expect(expandCommandTemplate(template, vars)).toBe('echo data/model.bin');
+    expect(expandCommandTemplate(template, vars)).toBe("echo 'data/model.bin'");
+  });
+
+  it('escapes single quotes in values', () => {
+    const evilVars: CommandTemplateVars = {
+      local: "/tmp/file'; rm -rf /; echo '",
+      remote: 'safe',
+      relative_path: 'safe',
+      bucket: 'safe',
+    };
+    const result = expandCommandTemplate('cp {local} dest', evilVars);
+    expect(result).toBe("cp '/tmp/file'\\''; rm -rf /; echo '\\''' dest");
   });
 });
 

@@ -98,6 +98,8 @@ export async function loadConfigFile(filePath: string): Promise<BlobsyConfig> {
     throw new ValidationError(`Invalid config file (not an object): ${filePath}`);
   }
 
+  validateConfigFields(parsed as Record<string, unknown>, filePath);
+
   return parsed as BlobsyConfig;
 }
 
@@ -158,6 +160,30 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   }
 
   return config;
+}
+
+function validateConfigFields(parsed: Record<string, unknown>, filePath: string): void {
+  if (
+    parsed.backends !== undefined &&
+    (typeof parsed.backends !== 'object' || Array.isArray(parsed.backends))
+  ) {
+    throw new ValidationError(`Invalid "backends" in ${filePath}: expected an object`);
+  }
+  if (
+    parsed.externalize !== undefined &&
+    (typeof parsed.externalize !== 'object' || Array.isArray(parsed.externalize))
+  ) {
+    throw new ValidationError(`Invalid "externalize" in ${filePath}: expected an object`);
+  }
+  if (
+    parsed.compress !== undefined &&
+    (typeof parsed.compress !== 'object' || Array.isArray(parsed.compress))
+  ) {
+    throw new ValidationError(`Invalid "compress" in ${filePath}: expected an object`);
+  }
+  if (parsed.ignore !== undefined && !Array.isArray(parsed.ignore)) {
+    throw new ValidationError(`Invalid "ignore" in ${filePath}: expected an array`);
+  }
 }
 
 /** Write a .blobsy.yml config file. */

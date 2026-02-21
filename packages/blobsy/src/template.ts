@@ -42,6 +42,7 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     if (key in replacements) {
       return replacements[key]!;
     }
+    console.warn(`Warning: unknown template variable {${key}} in key template`);
     return `{${key}}`;
   });
 }

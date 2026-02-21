@@ -192,6 +192,14 @@ export interface TransferResult {
   action: 'push' | 'pull';
   bytesTransferred?: number | undefined;
   error?: string | undefined;
+  /** Ref fields updated by a successful push. Caller merges into ref before writing .yref. */
+  refUpdates?:
+    | {
+        remote_key: string;
+        compressed: string | undefined;
+        compressed_size: number | undefined;
+      }
+    | undefined;
 }
 
 /** Parsed backend URL from `blobsy init <url>`. */

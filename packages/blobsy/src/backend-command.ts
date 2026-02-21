@@ -16,13 +16,18 @@ export interface CommandTemplateVars {
   bucket: string;
 }
 
-/** Expand template variables in a command string. */
+/** Shell-escape a string by wrapping in single quotes. */
+function shellEscape(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/** Expand template variables in a command string with shell escaping. */
 export function expandCommandTemplate(template: string, vars: CommandTemplateVars): string {
   return template
-    .replace(/\{local\}/g, vars.local)
-    .replace(/\{remote\}/g, vars.remote)
-    .replace(/\{relative_path\}/g, vars.relative_path)
-    .replace(/\{bucket\}/g, vars.bucket);
+    .replace(/\{local\}/g, shellEscape(vars.local))
+    .replace(/\{remote\}/g, shellEscape(vars.remote))
+    .replace(/\{relative_path\}/g, shellEscape(vars.relative_path))
+    .replace(/\{bucket\}/g, shellEscape(vars.bucket));
 }
 
 /** Execute a push command. */
@@ -51,8 +56,16 @@ export function commandBlobExists(existsCommand: string, vars: CommandTemplateVa
       timeout: 30000,
     });
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const execError = err as { status?: number | null; signal?: string | null; stderr?: Buffer };
+    if (execError.status != null && execError.signal == null) {
+      return false;
+    }
+    const stderr = execError.stderr?.toString().trim() ?? '';
+    throw new BlobsyError(
+      `Exists check command failed unexpectedly: ${cmd}\n${stderr}`,
+      categorizeCommandError(stderr),
+    );
   }
 }
 

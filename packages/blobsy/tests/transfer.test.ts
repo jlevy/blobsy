@@ -78,7 +78,7 @@ describe('push/pull integration with local backend', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('pushFile uploads and sets remote_key on ref', async () => {
+  it('pushFile uploads and returns refUpdates', async () => {
     const filePath = join(repoRoot, 'data.bin');
     await writeFile(filePath, 'push test content');
     const hash = await computeHash(filePath);
@@ -88,8 +88,8 @@ describe('push/pull integration with local backend', () => {
 
     expect(result.success).toBe(true);
     expect(result.action).toBe('push');
-    expect(ref.remote_key).toBeDefined();
-    expect(ref.remote_key!.length).toBeGreaterThan(0);
+    expect(result.refUpdates).toBeDefined();
+    expect(result.refUpdates!.remote_key.length).toBeGreaterThan(0);
   });
 
   it('pullFile downloads from remote', async () => {
@@ -100,9 +100,10 @@ describe('push/pull integration with local backend', () => {
     const ref: YRef = { format: YREF_FORMAT, hash, size: 17 };
     const pushResult = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
     expect(pushResult.success).toBe(true);
+    const updatedRef = { ...ref, ...pushResult.refUpdates };
 
     const pullPath = join(repoRoot, 'pulled.bin');
-    const pullResult = await pullFile(ref, pullPath, config, repoRoot);
+    const pullResult = await pullFile(updatedRef, pullPath, config, repoRoot);
     expect(pullResult.success).toBe(true);
 
     const content = await readFile(pullPath, 'utf-8');
@@ -115,9 +116,10 @@ describe('push/pull integration with local backend', () => {
     const hash = await computeHash(filePath);
 
     const ref: YRef = { format: YREF_FORMAT, hash, size: 11 };
-    await pushFile(filePath, 'data.bin', ref, config, repoRoot);
+    const result = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
+    const updatedRef = { ...ref, ...result.refUpdates };
 
-    expect(blobExists(ref.remote_key!, config, repoRoot)).toBe(true);
+    expect(blobExists(updatedRef.remote_key!, config, repoRoot)).toBe(true);
   });
 
   it('blobExists returns false for missing key', () => {

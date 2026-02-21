@@ -102,12 +102,7 @@ export function findTrackableFiles(dir: string): string[] {
   const results: string[] = [];
   walkDir(dir, (filePath) => {
     const name = basename(filePath);
-    if (
-      !name.endsWith(YREF_EXTENSION) &&
-      !name.startsWith('.') &&
-      name !== '.gitignore' &&
-      name !== '.blobsy.yml'
-    ) {
+    if (!name.endsWith(YREF_EXTENSION) && !name.startsWith('.')) {
       results.push(filePath);
     }
   });

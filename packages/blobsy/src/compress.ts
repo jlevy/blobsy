@@ -17,11 +17,10 @@ import {
   createZstdDecompress,
 } from 'node:zlib';
 
-import picomatch from 'picomatch';
-
 import type { CompressConfig } from './types.js';
 import { BlobsyError } from './types.js';
 import { parseSize } from './config.js';
+import { matchesGlobList } from './glob-match.js';
 
 /**
  * Decide whether a file should be compressed based on config rules.
@@ -36,23 +35,12 @@ export function shouldCompress(
   if (config.algorithm === 'none') {
     return false;
   }
-
-  const filename = filePath.split('/').pop() ?? filePath;
-
-  if (config.never.length > 0) {
-    const neverMatcher = picomatch(config.never);
-    if (neverMatcher(filename) || neverMatcher(filePath)) {
-      return false;
-    }
+  if (matchesGlobList(filePath, config.never)) {
+    return false;
   }
-
-  if (config.always.length > 0) {
-    const alwaysMatcher = picomatch(config.always);
-    if (alwaysMatcher(filename) || alwaysMatcher(filePath)) {
-      return true;
-    }
+  if (matchesGlobList(filePath, config.always)) {
+    return true;
   }
-
   const minSize = parseSize(config.min_size);
   return fileSize >= minSize;
 }

@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { rename, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -87,11 +87,11 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
   throw new ValidationError('Cannot determine backend type from config.');
 }
 
-/** Push a single file to remote. */
+/** Push a single file to remote. Returns refUpdates for the caller to merge into the ref. */
 export async function pushFile(
   filePath: string,
   repoPath: string,
-  ref: YRef,
+  ref: Readonly<YRef>,
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
@@ -115,30 +115,31 @@ export async function pushFile(
 
   let uploadPath = filePath;
   let tempCompressedPath: string | undefined;
+  let compressedSize: number | undefined;
+  let compressedAlgorithm: string | undefined;
 
   try {
     // Compress if needed
     if (shouldDoCompress && algorithm && algorithm !== 'none') {
       tempCompressedPath = `${filePath}.blobsy-compress-${randomBytes(4).toString('hex')}${compressSuffix}`;
-      const compressedSize = await compressFile(filePath, tempCompressedPath, algorithm);
+      compressedSize = await compressFile(filePath, tempCompressedPath, algorithm);
+      compressedAlgorithm = algorithm;
       uploadPath = tempCompressedPath;
-
-      // Update ref with compression info (caller writes the .yref)
-      ref.compressed = algorithm;
-      ref.compressed_size = compressedSize;
     }
 
     // Upload
     await pushToBackend(backend, uploadPath, remoteKey, repoPath, repoRoot);
 
-    // Set remote_key on ref (caller writes the .yref)
-    ref.remote_key = remoteKey;
-
     return {
       path: repoPath,
       success: true,
       action: 'push',
-      bytesTransferred: ref.compressed_size ?? ref.size,
+      bytesTransferred: compressedSize ?? ref.size,
+      refUpdates: {
+        remote_key: remoteKey,
+        compressed: compressedAlgorithm,
+        compressed_size: compressedSize,
+      },
     };
   } catch (err) {
     return {
@@ -200,7 +201,6 @@ export async function pullFile(
         }
 
         await ensureDir(join(localPath, '..'));
-        const { rename } = await import('node:fs/promises');
         await rename(tmpDecompressed, localPath);
       } finally {
         for (const tmp of [tmpCompressed, tmpDecompressed]) {
@@ -350,7 +350,6 @@ async function pullFromBackend(
         }
       }
 
-      const { rename } = await import('node:fs/promises');
       await rename(tempPath, localPath);
       break;
     }

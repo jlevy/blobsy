@@ -29,7 +29,7 @@ import { formatJson, formatJsonError, formatSize } from './format.js';
 import type { GlobalOptions, TransferResult } from './types.js';
 import { ValidationError } from './types.js';
 
-function getGlobalOpts(cmd: Command): GlobalOptions {
+export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
   const opts = root.opts();
   return {
@@ -39,7 +39,7 @@ function getGlobalOpts(cmd: Command): GlobalOptions {
   };
 }
 
-function resolveTrackedFiles(
+export function resolveTrackedFiles(
   paths: string[],
   repoRoot: string,
 ): { relPath: string; absPath: string; refPath: string }[] {
@@ -113,10 +113,11 @@ export async function handlePush(
 
     const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
 
-    if (result.success) {
-      await writeYRef(file.refPath, ref);
+    if (result.success && result.refUpdates) {
+      const updatedRef = { ...ref, ...result.refUpdates };
+      await writeYRef(file.refPath, updatedRef);
       if (existsSync(file.absPath)) {
-        const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
+        const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
         await writeCacheEntry(cacheDir, entry);
       }
     }
@@ -267,10 +268,11 @@ export async function handleSync(
 
     if (!ref.remote_key) {
       const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
-      if (result.success) {
-        await writeYRef(file.refPath, ref);
+      if (result.success && result.refUpdates) {
+        const updatedRef = { ...ref, ...result.refUpdates };
+        await writeYRef(file.refPath, updatedRef);
         if (existsSync(file.absPath)) {
-          const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
+          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
           await writeCacheEntry(cacheDir, entry);
         }
         pushed++;
@@ -301,13 +303,17 @@ export async function handleSync(
     } else {
       const currentHash = await computeHash(file.absPath);
       if (currentHash !== ref.hash) {
-        ref.hash = currentHash;
-        ref.size = statSync(file.absPath).size;
-        ref.remote_key = undefined;
-        const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
-        if (result.success) {
-          await writeYRef(file.refPath, ref);
-          const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
+        const modifiedRef = {
+          ...ref,
+          hash: currentHash,
+          size: statSync(file.absPath).size,
+          remote_key: undefined,
+        };
+        const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
+        if (result.success && result.refUpdates) {
+          const updatedRef = { ...modifiedRef, ...result.refUpdates };
+          await writeYRef(file.refPath, updatedRef);
+          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
           await writeCacheEntry(cacheDir, entry);
           pushed++;
           if (!globalOpts.quiet && !globalOpts.json) {

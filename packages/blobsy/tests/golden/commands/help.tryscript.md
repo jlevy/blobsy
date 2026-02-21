@@ -49,7 +49,6 @@ Arguments:
   path                   Files or directories to track
 
 Options:
-  --dry-run              Show what would happen without doing it
   --force                Skip confirmation for destructive operations
   -h, --help             Display help for command
 ? 0
@@ -68,7 +67,6 @@ Arguments:
 
 Options:
   --force                Override hash mismatch (updates .yref to match file)
-  --dry-run              Show what would happen without doing it
   -h, --help             Display help for command
 ? 0
 ```
@@ -86,7 +84,6 @@ Arguments:
 
 Options:
   --force                Overwrite local modifications
-  --dry-run              Show what would happen without doing it
   -h, --help             Display help for command
 ? 0
 ```
@@ -122,7 +119,6 @@ Arguments:
 Options:
   --skip-health-check    Skip backend health check
   --force                Force sync (overwrite conflicts)
-  --dry-run              Show what would happen without doing it
   -h, --help             Display help for command
 ? 0
 ```
@@ -158,7 +154,6 @@ Arguments:
 Options:
   --local                Delete local file only, keep .yref and remote
   --recursive            Required for directory removal
-  --dry-run              Show what would happen without doing it
   -h, --help             Display help for command
 ? 0
 ```
