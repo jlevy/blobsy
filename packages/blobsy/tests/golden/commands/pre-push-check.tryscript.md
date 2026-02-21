@@ -18,7 +18,10 @@ before: |
 
 ```console
 $ blobsy pre-push-check
-...
+  data/model.bin  missing remote blob
+
+1 file missing remote blobs.
+Run blobsy push first.
 ? 1
 ```
 

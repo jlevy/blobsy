@@ -20,7 +20,8 @@ before: |
 
 ```console
 $ blobsy status
-...
+  ✓  data/model.bin  synced
+
 1 tracked file
 ? 0
 ```
@@ -72,7 +73,9 @@ $ git add -A && git commit -q -m "add results"
 
 ```console
 $ blobsy status
-...
+  ✓  data/model.bin  synced
+  ✓  data/results.csv  synced
+
 2 tracked files
 ? 0
 ```
@@ -94,7 +97,9 @@ $ git merge feature/new-data -q
 
 ```console
 $ blobsy status
-...
+  ✓  data/model.bin  synced
+  ✓  data/results.csv  synced
+
 2 tracked files
 ? 0
 ```
@@ -103,7 +108,8 @@ $ blobsy status
 
 ```console
 $ blobsy sync
-...
+  ✓ data/model.bin - up to date
+  ✓ data/results.csv - up to date
 Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -112,7 +118,9 @@ Sync complete: 0 pushed, 0 pulled, 0 errors.
 
 ```console
 $ blobsy verify
-...
+  ✓  data/model.bin  ok
+  ✓  data/results.csv  ok
+
 All files verified.
 ? 0
 ```

@@ -19,7 +19,8 @@ before: |
 
 ```console
 $ blobsy status
-...
+  ✓  data/model.bin  synced
+
 1 tracked file
 ? 0
 ```
@@ -83,7 +84,8 @@ All files verified.
 
 ```console
 $ blobsy status
-...
+  ✓  data/model.bin  synced
+
 1 tracked file
 ? 0
 ```

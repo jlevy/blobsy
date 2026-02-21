@@ -43,7 +43,7 @@ Error: Not tracked: nonexistent.bin (no .yref file found)
 
 ```console
 $ blobsy init 2>&1
-...
+error: missing required argument 'url'
 ? 1
 ```
 
@@ -52,6 +52,11 @@ $ blobsy init 2>&1
 ```console
 $ blobsy init r2://bucket/prefix/ 2>&1
 Error: Unrecognized backend URL scheme: r2:
-...
+
+  Supported schemes:
+    s3://my-bucket/prefix/
+    gs://my-bucket/prefix/
+    azure://my-container/prefix/
+    local:../blobsy-remote
 ? 1
 ```

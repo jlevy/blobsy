@@ -16,13 +16,21 @@ before: |
 
 ```console
 $ blobsy track data/models/
-...
+Scanning data/models/...
+  data/models/model-1.bin (   8 B)  -> tracked
+  data/models/model-2.bin (   8 B)  -> tracked
+  data/models/model-3.bin (   8 B)  -> tracked
+3 files tracked.
 ? 0
 ```
 
 ```console
 $ blobsy track data/datasets/
-...
+Scanning data/datasets/...
+  data/datasets/data-1.bin (  10 B)  -> tracked
+  data/datasets/data-2.bin (  10 B)  -> tracked
+  data/datasets/data-3.bin (  10 B)  -> tracked
+3 files tracked.
 ? 0
 ```
 
@@ -35,7 +43,12 @@ $ git add -A && git commit -q -m "track files"
 
 ```console
 $ blobsy push
-...
+  data/datasets/data-1.bin (10 B) - pushed
+  data/datasets/data-2.bin (10 B) - pushed
+  data/datasets/data-3.bin (10 B) - pushed
+  data/models/model-1.bin (8 B) - pushed
+  data/models/model-2.bin (8 B) - pushed
+  data/models/model-3.bin (8 B) - pushed
 Done: 6 pushed.
 ? 0
 ```
@@ -57,7 +70,13 @@ $ git add -A && git commit -q -m "push updates"
 
 ```console
 $ blobsy verify
-...
+  ✓  data/datasets/data-1.bin  ok
+  ✓  data/datasets/data-2.bin  ok
+  ✓  data/datasets/data-3.bin  ok
+  ✓  data/models/model-1.bin  ok
+  ✓  data/models/model-2.bin  ok
+  ✓  data/models/model-3.bin  ok
+
 All files verified.
 ? 0
 ```
@@ -71,7 +90,12 @@ $ rm data/models/model-1.bin data/datasets/data-2.bin
 
 ```console
 $ blobsy sync
-...
+  ✓ data/datasets/data-1.bin - up to date
+  ↓ data/datasets/data-2.bin - pulled
+  ✓ data/datasets/data-3.bin - up to date
+  ↓ data/models/model-1.bin - pulled
+  ✓ data/models/model-2.bin - up to date
+  ✓ data/models/model-3.bin - up to date
 Sync complete: 0 pushed, 2 pulled, 0 errors.
 ? 0
 ```

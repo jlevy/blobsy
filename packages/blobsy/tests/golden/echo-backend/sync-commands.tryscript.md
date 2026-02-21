@@ -35,7 +35,8 @@ before: |
 
 ```console
 $ blobsy sync --skip-health-check
-...
+  ↑ data/dataset.csv - pushed
+  ↑ data/model.bin - pushed
 Sync complete: 2 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -57,7 +58,8 @@ $ rm data/model.bin
 
 ```console
 $ blobsy sync --skip-health-check
-...
+  ✓ data/dataset.csv - up to date
+  ↓ data/model.bin - pulled
 Sync complete: 0 pushed, 1 pulled, 0 errors.
 ? 0
 ```

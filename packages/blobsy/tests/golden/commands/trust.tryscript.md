@@ -28,15 +28,16 @@ No repos currently trusted.
 
 ```console
 $ blobsy trust
-...
+Trusted [SANDBOX_PATH]
+Command backends in this repo's .blobsy.yml will now be executed.
 ? 0
 ```
 
-# Trust list now shows the repo (one entry)
+# Trust list now shows the repo
 
 ```console
-$ blobsy trust --list | wc -l | tr -d ' '
-1
+$ blobsy trust --list
+  [SANDBOX_PATH]  (trusted [TIMESTAMP])
 ? 0
 ```
 
@@ -44,7 +45,7 @@ $ blobsy trust --list | wc -l | tr -d ' '
 
 ```console
 $ blobsy trust --revoke
-...
+Revoked trust for [SANDBOX_PATH]
 ? 0
 ```
 

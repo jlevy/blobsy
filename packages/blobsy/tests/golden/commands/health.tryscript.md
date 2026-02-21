@@ -31,7 +31,7 @@ $ rm -rf ../remote
 
 ```console
 $ blobsy health 2>&1
-[..]
+Health check failed: Local backend directory not found: [LOCAL_PATH]
 ? 1
 ```
 
@@ -49,7 +49,7 @@ $ chmod 000 ../remote
 
 ```console
 $ blobsy health 2>&1
-[..]
+Health check failed: Local backend directory is not writable: [LOCAL_PATH]
 ? 1
 ```
 

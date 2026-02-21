@@ -124,7 +124,9 @@ $ echo "research data" > data/research/data.bin
 
 ```console
 $ blobsy track data/research/
-...
+Scanning data/research/...
+  data/research/data.bin (  14 B)  -> tracked
+  data/research/model.bin (  15 B)  -> tracked
 2 files tracked.
 ? 0
 ```
@@ -133,7 +135,8 @@ $ blobsy track data/research/
 
 ```console
 $ blobsy mv data/research archive/research
-...
+Moved data/research/data.bin -> archive/research/data.bin
+Moved data/research/model.bin -> archive/research/model.bin
 ? 0
 ```
 

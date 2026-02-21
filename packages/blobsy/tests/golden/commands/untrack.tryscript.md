@@ -55,8 +55,8 @@ $ cat data/.gitignore
 # Verify trash has the ref
 
 ```console
-$ ls .blobsy/trash/ | wc -l | tr -d ' '
-[..]
+$ find .blobsy/trash/ -type f | sort
+.blobsy/trash/model.bin.yref.[UNIX_TS]
 ? 0
 ```
 

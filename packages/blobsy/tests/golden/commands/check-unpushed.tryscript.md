@@ -21,7 +21,9 @@ before: |
 
 ```console
 $ blobsy check-unpushed
-...
+  data/dataset.csv
+  data/model.bin
+
 2 files not pushed.
 ? 1
 ```
@@ -37,7 +39,8 @@ Done: 1 pushed.
 
 ```console
 $ blobsy check-unpushed
-...
+  data/dataset.csv
+
 1 file not pushed.
 ? 1
 ```
@@ -46,7 +49,8 @@ $ blobsy check-unpushed
 
 ```console
 $ blobsy push
-...
+  data/model.bin  already pushed
+  data/dataset.csv (21 B) - pushed
 Done: 1 pushed.
 ? 0
 ```

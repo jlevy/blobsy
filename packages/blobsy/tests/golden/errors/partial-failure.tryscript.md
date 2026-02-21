@@ -27,7 +27,8 @@ before: |
 
 ```console
 $ blobsy push data/good-file.bin
-...
+  data/good-file.bin (13 B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
@@ -42,7 +43,8 @@ $ chmod 000 ../remote
 
 ```console
 $ blobsy push data/bad-file.bin 2>&1
-...
+  data/bad-file.bin - FAILED: EACCES: permission denied, mkdir '[LOCAL_PATH]'
+Done: 0 pushed, 1 failed.
 ? 1
 ```
 
@@ -57,6 +59,8 @@ $ chmod 755 ../remote
 
 ```console
 $ blobsy push
-...
+  data/good-file.bin  already pushed
+  data/bad-file.bin (12 B) - pushed
+Done: 1 pushed.
 ? 0
 ```

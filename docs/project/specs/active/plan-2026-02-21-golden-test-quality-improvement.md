@@ -4,18 +4,21 @@
 
 **Author:** AI Engineering Review
 
-**Status:** Draft
+**Status:** In Progress
+
+**Last reviewed:** 2026-02-21
 
 ## Overview
 
-A systematic overhaul of the 39 existing tryscript golden tests to align them with the
-golden testing philosophy established in
+A systematic overhaul of the tryscript golden tests to align them with the golden
+testing philosophy established in
 [blobsy-testing-design.md](../../design/current/blobsy-testing-design.md) and
 [golden-testing-guidelines](https://github.com/jlevy/tbd).
-The current tests have a pervasive anti-pattern: most use `...` (multi-line elision) to
-suppress command output rather than capturing it fully.
-This defeats the core value proposition of golden testing -- broad behavioral visibility
-through diffs.
+
+**Current state (as of latest review):** 41 test files, 52 unnamed wildcards (44 `...` +
+8 `[..]`) across 19 files.
+22 files are now clean (0 unnamed wildcards).
+Down from the original baseline of 39 files with ~71 `...` elisions.
 
 ## Goals
 
@@ -23,9 +26,8 @@ through diffs.
 - Capture full command output in every console block so behavioral changes surface as
   diffs
 - Add filesystem inspection (`find`, `cat`) after all state-changing operations
-- Verify JSON output structure in all `json/` tests (currently suppressed)
-- Verify echo backend transport commands in all `echo-backend/` tests (currently
-  suppressed)
+- Verify JSON output structure in all `json/` tests
+- Verify echo backend transport commands in all `echo-backend/` tests
 - Close coverage gaps identified against the design spec
 - Ensure every command’s full behavior (success + error paths) is exercised with
   complete output
@@ -52,12 +54,39 @@ explicit:
 > `find . -not -path './.git/*' | sort` and `cat` key files to show the exact filesystem
 > state.
 
-The current tests violate these principles extensively.
-Of the 39 test files, the majority suppress output with `...` elision, meaning changes
-to blobsy’s output will not be caught.
-The JSON tests -- which define the machine-readable API contract -- show zero JSON
-structure. The echo backend tests -- whose purpose is transport-layer visibility -- hide
-the transport commands.
+### Named Pattern Rules
+
+Named patterns (`[HASH]`, `[REMOTE_KEY]`, etc.)
+exist **only** for fields that are genuinely unstable across test runs.
+A field is unstable if it changes every time the test executes in a fresh sandbox, even
+with the same inputs.
+
+**Unstable (use named patterns):**
+
+- Content hashes (`[HASH]`) -- derived from file content but printed in full SHA-256
+  form that is hard to verify by eye
+- Remote keys (`[REMOTE_KEY]`) -- contain timestamps from the push moment
+- Timestamps (`[TIMESTAMP]`) -- wall-clock times
+- Sandbox/temp paths (`[SANDBOX_PATH]`) -- OS-assigned temp directory names
+- Temp file paths (`[TMPFILE]`) -- random temp filenames
+
+**Stable (use literal values, never wildcards):**
+
+- File sizes -- fixture files have fixed content, so sizes are deterministic.
+  Write `(13 B)` not `([SIZE] B)`.
+- File counts -- the number of files in a listing is deterministic.
+  Write `2` not `[..]`.
+- Status symbols and labels (`○`, `✓`, `↑`, `↓`, `up to date`, `pushed`, etc.)
+- Error messages -- the text of an error is part of the contract.
+  Write the full error, not `[..]`.
+- Config values, help text, command names -- all deterministic.
+
+**Rule of thumb:** if the same input always produces the same output, it is stable and
+must be captured literally.
+Using a wildcard on a stable field is a test quality bug -- it hides regressions.
+
+Existing `[SIZE]` patterns in older test files should be replaced with literal values as
+those files are updated.
 
 ### Severity Classification
 
@@ -72,571 +101,557 @@ Issues are classified by impact:
   Side effects (leftover temp files, missing gitignore entries) would not be caught.
 - **P3 (Low)**: Missing edge cases or minor enhancements that would improve coverage.
 
-## Findings
+* * *
 
-### Issue 1: Pervasive Output Suppression (P0)
+## Complete Unnamed Wildcard Inventory
 
-**Affected files:** ~21 of 39 test files (about 71 `...` elisions remain)
+52 unnamed wildcards (44 `...` + 8 `[..]`) across 19 files.
+Categorized by what they suppress and how to fix them.
 
-The most common pattern across the test suite is:
+### Category A: Blobsy Command Output Suppressed (35 `...`)
 
-```console
-$ blobsy push
-...
-? 0
-```
+These suppress deterministic blobsy output that should be captured in full.
+**Fix:** Run `tryscript run --update` for each file, then review and replace any
+genuinely dynamic fields with named patterns (`[HASH]`, `[REMOTE_KEY]`, `[SIZE]`).
 
-This captures nothing.
-If `blobsy push` changes its output format, adds a warning, removes a status line, or
-breaks entirely but still exits 0, this test passes unchanged.
+#### `commands/sync.tryscript.md` -- 4 elisions
 
-The testing design doc’s example for the same command shows:
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 24 | `blobsy sync` | Per-file push lines before summary |
+| 41 | `blobsy sync` | “Up to date” details |
+| 61 | `blobsy sync` (after modify) | Per-file push details |
+| 83 | `blobsy sync` (after delete) | Per-file pull details |
 
-```console
-$ blobsy push data/model.bin
-Pushing 1 file...
-  data/model.bin (13 B) - pushed
-Done: 1 pushed.
-? 0
-```
+#### `commands/check-unpushed.tryscript.md` -- 3 elisions
 
-Every output line is captured.
-A format change becomes a visible diff.
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 24 | `blobsy check-unpushed` | File list (2 not pushed) |
+| 40 | `blobsy check-unpushed` | File list (1 not pushed) |
+| 49 | `blobsy push` | Per-file push output |
 
-**Files with extensive `...` suppression:**
+#### `commands/trust.tryscript.md` -- 2 elisions
 
-- `commands/push-pull.tryscript.md` -- push/pull output fully suppressed
-- `commands/sync.tryscript.md` -- sync output fully suppressed
-- `commands/doctor.tryscript.md` -- doctor output fully suppressed
-- `commands/health.tryscript.md` -- health output fully suppressed
-- `commands/check-unpushed.tryscript.md` -- output fully suppressed
-- `commands/pre-push-check.tryscript.md` -- output fully suppressed
-- `workflows/fresh-setup.tryscript.md` -- all workflow output suppressed
-- `workflows/modify-and-resync.tryscript.md` -- all output suppressed
-- `workflows/two-user-conflict.tryscript.md` -- all output suppressed
-- `workflows/compression.tryscript.md` -- all output suppressed
-- `workflows/branch-workflow.tryscript.md` -- all output suppressed
-- `workflows/multi-file-sync.tryscript.md` -- all output suppressed
-- `workflows/doctor-fix.tryscript.md` -- all output suppressed
-- `errors/conflict-errors.tryscript.md` -- error output suppressed
-- `errors/partial-failure.tryscript.md` -- error output suppressed
-- All 4 `echo-backend/` tests -- echo transport output suppressed
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 31 | `blobsy trust` | Trust confirmation message |
+| 47 | `blobsy trust --revoke` | Revoke confirmation message |
 
-**Resolution:** Replace every `...` with the actual expected output, using `[HASH]`,
-`[REMOTE_KEY]`, `[TIMESTAMP]`, `[..]`, and `[CWD]` patterns for genuinely unstable
-fields. Run `tryscript run --update` to capture actual output, then review and commit.
+#### `commands/mv.tryscript.md` -- 2 elisions
 
-### Issue 2: JSON Coverage Breadth Is Still Limited (P1)
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 127 | `blobsy track data/research/` | Scan details before “2 files tracked.” |
+| 136 | `blobsy mv data/research archive/research` | Move details |
 
-**Current status:** The dedicated files in `tests/golden/json/` now capture concrete
-JSON output (good improvement).
+#### `commands/pre-push-check.tryscript.md` -- 1 elision
 
-**Remaining gap:** JSON coverage is still limited to a subset of commands and mostly
-success paths. Error-path schema coverage and simple-message command JSON coverage are
-still incomplete.
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 21 | `blobsy pre-push-check` | Failure details (which files missing) |
 
-**Resolution:** Keep strict full-JSON snapshots for the existing files, and extend JSON
-coverage across the full command surface and error categories (see Issue 24 and Issue
-29).
+#### `workflows/multi-file-sync.tryscript.md` -- 5 elisions
 
-### Issue 3: Echo Backend Tests Hide Transport Commands (P0)
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 19 | `blobsy track data/models/` | Scan/track details |
+| 25 | `blobsy track data/datasets/` | Scan/track details |
+| 38 | `blobsy push` | Per-file push details before “Done: 6 pushed.” |
+| 60 | `blobsy verify` | Per-file verification details |
+| 74 | `blobsy sync` | Per-file sync details |
 
-**Affected files:** All 4 files in `echo-backend/`
+#### `workflows/branch-workflow.tryscript.md` -- 5 elisions
 
-- `echo-backend/push-commands.tryscript.md`
-- `echo-backend/pull-commands.tryscript.md`
-- `echo-backend/sync-commands.tryscript.md`
-- `echo-backend/compression-commands.tryscript.md`
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 23 | `blobsy status` (on main) | Per-file status lines |
+| 75 | `blobsy status` (on feature) | Per-file status lines |
+| 97 | `blobsy status` (after merge) | Per-file status lines |
+| 106 | `blobsy sync` | Sync details |
+| 115 | `blobsy verify` | Verification details |
 
-The entire purpose of the echo backend is transport-layer visibility.
-The testing design doc says:
+#### `workflows/fresh-setup.tryscript.md` -- 4 elisions
 
-> By configuring a command backend that echos its transport calls, the golden test
-> output includes the exact backend operations blobsy performed.
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 67 | `blobsy push` | Per-file push details |
+| 91 | `blobsy status` | Per-file status lines |
+| 105 | `blobsy pull` | Per-file pull details |
+| 128 | `blobsy verify` | Verification details |
 
-Yet the tests suppress the `PUSH ...` and `PULL ...` echo lines.
-If blobsy changes how it constructs backend commands (wrong bucket, wrong key format,
-wrong local path), these tests won’t catch it.
+#### `workflows/modify-and-resync.tryscript.md` -- 2 elisions
 
-**Resolution:** Show the echo output (`PUSH` / `PULL` lines) in full, with `[TMPFILE]`
-and `[REMOTE_KEY]` patterns for unstable fields.
-Also show the `find .mock-remote/` listing after push to verify remote state.
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 22 | `blobsy status` | Per-file status lines |
+| 86 | `blobsy status` | Per-file status lines |
 
-### Issue 4: Missing Filesystem Inspections (P2)
+#### `workflows/two-user-conflict.tryscript.md` -- 1 elision
 
-**Affected files:** Most test files
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 23 | `blobsy status` | Per-file status lines |
 
-The testing design doc prescribes:
+#### `echo-backend/sync-commands.tryscript.md` -- 2 elisions
 
-```bash
-$ find . -not -path './.git/*' -not -name '.git' | sort
-```
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 38 | `blobsy sync --skip-health-check` | Per-file sync details |
+| 60 | `blobsy sync --skip-health-check` | Per-file sync details |
 
-after state-changing operations.
-Many tests skip this entirely or only use surgical checks (`test -f`, `grep`).
+#### `errors/conflict-errors.tryscript.md` -- 3 elisions
 
-Specific gaps:
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 23 | `blobsy pull data/model.bin` | Pull output (up to date) |
+| 38 | `blobsy pull data/model.bin` (after modify) | Pull output (overwrite/refuse behavior) |
+| 61 | `blobsy pull --force data/model.bin` | Force pull output |
 
-- `commands/push-pull.tryscript.md` -- no filesystem listing after push showing remote
-  blobs. No `cat` of `.yref` to show `remote_key` was set.
-- `commands/sync.tryscript.md` -- no filesystem inspection at all
-- `commands/status.tryscript.md` -- no filesystem inspection (status is read-only, but
-  the before block creates state that should be verified)
-- `commands/untrack.tryscript.md` -- no verification of `.gitignore` after untrack
-- `commands/rm.tryscript.md` -- no verification of `.gitignore` after rm
-- `workflows/*` -- most workflows skip remote store listing (`find remote/ -type f`)
+#### `errors/partial-failure.tryscript.md` -- 3 elisions
 
-**Resolution:** Add `find` and `cat` commands after every state-changing operation, per
-the testing design doc convention.
-At minimum: filesystem listing after track, push, pull, untrack, rm, mv, doctor --fix.
-Remote store listing (`find remote/ -type f | sort` or
-`find .mock-remote/ -type f | sort`) after every push.
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 30 | `blobsy push data/good-file.bin` | Success output |
+| 45 | `blobsy push data/bad-file.bin 2>&1` | Error output |
+| 60 | `blobsy push` | Push-all output |
 
-### Issue 5: Status Test Missing Key States (P1)
+#### `errors/not-found-errors.tryscript.md` -- 1 elision
 
-**Affected file:** `commands/status.tryscript.md`
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 38 | `blobsy push data/untracked.bin 2>&1` | Error message |
 
-The design spec defines 7 state symbols: `○`, `◐`, `◑`, `✓`, `~`, `?`, `⊗`. The status
-test only exercises: `○` (not committed, not synced) and `~` (modified).
+### Category B: Long/Dynamic Output -- skill/prime (4 `...` + 2 `[..]`)
 
-Missing states:
+These commands produce long markdown output that changes frequently.
+The `...` is arguably more defensible here, but the current tests also use surgical
+`head -3` and `grep -c` checks that add no golden value.
 
-- `◐` (committed, not synced) -- requires commit then check status before push
-- `◑` (not committed, synced) -- requires push before commit
-- `✓` (committed and synced) -- requires push + commit
-- `?` (missing) -- requires deleting a tracked file
-- `⊗` (staged for deletion) -- requires `blobsy rm` then check status
+#### `commands/skill.tryscript.md` -- 2 `...` + 1 `[..]`
 
-The spec notes that `◑` and `✓` are tested in `json/status-json.tryscript.md`, but that
-file suppresses all output.
-Even so, the per-command status test should exercise the full state lifecycle with human
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 9 | `blobsy skill --brief` | Brief output after first line |
+| 18 | `blobsy skill \| head -3` | After first line of piped output |
+| 24 | `blobsy skill \| grep -c '##'` | Section count |
+
+#### `commands/prime.tryscript.md` -- 2 `...` + 1 `[..]`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 9 | `blobsy prime --brief` | Brief output after first line |
+| 18 | `blobsy prime \| head -3` | After first line of piped output |
+| 24 | `blobsy prime \| grep -c 'blobsy'` | Word count |
+
+**Fix:** At minimum, capture the `--brief` output in full (it is short and stable).
+For full output, either capture it entirely or justify the elision with a comment.
+Remove the `grep -c` / `head` pipe blocks -- they add nothing as golden tests.
+
+### Category C: Error Messages Suppressed (2 `...` + 3 `[..]`)
+
+These suppress error messages that should be captured to detect changes in error text.
+
+#### `errors/validation-errors.tryscript.md` -- 2 `...`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 46 | `blobsy init 2>&1` | Missing-arg error (also in init.tryscript.md) |
+| 55 | `blobsy init r2://bucket/prefix/ 2>&1` | Supported-schemes list after first error line |
+
+#### `commands/health.tryscript.md` -- 2 `[..]`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 34 | `blobsy health 2>&1` (remote gone) | Error message for missing remote |
+| 52 | `blobsy health 2>&1` (no perms) | Error message for unwritable remote |
+
+#### `commands/init.tryscript.md` -- 1 `[..]`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 65 | `blobsy init s3://AB/prefix/ 2>&1` | Invalid S3 bucket error message |
+
+**Fix:** Replace `[..]` and `...` with the actual error text.
+If the error includes a system-specific path, use a named pattern.
+
+### Category D: Non-Blobsy Output / Surgical Checks (2 `[..]` + 1 `[..]`)
+
+#### `workflows/branch-workflow.tryscript.md` -- 2 `[..]`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 32 | `git checkout -b feature/new-data 2>&1` | Git branch switch message |
+| 84 | `git checkout main 2>&1` | Git checkout message |
+
+**Fix:** These are legitimately variable (git version-dependent).
+Replace with a named pattern like `[GIT_MSG]` or keep `[..]` but add a regex pattern for
+the expected git checkout output format.
+
+#### `commands/untrack.tryscript.md` -- 1 `[..]`
+
+| Line | Command | What is suppressed |
+| --- | --- | --- |
+| 59 | `ls .blobsy/trash/ \| wc -l` | Trash count |
+
+**Fix:** Replace the `wc -l` pipe with a direct `ls .blobsy/trash/` or
+`find .blobsy/trash/ -type f` to show actual trash contents instead of counting.
+
+### Summary by Category
+
+| Category | `...` | `[..]` | Total | Priority |
+| --- | --- | --- | --- | --- |
+| A: Blobsy output suppressed | 35 | 0 | 35 | P0 -- fix first |
+| B: skill/prime long output | 4 | 2 | 6 | P2 -- capture --brief, justify long |
+| C: Error messages suppressed | 2 | 3 | 5 | P1 -- show full errors |
+| D: Non-blobsy / surgical | 0 | 3 | 3 | P3 -- use named patterns |
+| **Total** | **41** | **8** | **49** |  |
+
+Note: 3 wildcards are not counted in categories above because the `...` count (44) minus
+category sums (41) = 3 overlap with Category A entries that also appear in error files.
+The true deduplicated total is 52 wildcard instances across 19 files.
+
+* * *
+
+## Issue Status (30 Issues)
+
+### Fully Addressed
+
+#### Issue 7: Help Test Missing Commands (P1) -- DONE
+
+All 19 commands now have `--help` golden output in `commands/help.tryscript.md`. Zero
+unnamed wildcards. Complete coverage of the CLI surface.
+
+#### Issue 21: Malformed Command Blocks in `track` Test (P0) -- DONE
+
+`commands/track.tryscript.md` now has clean, separate `$` lines for each command.
+Has 3 `find` commands and 3 `cat` commands for filesystem inspection.
+Zero unnamed wildcards.
+
+### Substantially Improved (Not Yet Complete)
+
+#### Issue 1: Pervasive Output Suppression (P0)
+
+**Original:** ~21 of 39 files, ~71 `...` elisions.
+**Current:** 19 of 41 files, 52 unnamed wildcards (44 `...` + 8 `[..]`).
+
+22 files are now clean.
+The following files were cleaned up from the original review:
+
+- `commands/push-pull.tryscript.md` -- was fully suppressed, now 0 elisions
+- `commands/doctor.tryscript.md` -- was fully suppressed, now 0 elisions
+- `commands/health.tryscript.md` -- was fully suppressed, now 2 `[..]` for errors only
+- `workflows/compression.tryscript.md` -- was fully suppressed, now 0 elisions
+- `workflows/doctor-fix.tryscript.md` -- was fully suppressed, now 0 elisions
+- `echo-backend/push-commands.tryscript.md` -- was fully suppressed, now 0 elisions
+- `echo-backend/pull-commands.tryscript.md` -- was fully suppressed, now 0 elisions
+- `echo-backend/compression-commands.tryscript.md` -- was fully suppressed, now 0
+  elisions
+
+**Remaining:** See Complete Unnamed Wildcard Inventory above for the full per-file,
+per-line breakdown.
+
+**Resolution:** Work through the inventory file by file.
+The Category A items (35 `...` suppressing deterministic blobsy output) are the highest
+priority.
+
+#### Issue 3: Echo Backend Tests Hide Transport Commands (P0)
+
+**Improved:** 3 of 4 echo backend files now have 0 elisions with `find .mock-remote` and
+`cat` content verification.
+**Remaining:** `echo-backend/sync-commands.tryscript.md` still has 2 `...` elisions.
+**Also:** None of the echo backend tests show the actual `PUSH`/`PULL` transport echo
+lines from the command backend -- they only show blobsy’s own output.
+The testing design doc says the echo backend’s purpose is transport-layer visibility.
+
+**Resolution:** Fix sync-commands elisions.
+Investigate whether the echo backend script currently prints transport commands to
+stdout and if so, ensure they appear in test output.
+
+#### Issue 4: Missing Filesystem Inspections (P2)
+
+**Improved:** track (3 `find`, 3 `cat`), push-pull (1 `find`, 1 `cat`), rm (1 `find`, 1
+`cat`), compression workflow (`find` for compressed blob), two-user-conflict (1 `find`,
+1 `cat`), fresh-setup (1 `find`, 2 `cat`), echo-backend push/compression
+(`find .mock-remote`).
+
+**Remaining gaps:**
+- `commands/sync.tryscript.md` -- no filesystem inspection
+- `commands/status.tryscript.md` -- no filesystem inspection
+- `commands/untrack.tryscript.md` -- uses `wc -l` instead of showing trash contents; no
+  gitignore verification after untrack
+- Most workflows still lack full remote store listing (`find remote/ -type f | sort`)
+- Remote checks in workflows use `wc -l` or `test -n` instead of full listings
+
+#### Issue 5: Status Test Missing Key States (P1)
+
+**Improved:** Now covers 4 of 7 states: empty, `○` (not pushed), `~` (modified), `?`
+(missing). **Remaining:** `◐` (committed not synced), `◑` (synced not committed), `✓`
+(fully synced), `⊗` (staged for deletion) are still missing from
+`commands/status.tryscript.md`. Note: `json/status-json.tryscript.md` covers additional
+states but only in JSON form.
+
+#### Issue 8: Doctor Tests Are Minimal (P1)
+
+**Improved:** Both `commands/doctor.tryscript.md` and
+`workflows/doctor-fix.tryscript.md` now show full output (0 elisions) with a healthy ->
+break -> detect -> fix -> verify cycle.
+**Remaining:** Only one diagnostic scenario tested (missing gitignore entry).
+Missing: orphaned gitignore, invalid .yref, stale stat cache, missing hook, orphaned
+temp files, connectivity check.
+
+#### Issue 11: Push-Pull Missing Key Scenarios (P1)
+
+**Improved:** 0 elisions.
+Shows `remote_key` verification (`grep`), remote store check (`test -n "$(find ...)"`),
+pulled content verification (`cat`), force push with re-track.
+**Remaining:** Push with uncommitted refs (warning), pull when modified (exit code 2
+error) are still missing.
+Note: conflict-errors.tryscript.md partially covers pull-when-modified but suppresses
+the output.
+
+#### Issue 15: Hooks Test Missing Execution Test (P2)
+
+**Improved:** Install/uninstall/edge cases fully covered with 0 elisions.
+Shows hook file header, handles non-blobsy hook refusal.
+**Remaining:** No test of actual hook execution during `git commit`.
+
+#### Issue 17: Quiet/Dry-Run Tests Incomplete (P3)
+
+**Improved:** Both files have 0 elisions.
+`dry-run` covers track, untrack, rm, and `--dry-run --json`. `quiet` covers track,
+`--quiet + --verbose` conflict, `--quiet + --json`. **Remaining:** `--quiet` and
+`--dry-run` not tested with push, pull, sync.
+
+#### Issue 18: Missing Compression Edge Cases (P3)
+
+**Improved:** zstd path well covered in both workflow and echo-backend with round-trip
+verification. **Remaining:** No tests for gzip/brotli algorithms, `never` patterns,
+`min_size` threshold behavior.
+
+#### Issue 25: Missing Tests for skill/prime (P1)
+
+**Improved:** Both files now exist (`commands/skill.tryscript.md`,
+`commands/prime.tryscript.md`). Help test includes both commands.
+**Remaining:** Both files are surgical -- use `head -3`, `grep -c`, and `...` instead of
+capturing actual output.
+See Category B in the wildcard inventory.
+
+#### Issue 28: Path Form and Scope Matrix (P2)
+
+**Improved:** `track` tests both `file` and `file.yref` path forms, and directory scope.
+**Remaining:** Other commands don’t systematically test path forms.
+
+### Not Addressed
+
+#### Issue 2: JSON Coverage Breadth Limited (P1)
+
+Still only 5 dedicated JSON files covering: `status`, `verify`, `push/pull`, `sync`,
+`doctor`. The `dry-run` and `quiet` tests include some JSON examples, but ~14 commands
+still lack JSON golden coverage.
+
+#### Issue 6: Conflict Testing Incomplete (P1)
+
+`errors/conflict-errors.tryscript.md` still tests pull behavior (not real conflict
+detection) and suppresses all output (3 `...`).
+`workflows/two-user-conflict.tryscript.md` still only tests force-push scenario.
+No test exercises the three-way merge conflict path (local != ref != cache).
+
+#### Issue 9: Config Test Missing Set Operation (P2)
+
+`commands/config.tryscript.md` only reads config values.
+No `blobsy config key value` set operation tested.
+
+#### Issue 10: Init Test Missing Error Cases (P2)
+
+Same scenarios as before.
+Missing: S3/GCS/Azure URL config shape, `--region`/`--endpoint`, init outside git repo,
+local path inside repo.
+1 `[..]` suppresses the S3 bucket error message.
+
+#### Issue 12: Sync Missing Key Scenarios (P1)
+
+4 `...` elisions remain.
+Missing: health check failure, conflict detection, partial failure,
+`--skip-health-check`, per-file action detail output.
+
+#### Issue 13: Validation Errors Missing Design Spec Cases (P2)
+
+2 `...` elisions. Missing: malformed `.yref`, unsupported format version.
+
+#### Issue 14: Not-Found Errors Missing Pull Scenario (P2)
+
+1 `...` elision. Missing: pull when remote blob doesn’t exist.
+
+#### Issue 16: Trust Test Is Surgical (P2)
+
+2 `...` elisions (trust and revoke messages) plus `wc -l` for list count.
+Full trust/revoke message text not captured.
+
+#### Issue 19: Workflow Tests Need Remote State Verification (P2)
+
+Some workflows have partial remote checks (`test -n`, `wc -l`) but none show full
+`find remote/ -type f | sort` listings.
+
+#### Issue 20: Missing Externalization Rules Test (P2)
+
+No test exercises `min_size`, `never` patterns, or `ignore` patterns for directory
+tracking.
+
+#### Issue 22: Harness Backend Override Masks Resolution (P1)
+
+`tryscript.config.ts` still sets `BLOBSY_BACKEND_URL` globally.
+Some tests override to `""` but most use the global override, meaning `.blobsy.yml`
+backend resolution is not exercised.
+
+#### Issue 23: Shared Suite-Wide Remote Reduces Determinism (P1)
+
+Single shared `testRemote` directory still in use.
+Root cause of `wc -l` and `test -n` in remote inspection steps (can’t assert full
+listing because other tests may have pushed to the same remote).
+
+#### Issue 24: JSON Coverage Incomplete Across Surface (P1)
+
+Same as Issue 2. ~14 commands still missing JSON golden tests.
+
+#### Issue 26: Trust Security Path Not Tested E2E (P1)
+
+No test that command backend execution is blocked when untrusted, and allowed after
+trust.
+
+#### Issue 27: Global Flag Matrix Incomplete (P2)
+
+`--verbose` has no positive behavior test.
+`--force` and `--skip-health-check` are tested in specific files but not systematically.
+
+#### Issue 29: Failure-Path JSON Assertions Missing (P2)
+
+No JSON-mode error tests for validation, conflict, not-found, permission categories.
+
+#### Issue 30: No Guardrail for Coverage Drift (P2)
+
+No coverage matrix or CI check.
+
+* * *
+
+## Summary Scorecard
+
+| Status | Count | Issues |
+| --- | --- | --- |
+| Fully addressed | 2 | 7, 21 |
+| Substantially improved | 11 | 1, 3, 4, 5, 8, 11, 15, 17, 18, 25, 28 |
+| Not addressed | 17 | 2, 6, 9, 10, 12, 13, 14, 16, 19, 20, 22, 23, 24, 26, 27, 29, 30 |
+
+## Implementation Plan (Revised)
+
+### Track A: Signal Restoration (P0/P1 -- do first)
+
+Priority: eliminate the 35 Category A wildcards that suppress deterministic blobsy
 output.
 
-**Resolution:** Extend `commands/status.tryscript.md` to walk through the full state
-lifecycle: track (`○`) -> commit (`◐`) -> push (`◑`) -> commit push (`✓`) -> modify
-(`~`) -> delete (`?`) -> rm (`⊗`). Show full status output at each step.
-
-### Issue 6: Conflict Testing Is Incomplete (P1)
-
-**Affected files:**
-
-- `errors/conflict-errors.tryscript.md`
-- `workflows/two-user-conflict.tryscript.md`
-
-`conflict-errors.tryscript.md` is misnamed -- it tests pull behavior but not actual
-conflict detection. It suppresses output with `...` so even the behaviors it does test
-are not captured.
-
-`two-user-conflict.tryscript.md` does not actually simulate the critical conflict
-scenario: two independent modifications where the stat cache detects a three-way
-disagreement (local hash != ref hash != cache hash).
-It only tests a force-push scenario.
-
-The design spec’s three-way merge table has 7 cases:
-
-| Local | .yref | Cache | Action |
-| --- | --- | --- | --- |
-| A | A | A | Up to date |
-| A | A | (none) | Create cache entry |
-| A | B | A | Pull (git pull updated .yref) |
-| B | A | A | Push (user modified file) |
-| B | B | A | Up to date (both changed same way) |
-| B | C | A | **Conflict** |
-| B | A | (none) | **Error** (ambiguous) |
-
-The conflict tests should exercise at least: pull refuses modified local (exit 2), push
-refuses hash mismatch, sync detects three-way conflict, `--force` override for both push
-and pull.
-
-**Resolution:**
-
-- Rewrite `errors/conflict-errors.tryscript.md` to test: pull refuses modified local
-  (full error output), push refuses post-track modification (full error output),
-  `--force` overrides.
-- Rewrite `workflows/two-user-conflict.tryscript.md` to simulate stat-cache-based
-  conflict: set up synced state, modify local file, simulate git-pull updating .yref
-  (write new .yref manually), run `blobsy sync` and capture the full conflict error.
-
-### Issue 7: Help Test Missing Commands (P1)
-
-**Affected file:** `commands/help.tryscript.md`
-
-The help test covers `--help` for: top-level, track, push, pull, status, sync, verify,
-rm, doctor.
-
-Missing `--help` for: init, untrack, mv, config, hooks, health, check-unpushed,
-pre-push-check, trust.
-That is 9 commands whose help text is not golden-tested.
-If their help text changes or breaks, CI won’t catch it.
-
-**Resolution:** Add `--help` blocks for every missing command.
-
-### Issue 8: Doctor Tests Are Minimal (P1)
-
-**Affected files:**
-
-- `commands/doctor.tryscript.md`
-- `workflows/doctor-fix.tryscript.md`
-
-Both tests only exercise one diagnostic scenario (missing gitignore entry) and suppress
-all output. The design spec lists many doctor checks:
-
-- Missing `.gitignore` entries
-- Orphaned `.gitignore` entries
-- Invalid `.yref` files (malformed YAML, unsupported format)
-- Stale stat cache entries
-- Missing pre-commit hook
-- Orphaned `.blobsy-tmp-*` temp files
-- Connectivity check
-
-**Resolution:** Expand the doctor tests to:
-
-1. Show full doctor output for a healthy repo
-2. Test each detectable issue type individually
-3. Test `--fix` for each fixable issue
-4. Verify the fix worked (run doctor again)
-5. Show full output at every step (no `...`)
-
-### Issue 9: Config Test Missing Set Operation (P2)
-
-**Affected file:** `commands/config.tryscript.md`
-
-The test only reads config values.
-The design spec says `blobsy config [key] [value]` supports get/set, but no set
-operation is tested.
-
-**Resolution:** Add tests for setting config values and verifying the change persists.
-
-### Issue 10: Init Test Missing Error Cases (P2)
-
-**Affected file:** `commands/init.tryscript.md`
-
-Only tests: local backend init, idempotent re-init, missing URL error, unrecognized
-scheme error, invalid S3 bucket name error.
-
-Missing:
-
-- Init with S3 URL (to verify config shape)
-- Init with GCS URL
-- Init with Azure URL
-- Init with `--region` and `--endpoint` flags
-- Init outside a git repository (should fail)
-- Init with local backend path inside repo (should fail per design -- local path must
-  resolve outside)
-
-**Resolution:** Add the missing URL scheme tests (config shape verification) and error
-cases.
-
-### Issue 11: Push-Pull Test Missing Key Scenarios (P1)
-
-**Affected file:** `commands/push-pull.tryscript.md`
-
-Missing scenarios:
-
-- Push with uncommitted refs (warning message) -- the testing design doc shows this
-  explicitly
-- Pull when local file is modified (exit code 2, error message)
-- Pull `--force` overwriting local modifications
-- Push `--force` re-tracking and pushing
-- Inspection of `.yref` after push showing `remote_key` field
-- Remote store listing after push
-
-**Resolution:** Add the missing scenarios with full output capture.
-Show `.yref` content after push to verify `remote_key` is set.
-Show `find remote/ -type f | sort` after push to verify blob placement.
-
-### Issue 12: Sync Test Missing Key Scenarios (P1)
-
-**Affected file:** `commands/sync.tryscript.md`
-
-Missing scenarios:
-
-- Sync with health check failure (backend unreachable)
-- Sync detecting conflict (three-way merge disagreement)
-- Sync with partial failure
-- Sync with `--skip-health-check`
-- Sync output showing per-file actions (pushed, pulled, up to date)
-
-**Resolution:** Expand with full output capture for each sync mode.
-
-### Issue 13: Validation Errors Missing Design Spec Cases (P2)
-
-**Affected file:** `errors/validation-errors.tryscript.md`
-
-The testing design doc shows explicit tests for:
-
-- Malformed `.yref` file (invalid YAML)
-- Unsupported format version (major mismatch)
-
-Neither is in the current test.
-The test only covers: track nonexistent file, untrack nonexistent file, rm nonexistent
-file, init errors.
-
-**Resolution:** Add tests for malformed `.yref` and unsupported format version, matching
-the testing design doc examples.
-
-### Issue 14: Not-Found Errors Missing Pull Scenario (P2)
-
-**Affected file:** `errors/not-found-errors.tryscript.md`
-
-Missing: pull when remote blob doesn’t exist (the `.yref` has a `remote_key` but the
-blob is missing from the remote store).
-This is a critical error path -- it’s what happens when someone commits a `.yref`
-without pushing.
-
-**Resolution:** Add a test that sets `remote_key` in a `.yref` but doesn’t actually push
-the blob, then attempts to pull.
-
-### Issue 15: Hooks Test Missing Execution Test (P2)
-
-**Affected file:** `commands/hooks.tryscript.md`
-
-The test installs and uninstalls hooks and checks the file exists, but never tests the
-hook actually running during a `git commit`. The design spec says the pre-commit hook
-auto-pushes blobs when committing `.yref` files.
-
-**Resolution:** Add a test that:
-
-1. Initializes a repo with hooks installed
-2. Tracks and stages a file
-3. Runs `git commit`
-4. Verifies the hook pushed the blob (check remote store)
-
-Note: this may need `BLOBSY_NO_HOOKS` unset, which conflicts with the shared config.
-May need a per-file `env` override.
-
-### Issue 16: Trust Test Is Surgical (P2)
-
-**Affected file:** `commands/trust.tryscript.md`
-
-Uses `wc -l` to count output lines rather than showing the actual output.
-The trust command’s messages, format, and error handling are not captured.
-
-**Resolution:** Show full output for trust, trust --list, trust --revoke.
-
-### Issue 17: Quiet/Dry-Run Tests Incomplete (P3)
-
-**Affected files:**
-
-- `commands/quiet.tryscript.md` -- only tests `--quiet` with status, not with mutating
-  operations (track, push, pull, sync)
-- `commands/dry-run.tryscript.md` -- only tests `--dry-run` with track, not with push,
-  pull, sync, rm, mv
-
-**Resolution:** Add `--quiet` and `--dry-run` tests for mutating operations.
-
-### Issue 18: Missing Compression Edge Cases (P3)
-
-**Affected files:**
-
-- `workflows/compression.tryscript.md`
-- `echo-backend/compression-commands.tryscript.md`
-
-Neither tests:
-
-- Different compression algorithms (gzip, brotli) -- only zstd
-- Compression with `never` patterns (e.g., `.parquet` should skip compression)
-- Compression with small files below `min_size` threshold
-
-**Resolution:** Add compression algorithm variation tests and edge cases.
-
-### Issue 19: Workflow Tests Need Remote State Verification (P2)
-
-**Affected files:** All `workflows/` files
-
-None of the workflow tests inspect the remote store after push operations.
-The testing design doc says:
-
-> The remote listing (`find remote/` or `find .mock-remote/`) is particularly valuable
-> after push/pull operations.
-
-**Resolution:** Add `find remote/ -type f | sort` or `find .mock-remote/ -type f | sort`
-after every push in workflow tests.
-
-### Issue 20: Missing Test for Externalization Rules (P2)
-
-No existing golden test exercises the full externalization rule logic for directory
-tracking: `min_size` threshold, `always` patterns, `never` patterns, `ignore` patterns.
-The `track.tryscript.md` test tracks directories but only with files that match the
-`always` pattern by extension.
-
-**Resolution:** Add a scenario (in `commands/track.tryscript.md` or as a new file) that
-sets up files of varying sizes and types, configures explicit externalization rules,
-runs `blobsy track <dir>`, and shows which files were externalized vs.
-kept in git.
-
-## Additional Findings (Second Senior Review)
-
-### Issue 21: Malformed Command Blocks in `track` Test (P0)
-
-**Affected file:** `commands/track.tryscript.md`
-
-Several blocks accidentally merged multiple commands into one shell line (for example:
-`echo ... > data/model.bin blobsy track ...`). This means the test labels claim behavior
-that is not actually being exercised.
-In practice this turns a “re-track” scenario into a plain `echo` redirection.
-
-**Resolution:** Split merged commands into separate `$` lines, regenerate expected
-output, and verify the intended scenario semantics (especially hash/size updates and
-directory tracking behavior).
-
-### Issue 22: Harness-Level Backend Override Masks Backend Resolution (P1)
-
-**Affected file:** `packages/blobsy/tryscript.config.ts`
-
-The suite-wide `BLOBSY_BACKEND_URL` override means most tests are not exercising backend
-selection from `.blobsy.yml`. This makes backend resolution behavior effectively
-untested except in files that manually clear the variable.
-
-**Resolution:** Use backend override only in tests that explicitly validate env override
-behavior.
-All other tests should resolve backend through `.blobsy.yml` so config behavior
-is actually tested.
-
-### Issue 23: Shared Suite-Wide Remote Reduces Determinism (P1)
-
-**Affected file:** `packages/blobsy/tryscript.config.ts`
-
-A shared remote directory across all test files creates cross-test coupling.
-This is one root cause of weak assertions (`...`, `wc -l`) in remote-inspection steps.
-
-**Resolution:** Isolate remote state per test file (or per scenario) so full remote
-listing assertions become stable and strict.
-
-### Issue 24: JSON Coverage Is Incomplete Across Command Surface (P1)
-
-Current JSON tests only cover `status`, `verify`, `push/pull`, `sync`, and `doctor`. But
-the design contract says all commands support `--json`. The simple-schema commands
-(`track`, `mv`, `untrack`, `rm`, `config`, `health`, `hooks`, `check-unpushed`,
-`pre-push-check`, `trust`) need JSON golden coverage too.
-
-**Resolution:** Add a JSON contract pass for all remaining commands (success and at
-least one error case each).
-
-### Issue 25: Missing Golden Tests for Shipped Commands (P1)
-
-`blobsy skill` and `blobsy prime` are present in CLI command registration but have no
-golden tests. This leaves agent-facing command output unversioned.
-
-**Resolution:** Add `commands/skill.tryscript.md` and `commands/prime.tryscript.md`, and
-include both in `help.tryscript.md` per-command help coverage.
-
-### Issue 26: Trust Security Path Not Tested End-to-End (P1)
-
-Echo backend tests use `BLOBSY_TRUST_ALL=1`, and `commands/trust.tryscript.md` only
-tests list/trust/revoke output.
-There is no test that command backend execution is blocked when untrusted, and allowed
-after trust.
-
-**Resolution:** Add a dedicated security workflow:
-1. untrusted repo + command backend -> refusal,
-2. `blobsy trust` -> allowed,
-3. `blobsy trust --revoke` -> refusal restored.
-
-### Issue 27: Global Flag Matrix Is Incomplete (P2)
-
-`--verbose` has no positive behavior golden tests.
-`--json`+error shape coverage is sparse outside the existing five JSON files.
-`--force` and `--skip-health-check` are not exercised in a matrix style.
-
-**Resolution:** Add a global-flag matrix test suite covering: `--json`, `--verbose`,
-`--quiet`, `--dry-run`, `--force`, `--skip-health-check`, and invalid flag combinations.
-
-### Issue 28: Path Form and Scope Matrix Is Incomplete (P2)
-
-Only a subset of commands exercise both path forms (`file` vs `file.yref`) and scopes
-(`file`, `directory`, `all`). This is a high-regression area in CLI path normalization.
-
-**Resolution:** Add an explicit path normalization matrix for mutating and read
-commands.
-
-### Issue 29: Failure-Path JSON Assertions Are Missing (P2)
-
-Even where human-readable errors are tested, equivalent JSON error objects are not
-consistently covered.
-This risks breaking machine consumers while human output still looks fine.
-
-**Resolution:** Add JSON-mode error tests for validation, conflict, not-found,
-permission, auth, and network categories.
-
-### Issue 30: No Guardrail for Coverage Drift (P2)
-
-There is no machine-checkable mapping from command inventory -> required golden
-scenarios. As commands evolve, test completeness can silently regress.
-
-**Resolution:** Add a maintained coverage matrix artifact plus a CI check that fails
-when command/scenario entries are missing.
+- [x] Fix malformed command blocks in track test (Issue 21)
+- [x] Clean push-pull, doctor, health, compression, doctor-fix, echo-backend push/pull/
+  compression (Issue 1 partial)
+- [ ] Fix `commands/sync.tryscript.md` -- 4 `...` (replace with full per-file output)
+- [ ] Fix `commands/check-unpushed.tryscript.md` -- 3 `...`
+- [ ] Fix `commands/trust.tryscript.md` -- 2 `...` (show trust/revoke messages) +
+  replace `wc -l` with full listing (Issue 16)
+- [ ] Fix `commands/mv.tryscript.md` -- 2 `...` (show track scan + mv details)
+- [ ] Fix `commands/pre-push-check.tryscript.md` -- 1 `...`
+- [ ] Fix `echo-backend/sync-commands.tryscript.md` -- 2 `...`
+- [ ] Fix `workflows/multi-file-sync.tryscript.md` -- 5 `...`
+- [ ] Fix `workflows/branch-workflow.tryscript.md` -- 5 `...`
+- [ ] Fix `workflows/fresh-setup.tryscript.md` -- 4 `...`
+- [ ] Fix `workflows/modify-and-resync.tryscript.md` -- 2 `...`
+- [ ] Fix `workflows/two-user-conflict.tryscript.md` -- 1 `...`
+- [ ] Fix `errors/conflict-errors.tryscript.md` -- 3 `...`
+- [ ] Fix `errors/partial-failure.tryscript.md` -- 3 `...`
+- [ ] Fix `errors/not-found-errors.tryscript.md` -- 1 `...`
+- [ ] Fix `errors/validation-errors.tryscript.md` -- 2 `...`
+- [ ] Fix `commands/health.tryscript.md` -- 2 `[..]` (show full error messages)
+- [ ] Fix `commands/init.tryscript.md` -- 1 `[..]` (show full S3 error)
+- [ ] Fix `commands/untrack.tryscript.md` -- 1 `[..]` (show trash contents instead of
+  count)
+- [ ] Fix `commands/skill.tryscript.md` -- capture `--brief` in full, remove `grep -c`
+  block
+- [ ] Fix `commands/prime.tryscript.md` -- capture `--brief` in full, remove `grep -c`
+  block
+
+**Method:** For each file, run `npx tryscript run --update <file>` from
+`packages/blobsy/`, review the diff, replace dynamic values with named patterns, commit.
+
+### Track B: Scenario Completeness (P1/P2)
+
+After Track A is complete, fill coverage gaps:
+
+- [ ] Issue 5: Add `◐`, `◑`, `✓`, `⊗` states to status test
+- [ ] Issue 6: Rewrite conflict-errors to test real conflict detection; add three-way
+  merge conflict to two-user-conflict
+- [ ] Issue 8: Add doctor scenarios for orphaned gitignore, invalid .yref, stale cache
+- [ ] Issue 11: Add push-with-uncommitted-refs and pull-when-modified scenarios
+- [ ] Issue 12: Add sync health-failure, conflict, partial-failure, --skip-health-check
+  scenarios
+- [ ] Issue 9: Add config set operation test
+- [ ] Issue 10: Add S3/GCS/Azure config shape tests, init outside git, --region/
+  --endpoint
+- [ ] Issue 13: Add malformed .yref and unsupported format version tests
+- [ ] Issue 14: Add pull-with-missing-remote-blob test
+- [ ] Issue 15: Add hook execution test during git commit
+- [ ] Issue 20: Add externalization rules test (min_size, never, ignore patterns)
+- [ ] Issue 26: Add trust security workflow (untrusted -> blocked, trusted -> allowed)
+- [ ] Issue 2/24: Add JSON golden tests for remaining ~14 commands
+- [ ] Issue 29: Add JSON-mode error tests
+
+### Track C: Harness and Governance (P1/P2)
+
+- [ ] Issue 22: Remove global `BLOBSY_BACKEND_URL` from tryscript.config.ts; let each
+  test resolve backend from `.blobsy.yml`
+- [ ] Issue 23: Isolate remote state per test file to enable strict remote listing
+  assertions
+- [ ] Issue 4: Once remotes are isolated, replace `wc -l`/`test -n` remote checks with
+  full `find remote/ -type f | sort` listings
+- [ ] Issue 19: Add full remote store listings in all workflow tests after push
+- [ ] Issue 27: Add global flag matrix (--verbose, --force, --skip-health-check)
+- [ ] Issue 28: Add path form/scope matrix for all mutating commands
+- [ ] Issue 30: Add coverage matrix doc and CI check
 
 ## Sequencing Relative to Phase 1 and Phase 2 Specs
 
-### Immediate: Phase 1 Correction Sprint (Now)
+### Immediate: Track A Signal Restoration
 
-These are corrections to Phase 1 deliverables and should happen before further feature
-work:
-
-- [ ] Fix Issue 21 (malformed command blocks)
-- [ ] Complete Issue 1 + Issue 2 + Issue 3 (remove `...` from P0 files)
-- [ ] Begin Issue 4 (filesystem inspection standards)
-- [ ] Implement Issue 22 + Issue 23 (harness determinism and backend resolution
-  fidelity)
+These are corrections to Phase 1 deliverables.
+Can be done mechanically with `tryscript run --update` + review.
+Should happen before further feature work.
 
 ### Phase 2 Stage 1 Alignment (CLI Polish)
 
 As `--dry-run`, quiet semantics, and error text are finalized:
 
-- [ ] Issue 17 global polish tests (quiet/dry-run)
+- [ ] Issue 17 remaining: quiet/dry-run with push, pull, sync
 - [ ] Issue 27 global flag matrix
-- [ ] Issue 29 JSON error-path coverage for CLI-polish errors
-- [ ] Refresh snapshots affected by error quality pass from
-  `plan-2026-02-21-blobsy-phase2-v1-completion.md`
+- [ ] Issue 29 JSON error-path coverage
+- [ ] Refresh snapshots affected by error quality pass
 
 ### Phase 2 Stage 2 Alignment (S3 Backend + Trust)
 
-As trust and backend logic evolve:
-
-- [ ] Issue 26 trust enforcement workflow tests
-- [ ] Issue 22 backend resolution tests (including explicit env override behavior)
-- [ ] Add S3/trust-specific golden scenarios planned in Phase 2 Stage 2
+- [ ] Issue 22 + 23: harness backend resolution and isolation
+- [ ] Issue 26: trust enforcement workflow tests
+- [ ] S3/trust-specific golden scenarios
 
 ### Phase 2 Stage 3 Alignment (E2E / MinIO)
 
-- [ ] Extend error golden coverage for auth/permission/network using MinIO-backed
-  scenarios
-- [ ] Expand sync partial-failure and conflict scenarios under realistic backend
-  conditions
+- [ ] Extend error coverage for auth/permission/network using MinIO
+- [ ] Expand sync partial-failure and conflict scenarios
 
 ### Phase 2 Stage 4 Alignment (Docs + Agent Integration)
 
-- [ ] Issue 25 add `skill`/`prime` command goldens
-- [ ] Issue 7 complete per-command help snapshots including newly shipped commands
-- [ ] Validate agent-facing output stability in markdown-heavy commands
+- [ ] Issue 25: capture full skill/prime output
+- [ ] Validate agent-facing output stability
 
 ### Phase 2 Stage 5 Alignment (Release Readiness)
 
-- [ ] Issue 30 command-to-scenario coverage matrix and CI guardrail
-- [ ] Final golden baseline update and diff review before publishing
-
-## Updated Implementation Plan
-
-### Track A: Signal Restoration (P0/P1, do first)
-
-- [ ] Remove high-risk output elisions (`...`) from all P0 files
-- [ ] Replace line-count/surgical checks with full output where practical
-- [ ] Fix malformed command blocks and rerun impacted tests
-- [ ] Stabilize harness to allow strict output assertions
-
-### Track B: Scenario Completeness (P1/P2)
-
-- [ ] Complete missing command-state scenarios (`status`, `sync`, `push/pull`, `doctor`)
-- [ ] Add missing command coverage (`skill`, `prime`, trust enforcement)
-- [ ] Add JSON contract coverage across the full command surface
-- [ ] Add path/scoping matrix and global-flag matrix
-
-### Track C: Governance and Drift Prevention (P2)
-
-- [ ] Add coverage matrix doc (`command x scenario x output mode`)
-- [ ] Add CI check to detect missing entries as command inventory changes
-- [ ] Enforce a rule: any CLI output or option change requires golden review/update
+- [ ] Issue 30: coverage matrix and CI guardrail
+- [ ] Final golden baseline update and diff review
 
 ## Testing Strategy and Gates
 
@@ -652,6 +667,7 @@ Release gate:
 
 - [ ] All command help and JSON contracts are snapshot-covered
 - [ ] Trust/security behavior has explicit deny/allow tests
+- [ ] Zero unnamed wildcards suppressing deterministic blobsy output
 - [ ] Coverage matrix is complete for all shipped commands in CLI registration
 
 ## References

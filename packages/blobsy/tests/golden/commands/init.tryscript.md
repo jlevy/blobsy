@@ -62,6 +62,6 @@ Error: Unrecognized backend URL scheme: r2:
 
 ```console
 $ blobsy init s3://AB/prefix/ 2>&1
-[..]
+Error: Bucket name must be 3-63 characters: "AB" in s3://AB/prefix/
 ? 1
 ```

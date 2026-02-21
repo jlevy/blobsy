@@ -21,7 +21,8 @@ before: |
 
 ```console
 $ blobsy sync
-...
+  ↑ data/dataset.csv - pushed
+  ↑ data/model.bin - pushed
 Sync complete: 2 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -38,7 +39,8 @@ $ grep -l remote_key data/*.yref | wc -l | tr -d ' '
 
 ```console
 $ blobsy sync
-...
+  ✓ data/dataset.csv - up to date
+  ✓ data/model.bin - up to date
 Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -58,7 +60,8 @@ Updated data/model.bin.yref (hash changed)
 
 ```console
 $ blobsy sync
-...
+  ✓ data/dataset.csv - up to date
+  ↑ data/model.bin - pushed
 Sync complete: 1 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -80,7 +83,8 @@ $ rm data/dataset.csv
 
 ```console
 $ blobsy sync
-...
+  ↓ data/dataset.csv - pulled
+  ✓ data/model.bin - up to date
 Sync complete: 0 pushed, 1 pulled, 0 errors.
 ? 0
 ```

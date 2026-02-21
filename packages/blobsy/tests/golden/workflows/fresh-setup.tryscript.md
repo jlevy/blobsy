@@ -64,7 +64,8 @@ $ git add -A && git commit -q -m "Track data files with blobsy"
 
 ```console
 $ blobsy push
-...
+  data/dataset.csv (21 B) - pushed
+  data/model.bin (13 B) - pushed
 Done: 2 pushed.
 ? 0
 ```
@@ -88,7 +89,9 @@ $ git add -A && git commit -q -m "Update remote keys after push"
 
 ```console
 $ blobsy status
-...
+  ✓  data/dataset.csv  synced
+  ✓  data/model.bin  synced
+
 2 tracked files
 ? 0
 ```
@@ -102,7 +105,8 @@ $ rm data/model.bin data/dataset.csv
 
 ```console
 $ blobsy pull
-...
+  data/dataset.csv (12 B) - pulled
+  data/model.bin (13 B) - pulled
 Done: 2 pulled.
 ? 0
 ```
@@ -125,7 +129,9 @@ second file
 
 ```console
 $ blobsy verify
-...
+  ✓  data/dataset.csv  ok
+  ✓  data/model.bin  ok
+
 All files verified.
 ? 0
 ```

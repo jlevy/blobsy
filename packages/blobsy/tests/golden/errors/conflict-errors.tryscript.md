@@ -20,7 +20,8 @@ before: |
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin  already up to date
+Done: 0 pulled.
 ? 0
 ```
 
@@ -35,7 +36,8 @@ $ echo "local changes" > data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin (13 B) - pulled
+Done: 1 pulled.
 ? 0
 ```
 
@@ -58,7 +60,8 @@ $ echo "local changes" > data/model.bin
 
 ```console
 $ blobsy pull --force data/model.bin
-...
+  data/model.bin (13 B) - pulled
+Done: 1 pulled.
 ? 0
 ```
 

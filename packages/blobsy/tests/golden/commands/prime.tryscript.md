@@ -1,26 +1,32 @@
 ---
 sandbox: true
 ---
-# Prime brief output (same as skill brief)
+# Prime brief output
 
 ```console
 $ blobsy prime --brief
 blobsy: Git-native large file storage CLI.
-...
+Track large files with .yref pointers in Git, store blobs in S3/local/custom backends.
+
+Commands: init, track, push, pull, sync, status, verify, untrack, rm, mv, config, health, doctor, trust
+Global flags: --json, --quiet, --verbose, --dry-run
+
+Quick start:
+  blobsy init s3://bucket/prefix/
+  blobsy track <file>
+  blobsy push
+  blobsy pull
 ? 0
 ```
 
 # Prime full output starts with context header
 
 ```console
-$ blobsy prime | head -3
+$ blobsy prime | head -5
 # blobsy context
-...
-? 0
-```
 
-```console
-$ blobsy prime | grep -c 'blobsy'
-[..]
+## What is blobsy?
+
+A standalone CLI for storing large files outside Git while tracking them with
 ? 0
 ```
