@@ -52,7 +52,7 @@ Git is the manifest.
 | Concern | Delegated to | Blobsy’s role |
 | --- | --- | --- |
 | Manifest / file tracking | Git (`.yref` files are git-versioned) | Creates and updates `.yref` files |
-| Conflict resolution | Git (standard merge on `.yref` files) | Nothing -- git handles it |
+| Conflict resolution | Git (standard merge on `.yref` files) | Detects payload-vs-ref desync (see [stat cache](stat-cache-design.md)); git handles `.yref` merges |
 | File transfer | External CLI tools (`aws-cli`, `rclone`) or template commands | Orchestrates concurrency |
 | Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
 | Compression | Node.js built-in `node:zlib` (`zstd`, `gzip`, `brotli`) | Decides what to compress, applies rules |
@@ -796,43 +796,22 @@ In practice the OS page cache makes the second read nearly free.
 ### Local Stat Cache
 
 Blobsy maintains a local stat cache (gitignored, machine-local) that stores the
-last-known `size`, `mtime_ms`, and `hash` for each tracked file.
-This follows the same approach as git’s index: use filesystem metadata as a fast-path to
-avoid re-hashing unchanged files.
+last-known state of each tracked file.
+The stat cache serves two purposes:
 
-**How it works:**
+1. **Performance** -- Avoid re-hashing unchanged files by checking `size` + `mtimeNs`
+   first.
+2. **Correctness** -- Provide the merge base for three-way conflict detection during
+   sync (distinguishes “git pull updated .yref” from “user modified file”).
 
-1. On push, sync, or verify, blobsy calls `stat()` on each local file.
-2. If `size` and `mtime_ms` match the cached entry, the cached `hash` is trusted (file
-   assumed unchanged -- no read or hash needed).
-3. If either differs, blobsy reads and hashes the file, then updates the cache.
+The stat cache is **mandatory** for operations that modify `.yref` files (`track`,
+`push`, `pull`, `sync`) and optional for read-only operations (`status`, `verify`).
 
-**Why mtime is safe in the local cache but not in refs:** The stat cache is local and
-per-machine. It only compares a file’s current mtime against the mtime recorded *on the
-same machine* after the last hash.
-This is a “definitely changed” signal -- if mtime changed, something touched the file.
-The `.yref` file cannot use mtime because different machines, git checkouts, CI runners,
-and Docker builds all produce different mtimes for the same content.
+Uses file-per-entry storage (one JSON file per tracked file) with atomic writes to
+eliminate concurrent-write conflicts between parallel blobsy processes.
 
-**High-resolution timestamps:** Node.js `fs.stat()` provides `mtimeMs` (millisecond
-float) on all platforms.
-Millisecond resolution is sufficient -- sub-millisecond file modifications between cache
-writes are unlikely in practice.
-
-**Performance impact:** `stat()` costs ~1-5 microseconds per file.
-For a directory with 1,000 files, the stat pass takes ~~5 ms.
-Without the cache, every push would read and hash all 1,000 files (~~seconds to minutes
-depending on sizes).
-
-| Scenario (1000 files, 10 MB avg) | Without stat cache | With stat cache |
-| --- | --- | --- |
-| First push | Hash all: ~20s | Hash all: ~20s (same) |
-| Second push, 3 files changed | Hash all: ~20s | Stat all + hash 3: ~65ms |
-| After `git checkout` (mtime reset on all) | Hash all: ~20s | Stat all + hash all: ~20s |
-
-**Cache invalidation:** The cache is a pure optimization.
-If missing or corrupted, blobsy falls back to hashing all files (correct but slower).
-The cache is never shared across machines -- it is gitignored and machine-local.
+See [stat-cache-design.md](stat-cache-design.md) for full design: entry format, storage
+layout, API, three-way merge algorithm, cache update rules, and recovery.
 
 ### Future: Remote Staleness Detection via Provider Hashes
 
@@ -1219,30 +1198,16 @@ warnings).
    - Skip with `--skip-health-check` flag (advanced use)
    - See [Transport Health Check](#transport-health-check) section
 
-2. **For each `.yref` file:**
-   - **Read the ref** from working tree -- get `hash`, `size`, `remote_key`
-   - **Check stat cache** for last-known state (mtime, size, hash)
-   - **Check local file** -- stat it (size, mtime), conditionally hash it
+2. **For each `.yref` file**, apply the three-way merge algorithm using the stat cache
+   as merge base. See [stat-cache-design.md](stat-cache-design.md) for the full decision
+   table and per-file sync logic.
 
-   **Decision tree:**
-
-   - **If local file matches stat cache** (mtime and size match):
-     - **And `.yref` hash matches cache:** File unchanged, check remote
-       - If remote has blob: nothing to do (✓)
-       - If remote missing: push
-     - **And `.yref` hash differs from cache:** Git updated `.yref` underneath us
-       - **Action:** Pull new blob from remote (update local file)
-
-   - **If local file differs from stat cache** (mtime or size changed):
-     - Hash the local file
-     - **And hash matches `.yref`:** Coincidental match (edited back to same content)
-       - Update cache, check remote, push if missing
-     - **And hash differs from `.yref`:** User edited the file
-       - **Action:** Update `.yref` with new hash, push new blob
-
-   - **If local file is missing:**
-     - **And remote has the blob:** Pull (download blob)
-     - **And remote missing:** Error (both local and remote missing)
+   Summary:
+   - **Local matches cache, .yref matches cache** -- up to date
+   - **Local matches cache, .yref differs** -- git pull updated .yref, pull new blob
+   - **Local differs from cache, .yref matches cache** -- user modified file, push
+   - **Both differ** -- conflict, error with resolution options
+   - **Local file missing** -- pull from remote (or error if remote also missing)
 
 **Important:** Sync can modify `.yref` files (update hash, set `remote_key`). These
 modifications are in the working tree - user must commit them.
@@ -1980,7 +1945,7 @@ We do not rely on external tools to handle atomicity.
 **Other atomic operations:** Blobsy also uses temp-file-then-rename for:
 
 - `.yref` file updates
-- Stat cache writes
+- Stat cache writes (file-per-entry, via `atomically` package)
 
 **Temp file management:**
 
@@ -2496,14 +2461,17 @@ This serves two purposes:
 Trash entries whose blobs are still referenced by other live `.yref` files on other
 branches are kept until those references are also gone.
 
+### What `.blobsy/` Contains
+
+- **Trash** for soft-deleted refs (see above).
+- **Stat cache** at `.blobsy/stat-cache/` (gitignored, machine-local).
+  One JSON file per tracked file.
+  See [stat-cache-design.md](stat-cache-design.md).
+
 ### What `.blobsy/` Does Not Contain
 
 - **No config.** Config lives in `.blobsy.yml` files (hierarchical, placed anywhere).
-- **No cache.** Caches (stat cache, hash cache) live outside git, e.g.,
-  `~/.cache/blobsy/` or a local-only gitignored cache.
 - **No manifests.** There are no manifests.
-
-The `.blobsy/` directory is small and focused: just the trash.
 
 ## Security and Trust Model
 
@@ -2902,8 +2870,10 @@ support). Older versions can still use gzip or brotli compression.
 
 Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
 files, exits. No background processes, no lock files.
-The only persistent local state is the stat cache, which is a pure optimization -- if
-missing, all operations still work correctly, just slower.
+The only persistent local state is the stat cache (see
+[stat-cache-design.md](stat-cache-design.md)), which is mandatory for conflict detection
+during sync. If missing, blobsy auto-rebuilds it where unambiguous and errors with
+resolution guidance where ambiguous.
 
 ### Testing
 

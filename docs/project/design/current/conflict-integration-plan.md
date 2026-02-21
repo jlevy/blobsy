@@ -9,75 +9,15 @@
 
 ### 1. Integrity Model Section (Lines 741-848)
 
-**Current:** Stat cache described as performance optimization only.
+**Status:** ✅ Completed.
+Stat cache section in main design replaced with summary and cross-reference to
+[stat-cache-design.md](stat-cache-design.md), which is now the authoritative source for
+stat cache design (entry format, storage layout, API, three-way merge algorithm, cache
+update rules, and recovery).
 
-**Integration needed:**
-````markdown
-### Local Stat Cache
+* * *
 
-The stat cache serves TWO critical purposes:
-
-1. **Performance optimization** - Fast-path to avoid re-hashing unchanged files
-2. **Conflict detection** - Merge base for three-way conflict resolution
-
-#### Stat Cache as Performance Optimization
-
-[Keep existing content lines 796-836]
-
-#### Stat Cache as Merge Base (NEW)
-
-The stat cache stores the last-known state when blobsy interacted with each file:
-
-```typescript
-interface StatCacheEntry {
-  hash: string;      // SHA-256 hash of file content
-  size: number;      // File size in bytes
-  mtimeNs: string;   // Modification time in nanoseconds (BigInt as string)
-  cachedAt: number;  // Timestamp when cached (ms since epoch)
-}
-````
-
-**Critical insight:** The stat cache is the **merge base** for three-way conflict
-detection.
-
-For each tracked file, blobsy has three states:
-- **Local state:** Hash of file on disk
-- **Remote state:** Hash in `.yref` file (from git)
-- **Base state:** Hash in stat cache (last time blobsy touched this file)
-
-This enables detecting:
-- **Git pull updated .yref, local unchanged** → Pull new blob
-- **User modified file, .yref unchanged** → Push new version
-- **Both changed** → Conflict (manual resolution)
-
-See [Conflict Detection](#conflict-detection-and-resolution) for full algorithm.
-
-#### Stat Cache Correctness Requirements (NEW)
-
-The stat cache MUST be updated atomically with file operations:
-
-1. **After `blobsy track`:** Update cache with new hash
-2. **After `blobsy push`:** Update cache to match pushed version
-3. **After `blobsy pull`:** Update cache to match pulled version
-4. **Never in between:** Don’t update cache without completing the operation
-
-**Cache invalidation:**
-- File size changes → invalidate
-- File mtime changes (nanosecond precision) → invalidate
-- Cache entry older than 30 days → revalidate on next access
-
-**Cache storage:**
-```
-.blobsy/stat-cache.json (gitignored, machine-local)
-```
-
-The stat cache is mandatory for correctness in operations that modify .yref files.
-If missing, blobsy auto-rebuilds it (hashes all files, warns it’s slow).
-````
-
-**Consistency check:** ✅ No conflicts. Expands existing section.
-
----
+* * *
 
 ### 2. Conflict Model Section (Lines 2384-2436)
 
@@ -88,7 +28,7 @@ If missing, blobsy auto-rebuilds it (hashes all files, warns it’s slow).
 **Location:** Lines 2384-2436 (replace entire section)
 
 **New content:**
-```markdown
+````markdown
 ## Conflict Detection and Resolution
 
 ### The Critical Race Condition
@@ -240,107 +180,11 @@ This catches:
 
 #### Layer 2: Detection via Stat Cache Three-Way Merge
 
-When the pre-commit hook is skipped or in edge cases, the stat cache detects conflicts
-at sync time.
+**Status:** ✅ Completed.
+Full design now in [stat-cache-design.md](stat-cache-design.md), including decision
+table, per-file sync logic, and all conflict cases.
 
-##### Three-Way Merge Algorithm
-
-For each tracked file:
-
-1. **Local state:** Hash of file on disk
-2. **Remote state:** Hash in `.yref` file (from git)
-3. **Base state:** Hash in stat cache (last time blobsy touched this file)
-
-**Decision table:**
-
-| Local Hash | .yref Hash | Cache Hash | Interpretation | Action |
-| --- | --- | --- | --- | --- |
-| A | A | A | No changes anywhere | Nothing (✓) |
-| A | A | (none) | First time tracking | Nothing (✓) |
-| A | B | A | .yref updated by git pull, local unchanged | **Pull new blob** |
-| B | A | A | User modified file, .yref unchanged | **Push new version** |
-| B | B | A | User modified + already synced | Nothing (✓) |
-| A | B | B | User reverted file to old version | **Pull or warn** |
-| B | C | A | **Conflict:** Both local and .yref changed | **Error (manual resolution)** |
-
-##### Implementation
-
-```typescript
-async function sync(filePath: string): Promise<void> {
-  const localHash = await computeHash(filePath);
-  const ref = await readYRef(filePath + '.yref');
-  const cached = await statCache.get(filePath);
-
-  // Case 1: Everything matches
-  if (localHash === ref.hash) {
-    console.log(`✓ ${filePath} (in sync)`);
-    return;
-  }
-
-  // Case 2: First time (no cache entry)
-  if (!cached) {
-    if (localHash === ref.hash) {
-      await updateStatCache(filePath, localHash);
-      return;
-    } else {
-      // First time, local differs - assume local is truth
-      await updateRefAndPush(filePath, localHash);
-      return;
-    }
-  }
-
-  // Case 3: git pull updated .yref, local unchanged
-  if (localHash === cached.hash && ref.hash !== cached.hash) {
-    console.log(`↓ ${filePath} (pulling update from git)`);
-
-    if (!ref.remote_key) {
-      throw new Error(
-        `Cannot pull ${filePath}: .yref has no remote_key.\n` +
-        `\n` +
-        `Someone committed the .yref without pushing the blob.\n` +
-        `\n` +
-        `Last commit of this .yref:\n` +
-        `  ${await getLastCommitInfo(filePath + '.yref')}\n` +
-        `\n` +
-        `To fix: Ask them to run: blobsy push ${filePath}\n`
-      );
-    }
-
-    await pullBlob(filePath, ref.remote_key);
-    await updateStatCache(filePath, ref.hash);
-    return;
-  }
-
-  // Case 4: User modified file, .yref unchanged
-  if (localHash !== cached.hash && ref.hash === cached.hash) {
-    console.log(`↑ ${filePath} (pushing local modification)`);
-    await updateRefAndPush(filePath, localHash);
-    return;
-  }
-
-  // Case 5: Both changed (conflict)
-  if (localHash !== cached.hash && ref.hash !== cached.hash && localHash !== ref.hash) {
-    throw new ConflictError(
-      `Conflict in ${filePath}:\n` +
-      `\n` +
-      `  Local file:    ${localHash.substring(0, 12)}... (modified by you)\n` +
-      `  .yref file:    ${ref.hash.substring(0, 12)}... (modified in git)\n` +
-      `  Last known:    ${cached.hash.substring(0, 12)}... (merge base)\n` +
-      `\n` +
-      `Both the local file and .yref changed since last sync.\n` +
-      `\n` +
-      `Last commit of this .yref:\n` +
-      `  ${await getLastCommitInfo(filePath + '.yref')}\n` +
-      `\n` +
-      `Resolution:\n` +
-      `  1. Keep local:  blobsy push --force ${filePath}\n` +
-      `  2. Take remote: blobsy pull --force ${filePath}\n` +
-      `  3. Manual merge: (edit file, then blobsy track ${filePath})\n`
-    );
-  }
-}
-```
-
+* * *
 * * *
 
 #### Layer 3: Attribution and Error Messages
@@ -742,9 +586,8 @@ Commit BLOCKED.
 - [ ] Prevent corrupted/stale .yref files from being pushed
 
 ### Stat Cache as Merge Base
-- [ ] Elevate from optional to mandatory for correctness
-- [ ] Nanosecond mtime precision (`mtimeNs` as string for BigInt)
-- [ ] Atomic cache updates (update atomically with file operations)
+See [stat-cache-design.md](stat-cache-design.md) for full design.
+- [ ] File-per-entry storage with atomic writes
 - [ ] Three-way merge algorithm implementation
 - [ ] Conflict detection and clear error messages
 
@@ -782,13 +625,8 @@ Commit BLOCKED.
 
 #### 1. Stat Cache Role - RESOLVED
 
-**Main design originally said:** Optional performance optimization.
-
-**Conflict detection says:** Mandatory for correctness (merge base).
-
-**Resolution:** Integration updates main design to say **both** - optional for read-only
-ops, mandatory for write ops.
-This is consistent.
+**Resolution:** Mandatory for write ops, optional for read-only ops.
+Full design in [stat-cache-design.md](stat-cache-design.md).
 
 #### 2. `blobsy sync` Behavior - CONSISTENT
 
@@ -848,16 +686,8 @@ Exit code 2 for conflicts is already documented.
 
 #### Decision 1: Stat Cache Mandatory or Optional?
 
-**Conflict detection doc position:** Mandatory for correctness.
-
-**Main design doc position (before integration):** Optional for performance.
-
-**Proposed resolution:**
-- **Mandatory** for operations that modify .yref files (`track`, `push`, `sync`)
-- **Optional** for read-only operations (`status`, `verify`)
-- **Auto-rebuild** if missing (hash all files, warn it’s slow)
-
-**Is this consistent?** ✅ Yes, if we update the main design to clarify this distinction.
+**RESOLVED.** See [stat-cache-design.md](stat-cache-design.md).
+Mandatory for write ops, optional for reads, auto-rebuild when missing.
 
 #### Decision 2: What if Hook Not Installed?
 
@@ -881,57 +711,10 @@ Git hooks:
 
 #### Decision 3: Stat Cache on Fresh Clone
 
-**Scenario:** User clones repo.
-No stat cache exists.
-Runs `blobsy sync`.
-
-**Conflict detection doc says (FAQ line 658):** “Conservative behavior: if local matches
-.yref assume in sync; if differs warn and ask user.”
-
-**Question:** Is this sufficient?
-
-**Analysis:**
-- On fresh clone, local files don’t exist yet (gitignored).
-- So “local matches .yref” can’t happen.
-- First `blobsy pull` or `blobsy sync` will pull everything.
-- As files are pulled, stat cache is populated.
-
-**Edge case:** User manually places files in repo (e.g., copied from backup), then
-clones .yref files from git.
-Now local files exist but no stat cache.
-- If local hash == .yref hash → assume in sync, populate cache ✓
-- If local hash != .yref hash → first-time case, assume local is truth (wrong!), would
-  push wrong version ✗
-
-**Better behavior:** On first run (no cache), if .yref has `remote_key` set and remote
-blob exists, trust remote.
-Pull if local differs.
-
-**Proposed algorithm update:**
-```typescript
-// Case 2: First time (no cache entry)
-if (!cached) {
-  if (localHash === ref.hash) {
-    // Local matches ref - in sync
-    await updateStatCache(filePath, localHash);
-    return;
-  } else if (ref.remote_key) {
-    // .yref has remote_key - pull from remote (trust git history)
-    console.warn(`First sync: pulling ${filePath} from remote (local differs from ref)`);
-    await pullBlob(filePath, ref.remote_key);
-    await updateStatCache(filePath, ref.hash);
-    return;
-  } else {
-    // No remote_key yet - assume local is truth (user just tracked this)
-    console.log(`First sync: tracking ${filePath} (no remote yet)`);
-    await updateRefAndPush(filePath, localHash);
-    return;
-  }
-}
-```
-
-**Is this consistent?** ⚠️ **This is a refinement** of the conflict detection doc’s
-algorithm. Should be integrated.
+**RESOLVED.** See “Missing Cache / Recovery” section in
+[stat-cache-design.md](stat-cache-design.md).
+If local matches .yref, create cache entry.
+If local differs and no cache, error with resolution guidance.
 
 * * *
 
@@ -945,7 +728,8 @@ algorithm. Should be integrated.
    writes)
 3. ✅ **Commands added** - `hooks`, `check-unpushed`, `pre-push-check`
 4. ✅ **Hook installation added** to `blobsy init`
-5. ⚠️ **Refinement needed** - First-time stat cache behavior (Decision 3 above)
+5. ✅ **Stat cache design consolidated** - See
+   [stat-cache-design.md](stat-cache-design.md)
 6. ✅ **Testing expanded** - Conflict detection tests added to checklist
 
 ### Action Items
