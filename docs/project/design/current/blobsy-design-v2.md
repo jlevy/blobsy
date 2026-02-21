@@ -1207,16 +1207,23 @@ Reminder: 2 .yref files have uncommitted changes. Run 'git add -A && git commit'
 **Reads from:** Working tree `.yref` files (can operate on uncommitted refs with
 warnings).
 
-**Algorithm for each `.yref`:**
+**Algorithm:**
 
-1. **Read the ref** from working tree -- get `hash`, `size`, `remote_key`.
-2. **Check local file** -- hash it (using stat cache for speed).
-3. **If local file changed:** update `.yref` with new hash (like `blobsy track`).
-4. **If local matches ref and remote has the blob:** nothing to do (✓).
-5. **If local matches ref but remote doesn’t have it:** push (upload blob, set
-   `remote_key` in ref) (becomes ◑).
-6. **If local is missing but remote has the blob:** pull (download blob).
-7. **If local differs from ref:** update ref, then push (combined track + push).
+1. **Health check** (first, before processing any files):
+   - Verify backend is accessible and credentials are valid
+   - Fail fast with clear error if backend is unreachable
+   - Skip with `--skip-health-check` flag (advanced use)
+   - See [Transport Health Check](#transport-health-check) section
+
+2. **For each `.yref` file:**
+   - **Read the ref** from working tree -- get `sha256`, `size`, `remote_key`
+   - **Check local file** -- hash it (using stat cache for speed)
+   - **If local file changed:** update `.yref` with new hash (like `blobsy track`)
+   - **If local matches ref and remote has the blob:** nothing to do (✓)
+   - **If local matches ref but remote doesn’t have it:** push (upload blob, set
+     `remote_key` in ref) (becomes ◑)
+   - **If local is missing but remote has the blob:** pull (download blob)
+   - **If local differs from ref:** update ref, then push (combined track + push)
 
 **Important:** Sync can modify `.yref` files (update hash, set `remote_key`). These
 modifications are in the working tree - user must commit them.
@@ -1464,6 +1471,7 @@ $ blobsy config backend          # show current backend
 SETUP
   blobsy init                          Initialize blobsy in a git repo
   blobsy config [key] [value]          Get/set configuration
+  blobsy health                        Check transport backend health (credentials, connectivity)
   blobsy doctor                        Comprehensive diagnostics and health check (V2: enhanced)
        [--fix]                       Auto-fix detected issues
 
@@ -1767,8 +1775,16 @@ Template variables:
 
 The command runs once per file (not once per push operation), with up to `sync.parallel`
 invocations running concurrently.
-A non-zero exit code is treated as a transfer failure for that file.
-stdout is discarded; stderr is shown to the user on failure.
+
+**Error handling:**
+- **Exit code 0:** Success - file transferred successfully
+- **Non-zero exit code:** Failure - file transfer failed
+
+On failure, blobsy captures **both stdout and stderr** from the command and displays
+them to the user with context (file path, command, exit code).
+Transport tools vary in where they write error messages -- some use stderr, some use
+stdout, some use both.
+Blobsy does not discard either stream.
 
 **Examples:**
 
@@ -1956,6 +1972,362 @@ We do not rely on external tools to handle atomicity.
 **Interrupted operations:** If push or pull is interrupted midway, re-running is safe.
 Already-transferred files are detected via hash comparison and skipped.
 Per-file atomicity ensures no corrupt partial files.
+
+## Transport Layer Error Handling
+
+When transport commands fail, blobsy provides clear, actionable error messages with full
+diagnostic context. This is critical for debugging common issues like authentication
+failures, permission errors, and network problems.
+
+### Error Capture
+
+When a transport command fails (non-zero exit code):
+
+1. **Capture both stdout and stderr** from the failed command
+2. **Preserve the original error message** from the transport tool
+3. **Add context** about which file transfer failed and what command was attempted
+4. **Format consistently** across all backends (S3, local, command templates)
+
+**Important:** Both stdout and stderr are captured.
+Transport tools vary in where they write error messages -- aws-cli may write JSON errors
+to stdout, rclone writes to stderr, custom scripts may use either.
+Blobsy does not assume or discard either stream.
+
+### Error Message Format
+
+**Human-readable format (default):**
+
+```
+Error: Failed to push data/model.bin (500 MB)
+
+Command: aws s3 cp /path/to/data/model.bin s3://my-bucket/sha256/abc123...
+Exit code: 1
+
+Output:
+upload failed: s3://my-bucket/sha256/abc123... An error occurred (InvalidAccessKeyId)
+when calling the PutObject operation: The AWS Access Key Id you provided does not
+exist in our records.
+
+Troubleshooting:
+- Check AWS credentials: aws configure list
+- Verify bucket access: aws s3 ls s3://my-bucket/
+- See: https://github.com/jlevy/blobsy/docs/troubleshooting#auth-errors
+```
+
+**JSON format (`--json`):**
+
+```json
+{
+  "schema_version": "0.1",
+  "error": {
+    "type": "transport_failure",
+    "file": "data/model.bin",
+    "size": 524288000,
+    "direction": "push",
+    "backend": "s3",
+    "bucket": "my-bucket",
+    "remote_key": "sha256/abc123...",
+    "command": "aws s3 cp /path/to/data/model.bin s3://my-bucket/sha256/abc123...",
+    "exit_code": 1,
+    "stdout": "upload failed: s3://my-bucket/sha256/abc123...",
+    "stderr": "An error occurred (InvalidAccessKeyId) when calling the PutObject operation: The AWS Access Key Id you provided does not exist in our records.",
+    "error_category": "authentication",
+    "troubleshooting_url": "https://github.com/jlevy/blobsy/docs/troubleshooting#auth-errors"
+  }
+}
+```
+
+### Error Categories
+
+Blobsy attempts to categorize common transport errors for better troubleshooting:
+
+| Category | Detection Patterns | Common Causes |
+| --- | --- | --- |
+| `authentication` | “InvalidAccessKeyId”, “AccessDenied”, “403”, “Forbidden” | Missing/expired credentials, wrong IAM permissions |
+| `not_found` | “NoSuchBucket”, “404”, “Not Found”, “NoSuchKey” | Bucket doesn’t exist, wrong region, blob not found |
+| `network` | “Connection refused”, “timeout”, “Name resolution failed” | Network down, DNS issues, firewall blocking |
+| `permission` | “Permission denied”, “Access Denied”, “InsufficientPermissions” | IAM policy missing required actions |
+| `quota` | “RequestLimitExceeded”, “TooManyRequests”, “429” | Rate limiting, quota exceeded |
+| `storage_full` | “No space left”, “QuotaExceeded”, “InsufficientStorage” | Bucket quota exceeded, local disk full |
+| `unknown` | (default) | Unrecognized error pattern |
+
+Error categorization is best-effort pattern matching on stdout/stderr.
+It enables context-aware troubleshooting suggestions.
+
+### Partial Failure Handling
+
+When syncing multiple files, blobsy continues processing remaining files after a
+transport failure:
+
+```bash
+$ blobsy push
+Pushing 3 files...
+  ✓ data/file1.bin (1.2 GB) - ok
+  ✗ data/file2.bin (500 MB) - FAILED
+  ✓ data/file3.bin (800 MB) - ok
+
+1 file failed (see errors above)
+Exit code: 1
+```
+
+All errors are collected and displayed at the end.
+Exit code is 1 if any file failed.
+
+In `--json` mode, the output includes both successful and failed transfers:
+
+```json
+{
+  "schema_version": "0.1",
+  "summary": {
+    "total": 3,
+    "succeeded": 2,
+    "failed": 1
+  },
+  "transfers": [
+    {"file": "data/file1.bin", "status": "success", "size": 1288490188},
+    {
+      "file": "data/file2.bin",
+      "status": "failed",
+      "error": {
+        "type": "transport_failure",
+        "command": "aws s3 cp ...",
+        "exit_code": 1,
+        "stdout": "...",
+        "stderr": "...",
+        "error_category": "authentication"
+      }
+    },
+    {"file": "data/file3.bin", "status": "success", "size": 838860800}
+  ]
+}
+```
+
+### Common Error Scenarios
+
+These scenarios must be tested (see Testing section) and should produce helpful error
+messages:
+
+#### Missing AWS Credentials
+
+```
+Error: Failed to push data/model.bin (500 MB)
+
+Command: aws s3 cp /path/to/data/model.bin s3://my-bucket/sha256/abc123...
+Exit code: 255
+
+Output:
+Unable to locate credentials. You can configure credentials by running "aws configure".
+
+Troubleshooting:
+- Run: aws configure
+- Or set: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+- Or use IAM role (if on EC2/ECS)
+- See: https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html
+```
+
+#### Wrong Bucket/Region
+
+```
+Error: Failed to pull data/model.bin (500 MB)
+
+Command: aws s3 cp s3://my-bucket/sha256/abc123... /path/to/data/model.bin
+Exit code: 1
+
+Output:
+fatal error: An error occurred (NoSuchBucket) when calling the HeadObject operation:
+The specified bucket does not exist
+
+Troubleshooting:
+- Verify bucket name: my-bucket
+- Check region: us-east-1 (configured) vs. actual bucket region
+- Run: aws s3 ls s3://my-bucket/ --region us-east-1
+- Check .blobsy.yml backend configuration
+```
+
+#### Permission Denied
+
+```
+Error: Failed to push data/model.bin (500 MB)
+
+Command: aws s3 cp /path/to/data/model.bin s3://my-bucket/sha256/abc123...
+Exit code: 1
+
+Output:
+upload failed: s3://my-bucket/sha256/abc123... An error occurred (AccessDenied) when
+calling the PutObject operation: Access Denied
+
+Troubleshooting:
+- Your IAM user/role needs s3:PutObject permission on s3://my-bucket/*
+- Check IAM policy attached to your credentials
+- See: https://github.com/jlevy/blobsy/docs/troubleshooting#iam-permissions
+```
+
+#### Network Timeout
+
+```
+Error: Failed to push data/model.bin (500 MB)
+
+Command: aws s3 cp /path/to/data/model.bin s3://my-bucket/sha256/abc123...
+Exit code: 1
+
+Output:
+upload failed: s3://my-bucket/sha256/abc123... Connect timeout on endpoint URL:
+"https://my-bucket.s3.amazonaws.com/..."
+
+Troubleshooting:
+- Check network connectivity
+- Verify firewall/proxy settings
+- Try with smaller file first to test connectivity
+- Consider increasing timeout: AWS_CLI_CONNECT_TIMEOUT=60
+```
+
+#### Disk Full (Local)
+
+```
+Error: Failed to pull data/model.bin (500 MB)
+
+Command: aws s3 cp s3://my-bucket/sha256/abc123... /path/to/data/model.bin
+Exit code: 1
+
+Output:
+download failed: [Errno 28] No space left on device: '/path/to/data/model.bin'
+
+Troubleshooting:
+- Free up disk space on local filesystem
+- Current usage: df -h /path/to/data
+- Consider using blobsy rm --local to remove other tracked files
+```
+
+### Transport Health Check
+
+Before starting concurrent file transfers, blobsy runs a lightweight health check to
+verify the transport backend is accessible and credentials are valid.
+This **fails fast** with a clear error message instead of spawning multiple failing
+concurrent processes.
+
+**Why this matters:**
+
+Without a health check, syncing 100 files with invalid credentials would spawn up to
+`sync.parallel` (default 8) concurrent failed transfers, producing 8 identical error
+messages simultaneously.
+This is confusing and wasteful.
+
+With a health check, blobsy detects the auth problem immediately and shows one clear
+error before attempting any transfers.
+
+**Health check per backend:**
+
+| Backend | Health Check Operation | What It Validates |
+| --- | --- | --- |
+| `s3` | `HeadBucket` or small `ListObjectsV2` (1 item) | Credentials valid, bucket exists, region correct, network reachable |
+| `local` | `stat()` on the target directory | Directory exists and is writable |
+| `command` | Run push_command with a tiny test file (writes + deletes 1 KB test object) | Command syntax valid, remote accessible, credentials work |
+
+**Health check is:**
+- **Fast** - single lightweight operation (< 1 second in normal cases)
+- **Skippable** - `--skip-health-check` flag for advanced users who know backend is
+  healthy
+- **Cached** - health check result cached for 60 seconds to avoid redundant checks
+  across multiple sync commands
+
+**Failure modes:**
+
+```bash
+$ blobsy push
+Checking backend health...
+✗ Backend health check failed
+
+Error: Cannot access s3://my-bucket/
+Command: aws s3api head-bucket --bucket my-bucket
+Exit code: 254
+
+Output:
+An error occurred (NoSuchBucket) when calling the HeadBucket operation: The specified
+bucket does not exist
+
+Troubleshooting:
+- Verify bucket name: my-bucket
+- Check region in .blobsy.yml: us-east-1
+- Run: aws s3 ls s3://my-bucket/ --region us-east-1
+- See: https://github.com/jlevy/blobsy/docs/troubleshooting#bucket-config
+
+Aborting sync. Fix backend configuration and try again.
+```
+
+**Success (normal case):**
+
+```bash
+$ blobsy push
+✓ Backend healthy (s3://my-bucket/)
+Pushing 42 files...
+  ✓ data/file1.bin (1.2 GB) - ok
+  ✓ data/file2.bin (500 MB) - ok
+  ...
+```
+
+**Exposed as `blobsy health` command:**
+
+Health checks are also exposed as a standalone command for troubleshooting:
+
+```bash
+$ blobsy health
+Checking transport backend health...
+
+Backend: s3
+  Bucket: my-bucket
+  Region: us-east-1
+  Prefix: project-v1/
+
+✓ Credentials valid (AWS profile: default)
+✓ Bucket accessible
+✓ Can write (test upload: 1 KB)
+✓ Can read (test download: 1 KB)
+✓ Can delete (cleaned up test object)
+
+Transfer tools:
+  ✓ aws-cli v2.13.5 (using this)
+  ✗ rclone (not installed)
+
+All checks passed. Backend is healthy.
+```
+
+With `--json`:
+
+```json
+{
+  "schema_version": "0.1",
+  "backend": {
+    "type": "s3",
+    "bucket": "my-bucket",
+    "region": "us-east-1",
+    "prefix": "project-v1/"
+  },
+  "health_checks": {
+    "credentials": {"status": "ok", "message": "AWS profile: default"},
+    "bucket_access": {"status": "ok", "message": "Bucket accessible"},
+    "can_write": {"status": "ok", "message": "Test upload: 1 KB"},
+    "can_read": {"status": "ok", "message": "Test download: 1 KB"},
+    "can_delete": {"status": "ok", "message": "Cleaned up test object"}
+  },
+  "transfer_tools": {
+    "selected": "aws-cli",
+    "aws-cli": {"available": true, "version": "2.13.5"},
+    "rclone": {"available": false, "error": "not found in PATH"}
+  },
+  "overall_status": "healthy"
+}
+```
+
+**Integration with `blobsy doctor`:**
+
+`blobsy doctor` includes health check results in its comprehensive diagnostics (see
+`blobsy doctor` command documentation).
+
+**V1 implementation note:**
+
+Health checks are implemented in V1 for S3 and local backends.
+Command backends skip health checks in V1 (deferred to V2) since arbitrary commands may
+not have a safe, side-effect-free health check operation.
 
 ## Per-File State Model
 
@@ -2527,6 +2899,101 @@ missing, all operations still work correctly, just slower.
 The `local` backend makes testing trivial.
 Integration tests use a temp directory as the “remote.”
 No cloud account needed for development.
+
+#### Golden Tests for Error Conditions
+
+Blobsy includes comprehensive golden/snapshot tests for all transport error scenarios.
+Error messages are critical UX -- they must be helpful, consistent, and tested.
+
+**Required error test cases:**
+
+1. **Authentication failures:**
+   - Missing credentials (AWS_ACCESS_KEY_ID unset)
+   - Invalid credentials (wrong access key)
+   - Expired credentials (temporary credentials past expiry)
+
+2. **Permission errors:**
+   - IAM policy missing s3:PutObject
+   - IAM policy missing s3:GetObject
+   - Bucket policy denying access
+
+3. **Resource not found:**
+   - Bucket doesn’t exist
+   - Wrong region configured
+   - Blob missing on pull (committed ref but data not pushed)
+
+4. **Network errors:**
+   - Connection timeout (simulated with unreachable endpoint)
+   - DNS resolution failure
+   - Connection refused
+
+5. **Storage errors:**
+   - Disk full on pull (local filesystem)
+   - Bucket quota exceeded (S3 quota)
+
+6. **Command failures:**
+   - Transfer tool not installed (aws-cli missing from PATH)
+   - Transfer tool returns unexpected output
+   - Malformed command template (missing {local} variable)
+
+7. **Health check failures:**
+   - Health check detects auth failure before starting sync
+   - Health check detects bucket doesn’t exist before starting sync
+   - Health check detects network timeout before starting sync
+   - `blobsy health` command shows detailed diagnostics
+   - `--skip-health-check` flag bypasses health check when needed
+
+**Golden test implementation pattern:**
+
+```typescript
+// tests/golden/transport-errors.test.ts
+describe('transport error messages', () => {
+  it('shows helpful message for missing AWS credentials', async () => {
+    // Setup: unset AWS credentials, track a file
+    const result = await runBlobsy(['push', 'data/model.bin'], {
+      env: { ...process.env, AWS_ACCESS_KEY_ID: undefined }
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatchSnapshot()
+    // Snapshot includes:
+    // - "Unable to locate credentials"
+    // - "aws configure" suggestion
+    // - Link to AWS docs
+  })
+
+  it('shows helpful message for wrong bucket/region', async () => {
+    // Setup: configure backend with non-existent bucket
+    const result = await runBlobsy(['pull', 'data/model.bin'])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatchSnapshot()
+    // Snapshot includes:
+    // - "NoSuchBucket" error
+    // - Bucket name and region from config
+    // - Suggestion to verify with aws s3 ls
+  })
+
+  // ... tests for all error scenarios listed above
+})
+```
+
+**Snapshot maintenance:**
+- Error message snapshots are committed to the repo
+- CI fails if error messages change unexpectedly
+- Intentional error message improvements require explicit snapshot updates
+- Ensures error UX remains consistent and helpful across releases
+
+**Error message quality checklist:**
+
+Every error message must:
+- ✓ Show the failed file path and size
+- ✓ Show the exact command that failed (with variables expanded)
+- ✓ Show the full error output (both stdout and stderr)
+- ✓ Categorize the error (authentication, network, permission, etc.)
+- ✓ Suggest concrete next steps for resolution
+- ✓ Link to relevant documentation
+- ✓ Work correctly in both human-readable and `--json` output modes
 
 ## V1 Scope
 
