@@ -2,6 +2,7 @@
 sandbox: true
 env:
   BLOBSY_BACKEND_URL: ""
+  BLOBSY_TRUST_ALL: "1"
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/another-file.txt

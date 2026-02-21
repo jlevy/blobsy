@@ -34,6 +34,7 @@ Commands:
   hooks <action>         Manage pre-commit hook
   check-unpushed         Find committed refs with missing blobs
   pre-push-check         Verify all refs have remote blobs (CI)
+  trust                  Trust current repo for command backend execution
   help [command]         Display help for command
 ? 0
 ```

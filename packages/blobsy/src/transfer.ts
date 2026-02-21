@@ -24,6 +24,7 @@ import { parseBackendUrl, resolveLocalPath } from './backend-url.js';
 import { LocalBackend } from './backend-local.js';
 import { CommandBackend } from './backend-command.js';
 import { S3Backend } from './backend-s3.js';
+import { isRepoTrusted } from './trust.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
 import { getCompressConfig } from './config.js';
@@ -97,13 +98,24 @@ export function createBackend(config: ResolvedBackendConfig, repoRoot: string): 
       const remotePath = resolveLocalPath(config.path ?? '', repoRoot);
       return new LocalBackend(remotePath);
     }
-    case 'command':
+    case 'command': {
+      // Command backends from repo config require explicit trust
+      const envUrl = process.env.BLOBSY_BACKEND_URL;
+      const trustAll = process.env.BLOBSY_TRUST_ALL === '1';
+      if (!envUrl && !trustAll && !isRepoTrusted(repoRoot)) {
+        throw new ValidationError(
+          ".blobsy.yml specifies a 'command' backend, which can execute arbitrary shell commands. " +
+            'This is not allowed from repo config by default.',
+          ['To trust this repo: blobsy trust', 'Or configure the backend in ~/.blobsy.yml'],
+        );
+      }
       return new CommandBackend({
         pushCommand: config.push_command,
         pullCommand: config.pull_command,
         existsCommand: config.exists_command,
         bucket: config.bucket,
       });
+    }
     case 's3': {
       const parsed = config.url ? parseBackendUrl(config.url) : undefined;
       return new S3Backend({
