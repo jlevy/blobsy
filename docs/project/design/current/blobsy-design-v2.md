@@ -1084,6 +1084,87 @@ blobsy rm data/model.bin.yref   # Also works (same result)
 - `blobsy rm`: Deletes local file + stops tracking (permanent removal)
 - `blobsy untrack`: Stops tracking, keeps local file (you want to manage it yourself)
 
+### `blobsy mv` (V1)
+
+Rename or move a tracked file.
+This fixes a critical gap: `git mv` only moves the `.yref` but leaves the payload at the
+old location, causing constant drift.
+
+**V1 behavior (files only):**
+
+```bash
+$ blobsy mv data/model-v1.bin data/model-v2.bin
+Moved: data/model-v1.bin → data/model-v2.bin
+Moved: data/model-v1.bin.yref → data/model-v2.bin.yref
+Updated .gitignore (removed old entry, added new entry)
+
+Next: Run 'git add -A && git commit -m "Rename model"'
+```
+
+**Path specifications:**
+
+Both the original file path and `.yref` path are accepted:
+
+```bash
+blobsy mv data/old.bin data/new.bin        # Works
+blobsy mv data/old.bin.yref data/new.bin   # Also works (same result)
+```
+
+**What it does:**
+
+1. Verify source is tracked (has `.yref`)
+2. Verify dest doesn’t already exist (neither file nor `.yref`)
+3. Move local payload: `source → dest`
+4. Move ref file: `source.yref → dest.yref`
+5. Update `.gitignore` (remove source entry, add dest entry)
+6. Preserve `remote_key` in the `.yref` (no re-upload needed)
+
+**Key design decision:** V1 always preserves the `remote_key`. Rationale:
+
+- Content hasn’t changed → no need to re-upload
+- Avoids orphaning blobs at old keys
+- Simpler implementation
+- Works correctly for pure content-addressable templates
+- For path-based templates, the old path is “frozen” in the remote key (acceptable
+  tradeoff for V1)
+
+**Multi-user workflow:**
+
+```bash
+# User A renames a file
+$ blobsy mv data/model-v1.bin data/model-v2.bin
+$ git add -A
+$ git commit -m "Rename model-v1 to model-v2"
+$ git push
+
+# User B pulls the changes
+$ git pull
+# .yref renamed but payload still at old location
+
+$ blobsy status
+⚠ data/model-v2.bin.yref points to missing file
+  Expected: data/model-v2.bin
+  Found: data/model-v1.bin (at old location)
+  Run: blobsy mv data/model-v1.bin data/model-v2.bin
+
+$ blobsy mv data/model-v1.bin data/model-v2.bin
+# Now in sync
+```
+
+**V1 limitations (deferred to V2):**
+
+- No directory moves (only individual files)
+- No `--new-key` flag (always preserves `remote_key`)
+- No automatic move detection on `blobsy pull`
+
+**V2 enhancements:**
+
+| Feature | Description |
+| --- | --- |
+| `blobsy mv --new-key` | Regenerate `remote_key` based on new path (requires re-upload) |
+| `blobsy mv dir1/ dir2/` | Recursive directory moves (implemented on top of V1 file move) |
+| Auto-detection | `blobsy pull` detects moved `.yref` files and fixes payload paths automatically |
+
 ### `blobsy sync`
 
 The primary sync command.
@@ -1163,10 +1244,10 @@ Show the state of all tracked files.
 
 ```bash
 $ blobsy status
-  data/bigfile.zip              ok
-  data/research/report.md       modified (local != ref)
-  data/research/raw/resp.json   missing locally
-  data/research/raw/data.parq   ok (not pushed)
+  data/bigfile.zip              ok (500 MB)
+  data/research/report.md       modified (local != ref) (12 KB)
+  data/research/raw/resp.json   missing locally (1.2 MB)
+  data/research/raw/data.parq   ok (not pushed) (45 MB)
 ```
 
 What it does:
@@ -1174,8 +1255,62 @@ What it does:
 1. Find all `.yref` files in the repo.
 2. For each, compare local file hash against the ref’s `sha256`.
 3. Report: ok, modified, missing, not pushed (no `remote_key`).
+4. Show human-readable file sizes from `.yref` metadata.
 
 No network access. The ref file has everything needed.
+
+**V2 enhancement:** File sizes shown in human-readable format (KB, MB, GB) for all
+tracked files. Sizes are read from `.yref` metadata, so this remains fully offline.
+
+### `blobsy stats`
+
+Show aggregate statistics across all tracked files.
+**Fully offline.**
+
+```bash
+$ blobsy stats
+
+Repository: /Users/alice/projects/ml-research
+Backend: s3 (bucket: my-datasets, prefix: ml-research/)
+
+Tracked files by status:
+  ✓ Fully synced (committed + uploaded):        8 files    (2.1 GB)
+  ○ Not committed, not synced:                  2 files    (500 MB)
+  ◐ Committed, not synced:                      3 files    (1.2 GB)
+  ◑ Not committed, synced:                      1 file     (45 MB)
+  ~ Modified locally:                           2 files    (850 MB)
+  ? Missing locally:                            1 file     (120 MB)
+  ⊗ Staged for deletion:                        1 file     (300 MB)
+  ────────────────────────────────────────────────────────────────
+  Total tracked:                                18 files   (5.1 GB)
+
+Actions needed:
+  Run 'blobsy track' to update 2 modified files
+  Run 'blobsy push' to sync 3 files (1.2 GB)
+  Run 'blobsy pull' to restore 1 missing file (120 MB)
+  Run 'git add -A && git commit' to commit 3 refs and finalize deletion
+```
+
+What it does:
+
+1. Scan all `.yref` files in the repository.
+2. Classify each file by its state (using the same symbols as `blobsy status`).
+3. Aggregate counts and total sizes per state.
+4. Show total tracked files and storage usage.
+5. Suggest next actions based on current state.
+
+**Use cases:**
+- Quick health check of the repository
+- See total storage being tracked
+- Identify how many files need push/pull/commit
+- Understand distribution of file states
+
+**Flags:**
+- `--json` - Machine-readable JSON output with per-state breakdowns
+- `--verbose` - Show distribution by directory
+
+**V2 feature:** First introduced in V2. Complements `blobsy status` (per-file detail)
+with aggregate rollup view.
 
 ### `blobsy verify`
 
@@ -1196,20 +1331,103 @@ For definitive integrity verification.
 
 ### `blobsy doctor`
 
-Diagnostic command that prints resolved configuration and detected issues:
+Comprehensive diagnostic and health check command.
+**V2 enhancement:** Expanded to include common error detection, troubleshooting advice,
+and integration validation.
 
 ```bash
 $ blobsy doctor
+
+=== CONFIGURATION ===
 Backend: s3 (bucket: my-datasets, prefix: project-v1/, region: us-east-1)
-Sync tools: aws-cli (detected at /usr/local/bin/aws), rclone (not found)
-Key template: sha256/{content_sha256}
-Tracked files: 12 (.yref files found)
-Stat cache: 12 entries, 0 stale
-Issues: none
+Key template: {iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}
+Remote layout: Timestamp+Hash (default, recommended)
+
+Sync tools:
+  ✓ aws-cli v2.13.5 (detected at /usr/local/bin/aws)
+  ✗ rclone (not found)
+  → Using: aws-cli
+
+Compression: zstd (via Node.js built-in)
+Externalization threshold: 1 MB (files below this stay in git)
+
+=== REPOSITORY STATE ===
+Git repository: /Users/alice/projects/ml-research
+Branch: main (clean working tree)
+
+Tracked files: 18 total (5.1 GB)
+  ✓ 8 fully synced (2.1 GB)
+  ◐ 3 committed, not synced (1.2 GB)
+  ~ 2 modified locally (850 MB)
+  ? 1 missing locally (120 MB)
+
+Stat cache: 18 entries, 0 stale, 245 KB
+Trash: 3 expired refs (last GC: never)
+
+=== CONNECTIVITY ===
+✓ Backend reachable (s3://my-datasets/project-v1/)
+✓ Credentials valid (AWS profile: default)
+✓ Test upload: ok (wrote + deleted 1 KB test object)
+
+=== INTEGRITY CHECKS ===
+✓ All .yref files valid YAML
+✓ All .yref format versions supported (blobsy-yref/0.1)
+✓ No orphaned .gitignore entries
+✓ No .yref files missing corresponding .gitignore entries
+⚠ 2 files modified locally (hash mismatch with .yref)
+  → Run 'blobsy track <path>' to update refs
+
+=== COMMON ISSUES ===
+No issues detected.
+
+=== TROUBLESHOOTING TIPS ===
+• Modified files: Run 'blobsy track <path>' to update .yref after changes
+• Missing files: Run 'blobsy pull <path>' to restore from remote
+• Uncommitted refs: Run 'git add -A && git commit' after track/push
+• Sync failures: Check 'blobsy doctor' for credential/connectivity issues
+• Large gitignore: Normal (1 line per tracked file in blobsy-managed block)
+
+For detailed help: https://github.com/jlevy/blobsy/docs
 ```
 
-Checks: backend reachability, sync tool availability and configuration, credential
-validity, `.yref` consistency.
+**V1 behavior:** Basic configuration and connectivity checks.
+
+**V2 enhancements:**
+1. **Comprehensive state overview** - Includes stats rollup (superset of `blobsy stats`)
+2. **Common error detection** - Detects and reports common configuration mistakes:
+   - Missing `.gitignore` entries for tracked files
+   - Orphaned `.gitignore` entries (file no longer tracked)
+   - Invalid `.yref` files (malformed YAML, unsupported format version)
+   - Uncommitted refs after push (common mistake)
+   - Modified files not re-tracked
+   - Stale stat cache entries
+   - Credential expiration warnings
+3. **Troubleshooting advice** - Context-aware suggestions based on detected issues:
+   - How to fix each detected problem
+   - Links to relevant documentation sections
+   - Common workflows that might have caused the issue
+4. **Integration validation** - Verifies all components work together:
+   - Test upload/download to backend
+   - Compression library availability
+   - Transfer tool version compatibility
+   - Git repository health (no corruption)
+   - `.blobsy/` directory structure valid
+5. **Extensible diagnostics** - New checks added as common errors are discovered in the
+   field
+
+**Flags:**
+- `--fix` - Attempt to automatically fix detected issues (safe repairs only):
+  - Add missing `.gitignore` entries
+  - Remove orphaned `.gitignore` entries
+  - Clean up stale stat cache entries
+  - Remove orphaned temp files (`.blobsy-tmp-*`)
+- `--verbose` - Show detailed diagnostic logs (useful for bug reports)
+- `--json` - Machine-readable output for scripting
+
+**Exit codes:**
+- `0` - All checks passed
+- `1` - Warnings detected (repo functional but suboptimal)
+- `2` - Errors detected (action required before sync operations)
 
 ### `blobsy config`
 
@@ -1226,19 +1444,22 @@ $ blobsy config backend          # show current backend
 SETUP
   blobsy init                          Initialize blobsy in a git repo
   blobsy config [key] [value]          Get/set configuration
-  blobsy doctor                        Diagnose configuration and connectivity
+  blobsy doctor                        Comprehensive diagnostics and health check (V2: enhanced)
+       [--fix]                       Auto-fix detected issues
 
 TRACKING
   blobsy track <path>...               Start tracking a file or directory (creates/updates .yref)
   blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .yref to trash)
   blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
+  blobsy mv <source> <dest>            Rename/move tracked file (V1: files only, preserves remote_key)
 
 SYNC
   blobsy sync [path...]                Bidirectional: track changes, push missing, pull missing
   blobsy push [path...]                Upload local blobs to remote, set remote_key
   blobsy pull [path...]                Download remote blobs to local
        [--force]                     Overwrite local modifications
-  blobsy status [path...]              Show state of all tracked files (○ ◐ ◑ ✓ ~ ? ⊗)
+  blobsy status [path...]              Show state of all tracked files (○ ◐ ◑ ✓ ~ ? ⊗) (V2: with sizes)
+  blobsy stats                         Show aggregate statistics by state (V2: new command)
 
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
@@ -2263,11 +2484,12 @@ the older V1 manifest-based design).
 - Push/pull/sync with pluggable backends and configurable transfer tools
 - Per-file compression via Node.js built-in zstd/gzip/brotli
 - SHA-256 integrity verification
-- Content-addressable garbage collection
+- Content-addressable garbage collection (V2 feature)
 - Hierarchical `.blobsy.yml` configuration with externalization and compression rules
 - Per-file gitignore management
 - Machine-readable `--json` output for agents
-- `blobsy doctor` for diagnostics
+- `blobsy doctor` for basic diagnostics (V2: enhanced with error detection and auto-fix)
+- `blobsy status` for per-file state (V2: enhanced with file sizes)
 - Full file versioning via git history of `.yref` files
 
 ### What blobsy does not do (V1)
@@ -2373,6 +2595,50 @@ These are candidates for future versions if demand warrants.
 
 - **Export/import specification.** `blobsy export` / `blobsy import` for tar.zst
   archives (offline sharing, backup, migration).
+
+- **Enhanced status and stats commands.**
+  - **`blobsy stats` (new command):** Aggregate statistics across all tracked files,
+    grouped by state (✓ ○ ◐ ◑ ~ ? ⊗). Shows file counts and total sizes per state,
+    suggests next actions, and provides a high-level health overview.
+    Fully offline (reads from `.yref` metadata).
+    Use `blobsy stats` for quick repo health check; `blobsy status` for per-file detail.
+  - **`blobsy status` enhancement:** Add human-readable file sizes (KB, MB, GB) to
+    per-file output for consistency with `blobsy stats`.
+
+- **Enhanced `blobsy doctor` diagnostics.** Expand `blobsy doctor` to be a comprehensive
+  health check and troubleshooting tool:
+  - **Aggregate stats rollup** (superset of `blobsy stats`)
+  - **Common error detection:**
+    - Missing `.gitignore` entries for tracked files
+    - Orphaned `.gitignore` entries (file no longer tracked)
+    - Invalid `.yref` files (malformed YAML, unsupported format versions)
+    - Uncommitted refs after push (push-commit coordination gap)
+    - Modified files not re-tracked
+    - Stale stat cache entries
+    - Credential expiration warnings
+  - **Context-aware troubleshooting advice:**
+    - How to fix each detected problem
+    - Links to relevant documentation sections
+    - Common workflows that might have caused the issue
+  - **Integration validation:**
+    - Test upload/download to backend (write + delete test object)
+    - Compression library availability check
+    - Transfer tool version compatibility
+    - Git repository health (no corruption)
+    - `.blobsy/` directory structure validity
+  - **Extensible diagnostics framework:**
+    - New checks added as common errors are discovered in production
+    - Plugin system for custom health checks (future)
+  - **Auto-fix mode:** `blobsy doctor --fix` attempts safe repairs (add missing
+    `.gitignore` entries, remove orphaned entries, clean stale cache, remove orphaned
+    temp files)
+  - **Exit codes:** 0 = all good, 1 = warnings (functional but suboptimal), 2 = errors
+    (action required)
+
+  **Rationale:** `blobsy doctor` becomes the first command to run when something seems
+  wrong. It detects common mistakes (especially the push-without-commit and
+  modify-without-retrack patterns), explains what happened, and suggests fixes.
+  This reduces support burden and helps users self-diagnose issues.
 
 ## What This Design Eliminates
 
