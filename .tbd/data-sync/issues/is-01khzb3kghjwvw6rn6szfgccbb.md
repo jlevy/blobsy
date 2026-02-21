@@ -3,13 +3,15 @@ type: is
 id: is-01khzb3kghjwvw6rn6szfgccbb
 title: Stat cache should use file-per-entry format (eliminates concurrent write conflicts)
 kind: task
-status: in_progress
+status: closed
 priority: 1
-version: 2
+version: 3
 labels: []
 dependencies: []
 created_at: 2026-02-21T05:35:07.792Z
-updated_at: 2026-02-21T05:51:52.123Z
+updated_at: 2026-02-21T11:37:43.897Z
+closed_at: 2026-02-21T11:37:43.895Z
+close_reason: Stat cache uses file-per-entry format with 2-char prefix sharding, atomic writes, no concurrent write conflicts.
 ---
 **Current design:** Single JSON file at `.blobsy/stat-cache.json`
 - Concurrent `blobsy` processes: read entire file, update entries, write back
