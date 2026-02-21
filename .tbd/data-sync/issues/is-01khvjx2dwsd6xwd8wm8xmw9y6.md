@@ -3,9 +3,9 @@ type: is
 id: is-01khvjx2dwsd6xwd8wm8xmw9y6
 title: Design spec review issues (rounds 1-3)
 kind: epic
-status: open
+status: closed
 priority: 1
-version: 29
+version: 30
 labels: []
 dependencies:
   - type: blocks
@@ -63,5 +63,7 @@ dependencies:
   - type: blocks
     target: is-01khvk2tmd247ca157d6h4b5wg
 created_at: 2026-02-19T18:34:24.571Z
-updated_at: 2026-02-20T04:14:07.283Z
+updated_at: 2026-02-21T19:20:56.133Z
+closed_at: 2026-02-21T19:20:56.131Z
+close_reason: All design review rounds complete. Doc-sync issues from latest review all resolved.
 ---

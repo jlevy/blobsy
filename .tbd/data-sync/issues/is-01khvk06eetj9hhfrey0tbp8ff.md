@@ -5,9 +5,10 @@ title: "Branch name sanitization: define normalization rules for S3 key safety"
 kind: task
 status: open
 priority: 1
-version: 1
-labels: []
+version: 2
+labels:
+  - phase2
 dependencies: []
 created_at: 2026-02-19T18:36:06.990Z
-updated_at: 2026-02-19T18:36:06.990Z
+updated_at: 2026-02-21T19:20:59.737Z
 ---
