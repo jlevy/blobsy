@@ -23,6 +23,7 @@ before: |
     algorithm: none
   YAML
   git add -A && git commit -q -m "init"
+  npx tsx $FIXTURE exists warmup-key || true
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -32,7 +33,8 @@ before: |
 
 ```console
 $ blobsy push data/model.bin
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
@@ -56,14 +58,15 @@ hello blobsy
 
 ```console
 $ blobsy push data/model.bin
-...
+  data/model.bin  already pushed
+Done: 0 pushed.
 ? 0
 ```
 
 # Verify ref was updated with remote_key
 
 ```console
-$ grep -c remote_key data/model.bin.yref
-1
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```

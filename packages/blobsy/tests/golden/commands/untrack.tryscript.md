@@ -43,6 +43,15 @@ gone
 ? 0
 ```
 
+# Verify gitignore updated after untrack
+
+```console
+$ cat data/.gitignore
+# >>> blobsy-managed (do not edit) >>>
+# <<< blobsy-managed <<<
+? 0
+```
+
 # Verify trash has the ref
 
 ```console
@@ -98,6 +107,15 @@ file preserved
 ```console
 $ test -f data/research/data.bin.yref && echo "ref exists" || echo "ref gone"
 ref gone
+? 0
+```
+
+# Verify research gitignore cleaned up
+
+```console
+$ cat data/research/.gitignore
+# >>> blobsy-managed (do not edit) >>>
+# <<< blobsy-managed <<<
 ? 0
 ```
 

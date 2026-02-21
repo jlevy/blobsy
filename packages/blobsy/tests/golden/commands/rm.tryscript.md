@@ -45,6 +45,16 @@ gone
 ? 0
 ```
 
+# Verify gitignore updated after rm
+
+```console
+$ cat data/.gitignore
+# >>> blobsy-managed (do not edit) >>>
+model.bin
+# <<< blobsy-managed <<<
+? 0
+```
+
 # rm --local: delete local file only, keep .yref
 
 ```console
@@ -80,7 +90,7 @@ Deleted local file
 ? 0
 ```
 
-# Verify directory removal
+# Verify directory cleanup after recursive rm
 
 ```console
 $ find data/old/ -type f 2>/dev/null | sort
@@ -92,7 +102,7 @@ data/old/.gitignore
 
 ```console
 $ blobsy rm data/ 2>&1
-[..]
+Error: data is a directory. Use --recursive to remove all files in it.
 ? 1
 ```
 

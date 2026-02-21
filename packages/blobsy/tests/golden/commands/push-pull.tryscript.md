@@ -17,11 +17,11 @@ before: |
   blobsy track data/dataset.csv
   git add -A && git commit -q -m "track files"
 ---
-# Remote store before any push
+# Verify no remote_key in ref before push
 
 ```console
-$ find "$BLOBSY_TEST_REMOTE" | sort
-...
+$ grep remote_key data/model.bin.yref || echo "no remote_key"
+no remote_key
 ? 0
 ```
 
@@ -29,14 +29,24 @@ $ find "$BLOBSY_TEST_REMOTE" | sort
 
 ```console
 $ blobsy push data/model.bin
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
-# Remote store after push -- blob appears
+# Verify ref updated with remote_key after push
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f -name '*.bin*')"
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
+? 0
+```
+
+# Remote store after push -- blob exists
+
+```console
+$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f -name '*.bin*')" && echo "blob exists"
+blob exists
 ? 0
 ```
 
@@ -44,15 +54,25 @@ $ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f -name '*.bin*')"
 
 ```console
 $ blobsy push
-...
+  data/model.bin  already pushed
+  data/dataset.csv ([SIZE] B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
-# Verify ref was updated with remote_key
+# Verify both refs have remote_key
 
 ```console
-$ grep -c remote_key data/model.bin.yref
+$ grep -c remote_key data/dataset.csv.yref
 1
+? 0
+```
+
+# Both refs have remote_key (proving both pushed)
+
+```console
+$ grep -l remote_key data/*.yref | wc -l | tr -d ' '
+2
 ? 0
 ```
 
@@ -65,11 +85,12 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin ([SIZE] B) - pulled
+Done: 1 pulled.
 ? 0
 ```
 
-# Verify pulled content
+# Verify pulled content matches original
 
 ```console
 $ cat data/model.bin
@@ -77,11 +98,12 @@ hello blobsy
 ? 0
 ```
 
-# Pull when file already matches
+# Pull when file already matches (no-op)
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin  already up to date
+Done: 0 pulled.
 ? 0
 ```
 
@@ -94,12 +116,21 @@ $ echo "new content" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-...
+Updated data/model.bin.yref (hash changed)
 ? 0
 ```
 
 ```console
 $ blobsy push data/model.bin
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
+? 0
+```
+
+# Verify new push updated remote_key
+
+```console
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```

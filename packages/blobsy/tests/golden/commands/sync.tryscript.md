@@ -22,6 +22,15 @@ before: |
 ```console
 $ blobsy sync
 ...
+Sync complete: 2 pushed, 0 pulled, 0 errors.
+? 0
+```
+
+# Both refs have remote_key after sync
+
+```console
+$ grep -l remote_key data/*.yref | wc -l | tr -d ' '
+2
 ? 0
 ```
 
@@ -30,6 +39,7 @@ $ blobsy sync
 ```console
 $ blobsy sync
 ...
+Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```
 
@@ -42,13 +52,22 @@ $ echo "updated model" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-[..]
+Updated data/model.bin.yref (hash changed)
 ? 0
 ```
 
 ```console
 $ blobsy sync
 ...
+Sync complete: 1 pushed, 0 pulled, 0 errors.
+? 0
+```
+
+# Verify updated ref has remote_key
+
+```console
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -62,13 +81,22 @@ $ rm data/dataset.csv
 ```console
 $ blobsy sync
 ...
+Sync complete: 0 pushed, 1 pulled, 0 errors.
 ? 0
 ```
 
-# Verify pulled file
+# Verify pulled file content
 
 ```console
 $ cat data/dataset.csv
 second file
+? 0
+```
+
+# Both files present after full sync
+
+```console
+$ test -f data/model.bin && test -f data/dataset.csv && echo "both present"
+both present
 ? 0
 ```

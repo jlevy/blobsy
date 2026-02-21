@@ -21,6 +21,7 @@ before: |
 ```console
 $ blobsy status
 ...
+1 tracked file
 ? 0
 ```
 
@@ -49,7 +50,16 @@ Added data/results.csv to .gitignore
 
 ```console
 $ blobsy push data/results.csv
-...
+  data/results.csv ([SIZE] B) - pushed
+Done: 1 pushed.
+? 0
+```
+
+# Verify results.csv has remote_key after push
+
+```console
+$ grep remote_key data/results.csv.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -63,6 +73,7 @@ $ git add -A && git commit -q -m "add results"
 ```console
 $ blobsy status
 ...
+2 tracked files
 ? 0
 ```
 
@@ -84,6 +95,7 @@ $ git merge feature/new-data -q
 ```console
 $ blobsy status
 ...
+2 tracked files
 ? 0
 ```
 
@@ -92,6 +104,7 @@ $ blobsy status
 ```console
 $ blobsy sync
 ...
+Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```
 

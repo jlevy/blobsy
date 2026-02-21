@@ -22,6 +22,7 @@ before: |
 ```console
 $ blobsy check-unpushed
 ...
+2 files not pushed.
 ? 1
 ```
 
@@ -29,13 +30,15 @@ $ blobsy check-unpushed
 
 ```console
 $ blobsy push data/model.bin
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
 ```console
 $ blobsy check-unpushed
 ...
+1 file not pushed.
 ? 1
 ```
 
@@ -44,6 +47,7 @@ $ blobsy check-unpushed
 ```console
 $ blobsy push
 ...
+Done: 1 pushed.
 ? 0
 ```
 

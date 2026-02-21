@@ -36,13 +36,15 @@ $ git add -A && git commit -q -m "track files"
 ```console
 $ blobsy push
 ...
+Done: 6 pushed.
 ? 0
 ```
 
-# Remote has blobs
+# All 6 refs have remote_key after push
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f)"
+$ grep -rl remote_key data/ --include='*.yref' | wc -l | tr -d ' '
+6
 ? 0
 ```
 
@@ -70,10 +72,11 @@ $ rm data/models/model-1.bin data/datasets/data-2.bin
 ```console
 $ blobsy sync
 ...
+Sync complete: 0 pushed, 2 pulled, 0 errors.
 ? 0
 ```
 
-# Everything is back
+# Verify pulled content
 
 ```console
 $ cat data/models/model-1.bin

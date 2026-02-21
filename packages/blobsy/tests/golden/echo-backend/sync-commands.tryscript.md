@@ -36,6 +36,7 @@ before: |
 ```console
 $ blobsy sync --skip-health-check
 ...
+Sync complete: 2 pushed, 0 pulled, 0 errors.
 ? 0
 ```
 
@@ -57,6 +58,7 @@ $ rm data/model.bin
 ```console
 $ blobsy sync --skip-health-check
 ...
+Sync complete: 0 pushed, 1 pulled, 0 errors.
 ? 0
 ```
 

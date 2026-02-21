@@ -26,7 +26,16 @@ $ blobsy pre-push-check
 
 ```console
 $ blobsy push
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
+? 0
+```
+
+# Verify push set remote_key
+
+```console
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 

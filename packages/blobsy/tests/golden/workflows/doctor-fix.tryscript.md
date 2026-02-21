@@ -35,7 +35,9 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor
-...
+  ✗  data/model.bin: missing from .gitignore
+
+1 issue found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -43,15 +45,17 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
-...
+  ✓ Fixed  data/model.bin: added missing .gitignore entry
+
+All issues fixed.
 ? 0
 ```
 
 # Verify the fix -- gitignore restored
 
 ```console
-$ cat data/.gitignore
-...
+$ grep model.bin data/.gitignore
+model.bin
 ? 0
 ```
 

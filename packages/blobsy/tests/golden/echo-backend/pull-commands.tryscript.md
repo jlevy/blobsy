@@ -41,7 +41,8 @@ missing
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin ([SIZE] B) - pulled
+Done: 1 pulled.
 ? 0
 ```
 
@@ -57,6 +58,7 @@ hello blobsy
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin  already up to date
+Done: 0 pulled.
 ? 0
 ```

@@ -89,37 +89,62 @@ data/model.bin already tracked (unchanged)
 # Modify the file and re-track
 
 ```console
-$ echo "updated content for model" > data/model.bin blobsy track data/model.bin
+$ echo "updated content for model" > data/model.bin
 ? 0
 ```
 
-# Verify updated ref
+```console
+$ blobsy track data/model.bin
+Updated data/model.bin.yref (hash changed)
+? 0
+```
+
+# Verify ref updated with new hash and size
 
 ```console
-$ cat data/model.bin.yref
-# blobsy -- https://github.com/jlevy/blobsy
-# Run: blobsy status | blobsy --help
-
-format: blobsy-yref/0.1
-hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934
-size: 13
+$ grep -E 'hash|size' data/model.bin.yref
+hash: [HASH]
+size: [SIZE]
 ? 0
 ```
 
 # Track via .yref path (equivalent to file path)
 
 ```console
-$ echo "hello blobsy" > data/model.bin blobsy track data/model.bin.yref
+$ echo "hello blobsy" > data/model.bin
+? 0
+```
+
+```console
+$ blobsy track data/model.bin.yref
+Updated data/model.bin.yref (hash changed)
 ? 0
 ```
 
 # Track a directory
 
 ```console
-$ mkdir -p data/research cp small-file.txt data/research/report.bin cp another-file.txt data/research/data.bin blobsy track data/research/
-mkdir: small-file.txt: File exists
-mkdir: another-file.txt: File exists
-? 1
+$ mkdir -p data/research
+? 0
+```
+
+```console
+$ cp small-file.txt data/research/report.bin
+? 0
+```
+
+```console
+$ cp another-file.txt data/research/data.bin
+? 0
+```
+
+```console
+$ blobsy track data/research/
+Scanning data/research/...
+  data/research/data.bin (  12 B)  -> tracked
+  data/research/report.bin (  13 B)  -> tracked
+2 files tracked.
+? 0
 ```
 
 # Filesystem after directory tracking -- each file gets its own .yref
@@ -131,17 +156,23 @@ data/.gitignore
 data/model.bin
 data/model.bin.yref
 data/research
+data/research/.gitignore
 data/research/data.bin
+data/research/data.bin.yref
 data/research/report.bin
+data/research/report.bin.yref
 ? 0
 ```
 
-# Verify directory gitignore (per-directory, not global)
+# Verify directory gitignore (per-directory, manages files in that directory)
 
 ```console
 $ cat data/research/.gitignore
-cat: data/research/.gitignore: No such file or directory
-? 1
+# >>> blobsy-managed (do not edit) >>>
+data.bin
+report.bin
+# <<< blobsy-managed <<<
+? 0
 ```
 
 # Track directory again (idempotent)
@@ -149,6 +180,8 @@ cat: data/research/.gitignore: No such file or directory
 ```console
 $ blobsy track data/research/
 Scanning data/research/...
-0 files tracked.
+  data/research/data.bin (  12 B)  -> already tracked (unchanged)
+  data/research/report.bin (  13 B)  -> already tracked (unchanged)
+0 files tracked, 2 unchanged.
 ? 0
 ```

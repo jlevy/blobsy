@@ -21,6 +21,7 @@ before: |
 ```console
 $ blobsy status
 ...
+1 tracked file
 ? 0
 ```
 
@@ -35,21 +36,30 @@ $ echo "user A changes" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-[..]
+Updated data/model.bin.yref (hash changed)
 ? 0
 ```
 
 ```console
 $ blobsy push --force data/model.bin
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
+? 0
+```
+
+# Verify push stored blob in remote
+
+```console
+$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f)" && echo "remote has blobs"
+remote has blobs
 ? 0
 ```
 
 # Verify force push updated the ref
 
 ```console
-$ grep -c remote_key data/model.bin.yref
-1
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -62,7 +72,8 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-...
+  data/model.bin ([SIZE] B) - pulled
+Done: 1 pulled.
 ? 0
 ```
 
@@ -78,7 +89,8 @@ user A changes
 
 ```console
 $ blobsy verify data/model.bin
-...
+  ✓  data/model.bin  ok
+
 All files verified.
 ? 0
 ```

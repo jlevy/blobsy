@@ -20,6 +20,7 @@ before: |
 ```console
 $ blobsy status
 ...
+1 tracked file
 ? 0
 ```
 
@@ -34,15 +35,15 @@ $ echo "updated model content!!" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-[..]
+Updated data/model.bin.yref (hash changed)
 ? 0
 ```
 
-# Verify ref updated
+# Verify ref updated with new hash
 
 ```console
-$ cat data/model.bin.yref
-...
+$ grep hash data/model.bin.yref
+hash: [HASH]
 ? 0
 ```
 
@@ -50,14 +51,16 @@ $ cat data/model.bin.yref
 
 ```console
 $ blobsy push
-...
+  data/model.bin ([SIZE] B) - pushed
+Done: 1 pushed.
 ? 0
 ```
 
-# Remote now has blobs (content-addressable)
+# Verify push updated the remote_key
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f)"
+$ grep remote_key data/model.bin.yref
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -70,7 +73,8 @@ $ git add -A && git commit -q -m "update model"
 
 ```console
 $ blobsy verify
-...
+  ✓  data/model.bin  ok
+
 All files verified.
 ? 0
 ```
@@ -80,5 +84,6 @@ All files verified.
 ```console
 $ blobsy status
 ...
+1 tracked file
 ? 0
 ```

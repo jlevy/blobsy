@@ -65,6 +65,15 @@ $ git add -A && git commit -q -m "Track data files with blobsy"
 ```console
 $ blobsy push
 ...
+Done: 2 pushed.
+? 0
+```
+
+## Remote store has 2 blobs
+
+```console
+$ find ../remote -type f | wc -l | tr -d ' '
+2
 ? 0
 ```
 
@@ -80,14 +89,7 @@ $ git add -A && git commit -q -m "Update remote keys after push"
 ```console
 $ blobsy status
 ...
-? 0
-```
-
-## Remote store has blobs
-
-```console
-$ find ../remote -type f | wc -l | tr -d ' '
-2
+2 tracked files
 ? 0
 ```
 
@@ -101,6 +103,7 @@ $ rm data/model.bin data/dataset.csv
 ```console
 $ blobsy pull
 ...
+Done: 2 pulled.
 ? 0
 ```
 
