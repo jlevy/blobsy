@@ -61,7 +61,7 @@ Every command that must be implemented for V1, with key behaviors:
 
 | Command | Key Behaviors |
 | --- | --- |
-| `blobsy init <url>` | Create `.blobsy.yml` from URL positional arg (e.g. `s3://bucket/prefix/`, `./remote`) plus optional flags (`--region`, `--endpoint`). Install pre-commit hook. Fully non-interactive: fails with usage error if URL missing on first run. Unrecognized URL schemes rejected with clear error. Idempotent (subsequent runs skip config, install hooks only). |
+| `blobsy init <url>` | Create `.blobsy.yml` from URL positional arg (e.g. `s3://bucket/prefix/`, `local:../blobsy-remote`) plus optional flags (`--region`, `--endpoint`). Install pre-commit hook. Fully non-interactive: fails with usage error if URL missing on first run. Unrecognized URL schemes rejected with clear error. Idempotent (subsequent runs skip config, install hooks only). |
 | `blobsy config [key] [value]` | Get/set configuration values. Show current backend when called as `blobsy config backend`. |
 | `blobsy health` | Check transport backend health (credentials, connectivity). Fail fast with clear error. |
 | `blobsy hooks install\|uninstall` | Manage pre-commit hook. Detect hook managers (Lefthook, Husky, pre-commit). Idempotent. |
@@ -106,9 +106,9 @@ Every command that must be implemented for V1, with key behaviors:
 
 ### Global Flags
 
-Common flags across commands: `--json`, `--verbose`, `--help`, `--force`. `--json` is
-implemented from Stage 1. `--dry-run` (mutating commands) and `--quiet` are deferred to
-Stage 3.
+Common flags across commands: `--json`, `--verbose`, `--help`, `--force`, `--quiet`.
+`--json` and `--quiet` are implemented from Stage 1. `--dry-run` (mutating commands) is
+deferred to Phase 2.
 
 Exit codes: 0 = success, 1 = error, 2 = conflict
 
@@ -155,8 +155,8 @@ manages exit codes, and formats output (human or JSON).
 
 - Fully non-interactive.
   Missing required args produce usage errors with examples, never prompts.
-- Global options: `--json`, `--verbose`, `--help`, `--force`. (`--dry-run` and `--quiet`
-  deferred to Stage 3.)
+- Global options: `--json`, `--verbose`, `--help`, `--force`, `--quiet`. (`--dry-run`
+  deferred to Phase 2.)
 - Exit codes: 0 = success, 1 = error, 2 = conflict.
 - Path specifications: accept original file path (`data/model.bin`), `.yref` path
   (`data/model.bin.yref`), or directory path.
@@ -612,6 +612,7 @@ Used by the echo backend test fixture.
 - Exit code 0 = success; non-zero = failure with categorized error.
 - Security: command backends from repo-level `.blobsy.yml` require explicit trust
   (`blobsy trust`). Only allowed from `~/.blobsy.yml` or trusted repos.
+  Note: `blobsy trust` command implementation is deferred to Phase 2.
 - Uses POSIX `/bin/sh` on Unix, `cmd.exe` on Windows.
 
 #### `transfer.ts` -- Transfer Coordinator
@@ -789,7 +790,19 @@ exec blobsy hook pre-commit
 
 ## Implementation Plan
 
-Implementation is broken into three stages within this plan.
+Implementation was broken into three stages.
+Stages 1 and 2 are complete.
+Stage 3 has been moved to [Phase 2](plan-2026-02-21-blobsy-phase2-v1-completion.md).
+
+### Bead Mapping (Phase 1)
+
+| Stage | Epic Bead | Sub-beads |
+| --- | --- | --- |
+| Stage 1 | `blobsy-k8hi` | `blobsy-w1l4` (1.1 CLI scaffold), `blobsy-gxhh` (1.2 ref+hash), `blobsy-sv0k` (1.3 paths+config+url), `blobsy-lo11` (1.4 gitignore+ext+format), `blobsy-rjm5` (1.5 init), `blobsy-4a1q` (1.6 track), `blobsy-um5u` (1.7 status+verify), `blobsy-gtzl` (1.8 untrack+rm+mv), `blobsy-ca5s` (1.9 config) |
+| Stage 2 | `blobsy-ft7z` | `blobsy-fr3v` (2.1 stat-cache), `blobsy-6dst` (2.2 template+compress), `blobsy-pw2f` (2.3 backends), `blobsy-tm1f` (2.4 transfer), `blobsy-bzx9` (2.5 push+pull), `blobsy-mhwz` (2.6 sync), `blobsy-9uc9` (2.7 health+hooks), `blobsy-228w` (2.8 doctor), `blobsy-7ff6` (2.9 check-unpushed+pre-push), `blobsy-y4gl` (2.10 echo golden), `blobsy-2icq` (2.11 workflow golden), `blobsy-qxvo` (2.12 error+JSON golden) |
+| Stage 3 | -- | Moved to Phase 2 |
+
+All Stage 1 and Stage 2 beads are closed.
 
 ### Stage 1: Foundation + Offline Commands
 
@@ -823,8 +836,8 @@ Build the core primitives and all commands that work without a backend.
 - [x] `blobsy mv` (move payload + ref, update gitignore)
 - [x] `blobsy config` (get/set values)
 
-**Note:** `--json` is implemented for all commands from Stage 1. `--dry-run` and
-`--quiet` are deferred to Stage 3.
+**Note:** `--json` and `--quiet` are implemented for all commands from Stage 1.
+`--dry-run` is deferred to Phase 2.
 
 **Unit tests:**
 
@@ -913,21 +926,22 @@ Implement push, pull, sync, and all supporting commands.
 - [x] `json/sync-json.tryscript.md`
 - [x] `json/doctor-json.tryscript.md`
 
-### Stage 3: Polish + Cloud Backend Prep
+### Stage 3: Polish + Cloud Backend Prep (Moved to Phase 2)
 
-Harden edge cases, finalize error messages, prepare the backend interface for cloud
-backends.
+All Stage 3 items have been moved to
+[Phase 2](plan-2026-02-21-blobsy-phase2-v1-completion.md).
+`--quiet` was already implemented in Stage 1. The remaining items map as follows:
 
-- [ ] Error message quality pass (all errors follow the checklist from testing design)
-- [ ] `--dry-run` support across all mutating commands
-- [ ] `--quiet` support across all commands
-- [ ] Backend interface formalized for easy S3/R2 addition
-- [ ] `errors/auth-errors.tryscript.md` (S3 credential errors)
-- [ ] `errors/permission-errors.tryscript.md`
-- [ ] `errors/network-errors.tryscript.md`
-- [ ] `publint` validation passes
-- [ ] README with usage examples
-- [ ] npm package ready for publishing
+| Phase 1 Stage 3 Item | Phase 2 Stage |
+| --- | --- |
+| Error message quality pass | Stage 1: CLI Polish |
+| `--dry-run` support | Stage 1: CLI Polish |
+| `--quiet` support | Already implemented (Phase 1 Stage 1) |
+| Backend interface formalization | Stage 2: Cloud Backends |
+| Error golden tests (auth, permission, network) | Stage 3: E2E Testing |
+| `publint` validation | Stage 5: Publishing |
+| README with usage examples | Stage 4: Documentation |
+| npm package ready for publishing | Stage 5: Publishing |
 
 ## Golden Test Inventory
 
@@ -1049,8 +1063,8 @@ tryscript run --coverage --merge-lcov coverage/lcov.info tests/golden/
 
 3. **`blobsy init` interactivity:** Resolved: fully non-interactive.
    Backend specified as a URL positional argument (e.g. `s3://bucket/prefix/`,
-   `./remote`). Additional params via flags (`--region`, `--endpoint`). Missing URL on
-   first run produces a usage error with examples (not a prompt).
+   `local:../blobsy-remote`). Additional params via flags (`--region`, `--endpoint`).
+   Missing URL on first run produces a usage error with examples (not a prompt).
    Unrecognized URL schemes are rejected with a clear error listing supported schemes.
    This is agent-friendly, testable via tryscript, and produces clear audit trails.
 

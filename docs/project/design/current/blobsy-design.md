@@ -1664,6 +1664,11 @@ SYNC
 
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
+
+SECURITY
+  blobsy trust                         Trust current repo for command backend execution
+       [--revoke]                    Remove trust for current repo
+       [--list]                      Show trusted repos
 ```
 
 ### Flags (Global)
@@ -2170,10 +2175,9 @@ No secrets are ever stored in `.blobsy.yml` or `.yref` files.
 
 ```bash
 # Setup (one-time)
-$ blobsy init
+$ blobsy init s3://my-datasets/project-v1/ --region us-east-1
 Created .blobsy.yml
-? Bucket: my-datasets
-? Region: us-east-1
+Installed pre-commit hook
 
 # Track files
 $ blobsy track data/model.bin
@@ -2518,8 +2522,10 @@ package as a library.
 Compression uses Node.js built-in `node:zlib` (zstd, gzip, brotli) -- no external
 compression dependencies.
 
-**Minimum Node.js version:** Node.js 22.11.0 or later (required for `node:zlib` zstd
-support). Older versions can still use gzip or brotli compression.
+**Minimum Node.js version:** Node.js 22.15.0 or later (required for `node:zlib` zstd
+support and LTS stability).
+See `engines` in `package.json` for the authoritative minimum.
+Development and CI use Node.js 24 (see `.nvmrc`).
 
 ### No Daemon
 

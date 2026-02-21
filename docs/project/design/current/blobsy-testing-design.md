@@ -480,11 +480,11 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 
 ```console
 $ cat data/model.bin.yref
-# blobsy ref file -- do not edit manually.
-# See: blobsy status, blobsy verify, blobsy --help
-blobsy-yref/0.1:
-  hash: [HASH]
-  size: 13
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: [HASH]
+size: 13
 ? 0
 ```
 
@@ -517,11 +517,11 @@ Updated data/model.bin.yref (hash changed)
 
 ```console
 $ cat data/model.bin.yref
-# blobsy ref file -- do not edit manually.
-# See: blobsy status, blobsy verify, blobsy --help
-blobsy-yref/0.1:
-  hash: [HASH]
-  size: 26
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: [HASH]
+size: 26
 ? 0
 ```
 
@@ -854,12 +854,12 @@ remote/[REMOTE_KEY]
 
 ```console
 $ cat data/model.bin.yref
-# blobsy ref file -- do not edit manually.
-# See: blobsy status, blobsy verify, blobsy --help
-blobsy-yref/0.1:
-  hash: [HASH]
-  size: 13
-  remote_key: [REMOTE_KEY]
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: [HASH]
+size: 13
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -1117,12 +1117,12 @@ $ git clone -q ../[CWD] .
 
 ```console
 $ cat data/model.bin.yref
-# blobsy ref file -- do not edit manually.
-# See: blobsy status, blobsy verify, blobsy --help
-blobsy-yref/0.1:
-  hash: [HASH]
-  size: 13
-  remote_key: [REMOTE_KEY]
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: [HASH]
+size: 13
+remote_key: [REMOTE_KEY]
 $ test -f data/model.bin && echo "exists" || echo "missing"
 missing
 ? 0
@@ -1459,12 +1459,12 @@ Actions needed:
 $ blobsy track data/model.bin
 Updated data/model.bin.yref (hash changed)
 $ cat data/model.bin.yref
-# blobsy ref file -- do not edit manually.
-# See: blobsy status, blobsy verify, blobsy --help
-blobsy-yref/0.1:
-  hash: [HASH]
-  size: 25
-  remote_key: [REMOTE_KEY]
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: [HASH]
+size: 25
+remote_key: [REMOTE_KEY]
 ? 0
 ```
 
@@ -1735,10 +1735,11 @@ To repair: delete data/model.bin.yref and run 'blobsy track data/model.bin'
 
 ```console
 $ cat > data/model.bin.yref << 'EOF'
-# blobsy ref file -- do not edit manually.
-blobsy-yref/9.0:
-  hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  size: 13
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/9.0
+hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+size: 13
 EOF
 $ blobsy status 2>&1
 Error: Unsupported .yref format: data/model.bin.yref
@@ -1839,7 +1840,7 @@ before: |
 ```console
 $ blobsy status --json
 {
-  "schema_version": "1",
+  "schema_version": "0.1",
   "files": [
     {
       "path": "data/model.bin",
@@ -1869,7 +1870,7 @@ $ blobsy status --json
 $ echo "corrupted" > data/model.bin
 $ blobsy verify --json
 {
-  "schema_version": "1",
+  "schema_version": "0.1",
   "files": [
     {
       "path": "data/model.bin",

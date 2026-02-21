@@ -141,8 +141,7 @@ Blobsy recognizes exactly these URL forms:
 | `local:...` | Local directory | Path after colon; absolute, relative, or `~` |
 
 Anything else -- `http://`, `ftp://`, `hdfs://`, `r2://`, `file://`, a bare path like
-`./remote`, a bare word like `mybucket`, or a misspelled scheme like `S3://` -- is
-rejected:
+`./remote`, or a bare word like `mybucket` -- is rejected:
 
 ```
 Error: Unrecognized backend URL: "r2://my-bucket/prefix/"
@@ -818,7 +817,7 @@ error before attempting any transfers.
 | --- | --- | --- |
 | `s3` | `HeadBucket` or small `ListObjectsV2` (1 item) | Credentials valid, bucket exists, region correct, network reachable |
 | `local` | `stat()` on the target directory | Directory exists and is writable |
-| `command` | Run push_command with a tiny test file (writes + deletes 1 KB test object) | Command syntax valid, remote accessible, credentials work |
+| `command` | Deferred (arbitrary commands may lack a safe, side-effect-free health check) | -- |
 
 **Health check is:**
 - **Fast** - single lightweight operation (< 1 second in normal cases)
