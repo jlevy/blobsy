@@ -186,6 +186,38 @@ export class ValidationError extends BlobsyError {
   }
 }
 
+/**
+ * User-friendly error with optional hint for resolution.
+ * Use this for expected errors (file not found, not tracked, etc.)
+ * Let unexpected errors (bugs) bubble up as-is.
+ */
+export class UserError extends Error {
+  constructor(
+    message: string,
+    public hint?: string,
+    public exitCode = 1,
+  ) {
+    super(message);
+    this.name = 'UserError';
+
+    // Maintain proper stack trace for debugging
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, UserError);
+    }
+  }
+
+  /**
+   * Format for CLI output
+   */
+  format(): string {
+    let output = `✗ ${this.message}`;
+    if (this.hint) {
+      output += `\n  ${this.hint}`;
+    }
+    return output;
+  }
+}
+
 /** Result of a file transfer operation. */
 export interface TransferResult {
   path: string;
@@ -221,6 +253,7 @@ export interface Backend {
   push(localPath: string, remoteKey: string): Promise<void>;
   pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void>;
   exists(remoteKey: string): Promise<boolean>;
+  delete(remoteKey: string): Promise<void>;
   healthCheck(): Promise<void>;
 }
 

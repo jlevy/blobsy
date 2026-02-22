@@ -74,6 +74,16 @@ export class LocalBackend implements Backend {
     return Promise.resolve(existsSync(blobPath));
   }
 
+  async delete(remoteKey: string): Promise<void> {
+    const blobPath = join(this.remoteDir, remoteKey);
+    if (!existsSync(blobPath)) {
+      throw new BlobsyError(`Remote blob not found: ${remoteKey}`, 'not_found', 1, [
+        'The blob may have already been deleted.',
+      ]);
+    }
+    await unlink(blobPath);
+  }
+
   async healthCheck(): Promise<void> {
     try {
       await access(this.remoteDir);

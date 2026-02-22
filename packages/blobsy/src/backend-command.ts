@@ -180,6 +180,11 @@ export class CommandBackend implements Backend {
     return Promise.resolve(commandBlobExists(this.config.existsCommand, vars));
   }
 
+  delete(_remoteKey: string): Promise<void> {
+    // Command backends don't support delete operation
+    return Promise.reject(new Error('Delete operation not supported for command backends'));
+  }
+
   async healthCheck(): Promise<void> {
     // No health check for command backends -- commands are user-defined
   }

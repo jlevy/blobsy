@@ -3,9 +3,10 @@
  * check-unpushed, pre-push-check, hook.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { readFile, unlink } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, isAbsolute } from 'node:path';
 
 import type { Command } from 'commander';
 
@@ -580,11 +581,47 @@ export async function handleHooks(
     const hookDir = join(repoRoot, '.git', 'hooks');
     await ensureDir(hookDir);
     const { writeFile: writeFs, chmod } = await import('node:fs/promises');
-    const hookContent = `#!/bin/sh\n# Installed by: blobsy hooks install\n# To bypass: git commit --no-verify\nexec blobsy hook pre-commit\n`;
+
+    // Detect absolute path to blobsy executable
+    let blobsyPath: string;
+
+    // Option 1: Use process.argv[1] (current executable)
+    const execPath = process.argv[1];
+
+    if (execPath && isAbsolute(execPath)) {
+      blobsyPath = execPath;
+    } else {
+      // Option 2: Try to find blobsy in PATH
+      try {
+        const result = execFileSync('which', ['blobsy'], { encoding: 'utf-8' });
+        blobsyPath = result.trim();
+      } catch {
+        // Fallback: use 'blobsy' and warn user
+        blobsyPath = 'blobsy';
+
+        if (!globalOpts.quiet) {
+          console.warn(
+            '⚠️  Warning: Could not detect absolute path to blobsy executable.\n' +
+              '   Hook will use "blobsy" from PATH.\n' +
+              '   To ensure hooks work, install blobsy globally: pnpm link --global',
+          );
+        }
+      }
+    }
+
+    const hookContent = `#!/bin/sh
+# Installed by: blobsy hooks install
+# To bypass: git commit --no-verify
+exec "${blobsyPath}" hook pre-commit
+`;
     await writeFs(hookPath, hookContent);
     await chmod(hookPath, 0o755);
+
     if (!globalOpts.quiet) {
       console.log('Installed pre-commit hook.');
+      if (blobsyPath !== 'blobsy') {
+        console.log(`  Using executable: ${blobsyPath}`);
+      }
     }
   } else if (action === 'uninstall') {
     if (existsSync(hookPath)) {

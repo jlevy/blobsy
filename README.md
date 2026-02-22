@@ -79,7 +79,7 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy sync [path...]` | Bidirectional sync (push + pull) |
 | `blobsy status [path...]` | Show state of tracked files |
 | `blobsy verify [path...]` | Verify local files match ref hashes |
-| `blobsy rm <path...>` | Remove from tracking and delete local file |
+| `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .yref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
 | `blobsy config [key] [val]` | Get or set configuration |
 | `blobsy health` | Check backend connectivity |
@@ -129,8 +129,8 @@ backends:
     url: local:../blob-storage
 ```
 
-**Note:** Create the directory first: `mkdir -p ../blob-storage` (init doesn’t
-auto-create local directories).
+**Note:** The directory will be created automatically during `blobsy init` if the parent
+directory exists.
 
 ### Custom Command
 
@@ -144,6 +144,11 @@ backends:
 ```
 
 Command backends execute user-configured shell commands for push/pull/exists operations.
+
+**Switching Backends:** If you change the backend URL in `.blobsy.yml`, tracked files
+will continue to reference their existing remote keys.
+To migrate files to a new backend, you must manually re-push them with
+`blobsy push --force`.
 
 ## Externalization Rules
 

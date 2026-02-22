@@ -14,7 +14,7 @@ import { basename, dirname, join, relative } from 'node:path';
 import type { Help } from 'commander';
 import { Command, Option } from 'commander';
 
-import { parseBackendUrl, validateBackendUrl } from './backend-url.js';
+import { parseBackendUrl, validateBackendUrl, resolveLocalPath } from './backend-url.js';
 import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
 import { shouldExternalize } from './externalize.js';
 import {
@@ -180,6 +180,8 @@ function createProgram(): Command {
     .description('Remove tracked files: delete local + move .yref to trash')
     .argument('<path...>', 'Files or directories to remove')
     .option('--local', 'Delete local file only, keep .yref and remote')
+    .option('--remote', 'Also delete blob from backend (requires confirmation)')
+    .option('--force', 'Skip confirmation prompts')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleRm));
 
@@ -349,6 +351,44 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
 
   const parsed = parseBackendUrl(url);
   validateBackendUrl(parsed, repoRoot);
+
+  // Auto-create local backend directory if it doesn't exist
+  if (parsed.type === 'local' && parsed.path) {
+    const absPath = resolveLocalPath(parsed.path, repoRoot);
+
+    if (!existsSync(absPath)) {
+      // Check parent directory exists and is writable
+      const parentDir = dirname(absPath);
+
+      if (!existsSync(parentDir)) {
+        throw new ValidationError(
+          `Cannot create backend directory: ${absPath}\n` +
+            `  Parent directory does not exist: ${parentDir}\n` +
+            `  Create parent first: mkdir -p ${parentDir}`,
+        );
+      }
+
+      try {
+        // Create backend directory
+        await ensureDir(absPath);
+
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(
+            `Created backend directory: ${normalizePath(toRepoRelative(absPath, repoRoot))}`,
+          );
+        }
+      } catch (err: unknown) {
+        const error = err as NodeJS.ErrnoException;
+        if (error.code === 'EACCES') {
+          throw new ValidationError(
+            `Permission denied creating backend directory: ${absPath}\n` +
+              `  Parent directory not writable: ${parentDir}`,
+          );
+        }
+        throw error; // Re-throw unexpected errors
+      }
+    }
+  }
 
   if (globalOpts.dryRun) {
     const actions = [];
@@ -896,8 +936,15 @@ async function handleRm(
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
   const localOnly = Boolean(opts.local);
+  const deleteRemote = Boolean(opts.remote);
+  const force = Boolean(opts.force);
   const recursive = Boolean(opts.recursive);
   const repoRoot = findRepoRoot();
+
+  // Validate flag combinations
+  if (localOnly && deleteRemote) {
+    throw new ValidationError('Cannot use both --local and --remote flags');
+  }
 
   for (const inputPath of paths) {
     const absPath = resolveFilePath(stripYrefExtension(inputPath));
@@ -910,10 +957,10 @@ async function handleRm(
       }
       const yrefFiles = findYrefFiles(absPath, repoRoot);
       for (const rel of yrefFiles) {
-        await rmFile(join(repoRoot, rel), repoRoot, localOnly, globalOpts);
+        await rmFile(join(repoRoot, rel), repoRoot, localOnly, deleteRemote, force, globalOpts);
       }
     } else {
-      await rmFile(absPath, repoRoot, localOnly, globalOpts);
+      await rmFile(absPath, repoRoot, localOnly, deleteRemote, force, globalOpts);
     }
   }
 }
@@ -922,6 +969,8 @@ async function rmFile(
   absPath: string,
   repoRoot: string,
   localOnly: boolean,
+  deleteRemote: boolean,
+  force: boolean,
   globalOpts: GlobalOptions,
 ): Promise<void> {
   const relPath = toRepoRelative(absPath, repoRoot);
@@ -963,6 +1012,72 @@ async function rmFile(
   await ensureDir(trashDir);
   const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
   await rename(refPath, trashPath);
+
+  // Delete from backend if --remote flag set
+  if (deleteRemote) {
+    const yref = await readYRef(trashPath); // Read from trash copy
+
+    if (yref.remote_key) {
+      // Confirmation prompt (unless --force)
+      if (!force && !globalOpts.quiet) {
+        const { createInterface } = await import('node:readline/promises');
+        const rl = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+
+        const answer = await rl.question(
+          `Delete blob from backend?\n` +
+            `  File: ${relPath}\n` +
+            `  Remote key: ${yref.remote_key}\n` +
+            `  This cannot be undone. Continue? (y/N): `,
+        );
+
+        rl.close();
+
+        if (answer.toLowerCase() !== 'y') {
+          if (!globalOpts.quiet) {
+            console.log(
+              'Remote deletion cancelled. Local file and .yref removed, remote blob kept.',
+            );
+          }
+          // Still continue with local cleanup below
+          deleteRemote = false; // Skip backend deletion
+        }
+      }
+
+      // Delete from backend if confirmed or --force
+      if (deleteRemote) {
+        try {
+          const config = await resolveConfig(repoRoot, repoRoot);
+          const { createBackend, resolveBackend } = await import('./transfer.js');
+          if (!config.backends) {
+            throw new ValidationError('No backend configured');
+          }
+          const resolvedBackend = resolveBackend(config);
+          const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+          await backend.delete(yref.remote_key);
+
+          if (!globalOpts.quiet) {
+            if (globalOpts.json) {
+              console.log(formatJsonMessage(`Deleted from backend: ${yref.remote_key}`));
+            } else {
+              console.log(`Deleted from backend: ${yref.remote_key}`);
+            }
+          }
+        } catch (err: unknown) {
+          // Don't fail the whole rm operation if backend deletion fails
+          // Local cleanup already succeeded
+          console.warn(
+            `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
+              `  Remote blob may still exist: ${yref.remote_key}`,
+          );
+        }
+      }
+    } else if (!globalOpts.quiet) {
+      console.log(`Note: File was never pushed (no remote_key), skipping backend deletion`);
+    }
+  }
 
   // Remove from gitignore
   await removeGitignoreEntry(fileDir, fileName);
