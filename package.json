@@ -34,13 +34,14 @@
     "compile-template": "python admin/compile_template.py"
   },
   "devDependencies": {
+    "@20minutes/s3rver": "^4.0.3",
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "lefthook": "^2.1.1",
     "npm-check-updates": "^19.3.2",
     "prettier": "^3.8.1",
-    "tryscript": "^0.1.6",
+    "tryscript": "^0.1.7",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.55.0"

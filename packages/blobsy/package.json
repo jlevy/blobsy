@@ -49,16 +49,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run --dir tests/e2e",
+    "test:e2e": "vitest run --dir tests/e2e --config vitest.e2e.config.ts",
     "publint": "publint",
     "prepack": "pnpm build"
   },
   "devDependencies": {
+    "@20minutes/s3rver": "^4.0.3",
     "@types/node": "^24.0.0",
     "@types/picomatch": "^4.0.2",
     "@vitest/coverage-v8": "^4.0.18",
     "publint": "^0.3.17",
-    "tryscript": "^0.1.6",
+    "tryscript": "^0.1.7",
     "tsdown": "^0.20.3",
     "vitest": "^4.0.18"
   },

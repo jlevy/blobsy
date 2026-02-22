@@ -105,7 +105,7 @@ Run these to assess the repo:
 - .yref pointer files (YAML) are committed to Git
 - Original files are added to .gitignore
 - Blobs stored in content-addressable remote storage (SHA-256)
-- Backends: S3Backend, LocalBackend, CommandBackend (all implement Backend interface)
+- Backends: AwsCliBackend (default for S3), BuiltinS3Backend (SDK fallback), LocalBackend, CommandBackend (all implement Backend interface)
 - Transfer coordinator handles compression, key generation, backend dispatch
 
 ## File layout
