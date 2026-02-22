@@ -1,7 +1,5 @@
 ---
 sandbox: true
-env:
-  BLOBSY_BACKEND_URL: ""
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/another-file.txt
@@ -43,8 +41,9 @@ Sync complete: 2 pushed, 0 pulled, 0 errors.
 # Verify both blobs in mock remote
 
 ```console
-$ find .mock-remote -type f | wc -l | tr -d ' '
-2
+$ find .mock-remote -type f | sort
+.mock-remote/[REMOTE_KEY]
+.mock-remote/[REMOTE_KEY]
 ? 0
 ```
 

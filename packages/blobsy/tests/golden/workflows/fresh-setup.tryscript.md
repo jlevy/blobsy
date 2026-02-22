@@ -2,7 +2,6 @@
 sandbox: true
 env:
   BLOBSY_NO_HOOKS: "1"
-  BLOBSY_BACKEND_URL: ""
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/another-file.txt
@@ -73,8 +72,9 @@ Done: 2 pushed.
 ## Remote store has 2 blobs
 
 ```console
-$ find ../remote -type f | wc -l | tr -d ' '
-2
+$ find ../remote -type f | sort
+../remote/[REMOTE_KEY]
+../remote/[REMOTE_KEY]
 ? 0
 ```
 

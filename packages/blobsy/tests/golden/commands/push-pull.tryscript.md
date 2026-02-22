@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
@@ -29,7 +30,7 @@ no remote_key
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (13 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -45,7 +46,7 @@ remote_key: [REMOTE_KEY]
 # Remote store after push -- blob exists
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f -name '*.bin*')" && echo "blob exists"
+$ test -n "$(find remote -type f -name '*.bin*')" && echo "blob exists"
 blob exists
 ? 0
 ```
@@ -55,7 +56,7 @@ blob exists
 ```console
 $ blobsy push
   data/model.bin  already pushed
-  data/dataset.csv ([SIZE] B) - pushed
+  data/dataset.csv (21 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -85,7 +86,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin ([SIZE] B) - pulled
+  data/model.bin (13 B) - pulled
 Done: 1 pulled.
 ? 0
 ```
@@ -122,7 +123,7 @@ Updated data/model.bin.yref (hash changed)
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (12 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -132,5 +133,45 @@ Done: 1 pushed.
 ```console
 $ grep remote_key data/model.bin.yref
 remote_key: [REMOTE_KEY]
+? 0
+```
+
+# Push via .yref path
+
+```console
+$ echo "yref path test" > data/model.bin
+? 0
+```
+
+```console
+$ blobsy track data/model.bin
+Updated data/model.bin.yref (hash changed)
+? 0
+```
+
+```console
+$ blobsy push data/model.bin.yref
+  data/model.bin (15 B) - pushed
+Done: 1 pushed.
+? 0
+```
+
+# Pull via .yref path
+
+```console
+$ rm data/model.bin
+? 0
+```
+
+```console
+$ blobsy pull data/model.bin.yref
+  data/model.bin (15 B) - pulled
+Done: 1 pulled.
+? 0
+```
+
+```console
+$ cat data/model.bin
+yref path test
 ? 0
 ```

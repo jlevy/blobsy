@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv

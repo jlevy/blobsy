@@ -2,7 +2,6 @@
 sandbox: true
 env:
   BLOBSY_NO_HOOKS: "1"
-  BLOBSY_BACKEND_URL: ""
 before: |
   git init -q -b main
   git config user.name "Blobsy Test"
@@ -64,4 +63,48 @@ Error: Unrecognized backend URL scheme: r2:
 $ blobsy init s3://AB/prefix/ 2>&1
 Error: Bucket name must be 3-63 characters: "AB" in s3://AB/prefix/
 ? 1
+```
+
+# Init with GCS URL
+
+```console
+$ rm .blobsy.yml
+? 0
+```
+
+```console
+$ blobsy init gs://my-bucket/prefix/
+Initialized blobsy in .
+Created .blobsy.yml
+? 0
+```
+
+```console
+$ cat .blobsy.yml
+backends:
+  default:
+    url: gs://my-bucket/prefix/
+? 0
+```
+
+# Init with Azure URL
+
+```console
+$ rm .blobsy.yml
+? 0
+```
+
+```console
+$ blobsy init azure://my-container/prefix/
+Initialized blobsy in .
+Created .blobsy.yml
+? 0
+```
+
+```console
+$ cat .blobsy.yml
+backends:
+  default:
+    url: azure://my-container/prefix/
+? 0
 ```

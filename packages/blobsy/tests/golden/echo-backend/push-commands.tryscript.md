@@ -1,7 +1,5 @@
 ---
 sandbox: true
-env:
-  BLOBSY_BACKEND_URL: ""
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/echo-backend.ts
@@ -32,7 +30,7 @@ before: |
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (13 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -40,8 +38,8 @@ Done: 1 pushed.
 # Verify the blob landed in the mock remote
 
 ```console
-$ find .mock-remote -type f | wc -l | tr -d ' '
-1
+$ find .mock-remote -type f | sort
+.mock-remote/[REMOTE_KEY]
 ? 0
 ```
 

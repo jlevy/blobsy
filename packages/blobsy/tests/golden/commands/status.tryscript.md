@@ -94,11 +94,35 @@ $ blobsy status
 ? 0
 ```
 
+# Status after push shows synced
+
+```console
+$ blobsy push
+  data/dataset.csv (21 B) - pushed
+  data/model.bin (13 B) - pushed
+Done: 2 pushed.
+? 0
+```
+
+```console
+$ git add -A && git commit -q -m "push"
+? 0
+```
+
+```console
+$ blobsy status
+  ✓  data/dataset.csv  synced
+  ✓  data/model.bin  synced
+
+2 tracked files
+? 0
+```
+
 # Status for a specific path
 
 ```console
 $ blobsy status data/dataset.csv
-  ○  data/dataset.csv  not pushed
+  ✓  data/dataset.csv  synced
 
 1 tracked file
 ? 0

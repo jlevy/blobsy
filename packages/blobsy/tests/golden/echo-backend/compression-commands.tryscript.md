@@ -49,7 +49,7 @@ $ git add -A && git commit -q -m "track"
 
 ```console
 $ blobsy push data/readme.txt
-  data/readme.txt ([SIZE] B) - pushed
+  data/readme.txt (22 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -59,15 +59,15 @@ Done: 1 pushed.
 ```console
 $ grep compressed data/readme.txt.yref
 compressed: zstd
-compressed_size: [SIZE]
+compressed_size: 22
 ? 0
 ```
 
 # The mock remote has the compressed blob
 
 ```console
-$ find .mock-remote -type f | wc -l | tr -d ' '
-1
+$ find .mock-remote -type f | sort
+.mock-remote/[REMOTE_KEY]
 ? 0
 ```
 
@@ -80,7 +80,7 @@ $ rm data/readme.txt
 
 ```console
 $ blobsy pull data/readme.txt
-  data/readme.txt ([SIZE] B) - pulled
+  data/readme.txt (13 B) - pulled
 Done: 1 pulled.
 ? 0
 ```

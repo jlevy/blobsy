@@ -11,6 +11,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
 ---
@@ -46,5 +47,26 @@ $ blobsy --quiet --json status
     "total": 1
   }
 }
+? 0
+```
+
+# Quiet push suppresses output
+
+```console
+$ blobsy push --quiet
+? 0
+```
+
+# Quiet pull suppresses output
+
+```console
+$ blobsy pull --quiet
+? 0
+```
+
+# Quiet sync suppresses output
+
+```console
+$ blobsy sync --quiet
 ? 0
 ```

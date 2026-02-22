@@ -60,3 +60,39 @@ Error: Unrecognized backend URL scheme: r2:
     local:../blobsy-remote
 ? 1
 ```
+
+# Push with malformed .yref fails
+
+```console
+$ echo "not valid yaml %%%" > data/model.bin.yref
+? 0
+```
+
+```console
+$ blobsy push data/model.bin 2>&1
+Error: Invalid .yref file (not an object): [LOCAL_PATH]/data/model.bin.yref
+? 1
+```
+
+# Status with malformed .yref
+
+```console
+$ blobsy status 2>&1
+Error: Invalid .yref file (not an object): [LOCAL_PATH]/data/model.bin.yref
+? 1
+```
+
+# Restore valid .yref
+
+```console
+$ rm data/model.bin.yref
+? 0
+```
+
+```console
+$ blobsy track data/model.bin
+Tracking data/model.bin
+Created data/model.bin.yref
+Added data/model.bin to .gitignore
+? 0
+```

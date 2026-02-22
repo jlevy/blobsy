@@ -8,6 +8,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data/models data/datasets
   for i in 1 2 3; do echo "model $i" > data/models/model-$i.bin; done
   for i in 1 2 3; do echo "dataset $i" > data/datasets/data-$i.bin; done

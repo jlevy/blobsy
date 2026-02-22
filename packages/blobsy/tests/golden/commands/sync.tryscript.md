@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
@@ -102,5 +103,33 @@ second file
 ```console
 $ test -f data/model.bin && test -f data/dataset.csv && echo "both present"
 both present
+? 0
+```
+
+# Sync fails when backend health check fails
+
+```console
+$ chmod 000 remote
+? 0
+```
+
+```console
+$ blobsy sync 2>&1
+Health check failed: Local backend directory is not writable: [LOCAL_PATH]
+? 1
+```
+
+```console
+$ chmod 755 remote
+? 0
+```
+
+# Sync with --skip-health-check bypasses health check
+
+```console
+$ blobsy sync --skip-health-check
+  ✓ data/dataset.csv - up to date
+  ✓ data/model.bin - up to date
+Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```

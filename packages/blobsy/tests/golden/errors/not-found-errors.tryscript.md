@@ -9,6 +9,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -44,5 +45,24 @@ Error: Cannot read .yref file: [LOCAL_PATH]/data/untracked.bin.yref: ENOENT: no 
 ```console
 $ blobsy untrack nonexistent.bin 2>&1
 Error: Not tracked: nonexistent.bin (no .yref file found)
+? 1
+```
+
+# Pull when remote blob is missing
+
+```console
+$ rm -rf remote/*
+? 0
+```
+
+```console
+$ rm data/model.bin
+? 0
+```
+
+```console
+$ blobsy pull data/model.bin 2>&1
+  data/model.bin - FAILED: Remote blob not found: [REMOTE_KEY]
+Done: 0 pulled, 1 failed.
 ? 1
 ```

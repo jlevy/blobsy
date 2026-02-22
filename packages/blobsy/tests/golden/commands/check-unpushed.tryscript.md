@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   cp another-file.txt data/dataset.csv
@@ -32,7 +33,7 @@ $ blobsy check-unpushed
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (13 B) - pushed
 Done: 1 pushed.
 ? 0
 ```

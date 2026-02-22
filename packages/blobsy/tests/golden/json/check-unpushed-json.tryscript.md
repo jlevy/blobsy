@@ -2,7 +2,6 @@
 sandbox: true
 fixtures:
   - ../fixtures/small-file.txt
-  - ../fixtures/another-file.txt
   - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
 before: |
@@ -13,28 +12,31 @@ before: |
   mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
-  cp another-file.txt data/dataset.csv
   blobsy track data/model.bin
-  blobsy track data/dataset.csv
   git add -A && git commit -q -m "track"
 ---
-# sync --json: pushes both files
+# check-unpushed --json with unpushed files
 
 ```console
-$ blobsy sync --json
+$ blobsy check-unpushed --json
 {
   "schema_version": "0.1",
-  "sync": {
-    "pushed": 2,
-    "pulled": 0,
-    "errors": 0,
-    "total": 2
-  }
+  "unpushed": [
+    "data/model.bin"
+  ],
+  "count": 1
 }
-? 0
+? 1
 ```
 
-# sync --json: all up to date
+# Push and check again
+
+```console
+$ blobsy push
+  data/model.bin (13 B) - pushed
+Done: 1 pushed.
+? 0
+```
 
 ```console
 $ git add -A && git commit -q -m "push"
@@ -42,15 +44,11 @@ $ git add -A && git commit -q -m "push"
 ```
 
 ```console
-$ blobsy sync --json
+$ blobsy check-unpushed --json
 {
   "schema_version": "0.1",
-  "sync": {
-    "pushed": 0,
-    "pulled": 0,
-    "errors": 0,
-    "total": 2
-  }
+  "unpushed": [],
+  "count": 0
 }
 ? 0
 ```

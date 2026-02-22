@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -51,7 +52,7 @@ Added data/results.csv to .gitignore
 
 ```console
 $ blobsy push data/results.csv
-  data/results.csv ([SIZE] B) - pushed
+  data/results.csv (21 B) - pushed
 Done: 1 pushed.
 ? 0
 ```

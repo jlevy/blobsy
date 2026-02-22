@@ -9,6 +9,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -59,6 +60,63 @@ model.bin
 ```
 
 # Verify fix worked - doctor is clean
+
+```console
+$ blobsy doctor
+No issues found.
+? 0
+```
+
+# Doctor detects orphaned .yref (local file missing, no remote_key)
+
+Create orphan: track a file without pushing, then remove the local file so .yref exists
+but has no remote_key.
+
+```console
+$ cp small-file.txt data/orphan.bin && blobsy track data/orphan.bin && rm data/orphan.bin
+Tracking data/orphan.bin
+Created data/orphan.bin.yref
+Added data/orphan.bin to .gitignore
+? 0
+```
+
+```console
+$ blobsy doctor
+  ✗  data/orphan.bin: .yref exists but local file missing and no remote_key
+
+1 issue found. Run with --fix to attempt repairs.
+? 1
+```
+
+# Restore the file for clean state
+
+```console
+$ echo "hello blobsy" > data/orphan.bin
+? 0
+```
+
+# Doctor detects missing .blobsy directory
+
+```console
+$ rm -rf .blobsy
+? 0
+```
+
+```console
+$ blobsy doctor
+  ✗  .blobsy/ directory missing
+
+1 issue found. Run with --fix to attempt repairs.
+? 1
+```
+
+```console
+$ blobsy doctor --fix
+  ✓ Fixed  Created .blobsy/ directory
+
+All issues fixed.
+? 0
+```
 
 ```console
 $ blobsy doctor

@@ -103,8 +103,8 @@ Updated data/model.bin.yref (hash changed)
 
 ```console
 $ grep -E 'hash|size' data/model.bin.yref
-hash: [HASH]
-size: [SIZE]
+hash: sha256:dbae774e10a267ad13610c357c9d739f7c5729092fff3ec7b9e72a4a79d4f72d
+size: 26
 ? 0
 ```
 

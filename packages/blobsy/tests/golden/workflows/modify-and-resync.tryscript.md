@@ -9,6 +9,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -52,7 +53,7 @@ hash: [HASH]
 
 ```console
 $ blobsy push
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (24 B) - pushed
 Done: 1 pushed.
 ? 0
 ```

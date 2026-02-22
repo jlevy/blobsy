@@ -1,7 +1,5 @@
 ---
 sandbox: true
-env:
-  BLOBSY_BACKEND_URL: ""
 before: |
   git init -q -b main
   git config user.name "Blobsy Test"

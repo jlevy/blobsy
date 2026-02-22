@@ -84,3 +84,17 @@ $ blobsy config remote
 key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"
 ? 0
 ```
+
+# Set a config value
+
+```console
+$ blobsy config compress.algorithm zstd
+Set compress.algorithm = zstd
+? 0
+```
+
+```console
+$ blobsy config compress.algorithm
+zstd
+? 0
+```

@@ -1,7 +1,5 @@
 ---
 sandbox: true
-env:
-  BLOBSY_BACKEND_URL: ""
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/echo-backend.ts
@@ -40,7 +38,7 @@ missing
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin ([SIZE] B) - pulled
+  data/model.bin (13 B) - pulled
 Done: 1 pulled.
 ? 0
 ```

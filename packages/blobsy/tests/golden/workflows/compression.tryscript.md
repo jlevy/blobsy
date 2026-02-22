@@ -43,7 +43,7 @@ $ git add -A && git commit -q -m "track readme"
 
 ```console
 $ blobsy push data/readme.txt
-  data/readme.txt ([SIZE] B) - pushed
+  data/readme.txt (22 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -53,15 +53,15 @@ Done: 1 pushed.
 ```console
 $ grep compressed data/readme.txt.yref
 compressed: zstd
-compressed_size: [SIZE]
+compressed_size: 22
 ? 0
 ```
 
 # Remote has a compressed blob (.zst)
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f -name '*.zst')" && echo "compressed blob exists"
-compressed blob exists
+$ find remote -type f -name '*.zst' | sort
+remote/[REMOTE_KEY]
 ? 0
 ```
 
@@ -74,7 +74,7 @@ $ rm data/readme.txt
 
 ```console
 $ blobsy pull data/readme.txt
-  data/readme.txt ([SIZE] B) - pulled
+  data/readme.txt (13 B) - pulled
 Done: 1 pulled.
 ? 0
 ```

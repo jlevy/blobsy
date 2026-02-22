@@ -75,3 +75,40 @@ $ blobsy hooks uninstall
 Pre-commit hook not managed by blobsy.
 ? 0
 ```
+
+# Hook execution: install hook and verify it runs on commit
+
+```console
+$ mkdir -p data
+? 0
+```
+
+```console
+$ blobsy hooks install
+Installed pre-commit hook.
+? 0
+```
+
+```console
+$ echo "hook test data" > data/hooktest.bin
+? 0
+```
+
+```console
+$ blobsy track data/hooktest.bin
+Tracking data/hooktest.bin
+Created data/hooktest.bin.yref
+Added data/hooktest.bin to .gitignore
+? 0
+```
+
+```console
+$ BLOBSY_NO_HOOKS=0 git add -A && BLOBSY_NO_HOOKS=0 git commit -q -m "test hook"
+? 0
+```
+
+```console
+$ blobsy hooks uninstall
+Uninstalled pre-commit hook.
+? 0
+```

@@ -10,6 +10,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
@@ -43,7 +44,7 @@ Updated data/model.bin.yref (hash changed)
 
 ```console
 $ blobsy push --force data/model.bin
-  data/model.bin ([SIZE] B) - pushed
+  data/model.bin (15 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
@@ -51,8 +52,9 @@ Done: 1 pushed.
 # Verify push stored blob in remote
 
 ```console
-$ test -n "$(find "$BLOBSY_TEST_REMOTE" -type f)" && echo "remote has blobs"
-remote has blobs
+$ find remote -type f | sort
+remote/[REMOTE_KEY]
+remote/[REMOTE_KEY]
 ? 0
 ```
 
@@ -73,7 +75,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin ([SIZE] B) - pulled
+  data/model.bin (15 B) - pulled
 Done: 1 pulled.
 ? 0
 ```

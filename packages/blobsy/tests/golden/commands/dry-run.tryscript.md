@@ -11,6 +11,7 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   git add -A && git commit -q -m "init"
+  mkdir -p remote
   mkdir -p data
   cp small-file.txt data/model.bin
 ---
@@ -83,5 +84,30 @@ $ blobsy --dry-run --json track data/model.bin
     "update data/model.bin.yref"
   ]
 }
+? 0
+```
+
+# Dry-run push shows what would be pushed
+
+```console
+$ blobsy --dry-run push
+Would push data/model.bin
+Would push 1 file
+? 0
+```
+
+# Dry-run pull shows what would be pulled
+
+```console
+$ blobsy --dry-run pull
+Would pull 0 files
+? 0
+```
+
+# Dry-run sync shows what would happen
+
+```console
+$ blobsy --dry-run sync
+Would push data/model.bin
 ? 0
 ```
