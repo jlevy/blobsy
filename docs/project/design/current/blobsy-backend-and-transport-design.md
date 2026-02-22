@@ -855,7 +855,7 @@ error before attempting any transfers.
 | --- | --- | --- |
 | `s3` | `HeadBucket` or small `ListObjectsV2` (1 item) | Credentials valid, bucket exists, region correct, network reachable |
 | `local` | `stat()` on the target directory | Directory exists and is writable |
-| `command` | Deferred (arbitrary commands may lack a safe, side-effect-free health check) | -- |
+| `command` | None (arbitrary commands may lack a safe, side-effect-free health check) | User must test command manually before bulk operations |
 
 **Health check is:**
 - **Fast** - single lightweight operation (< 1 second in normal cases)
@@ -956,6 +956,52 @@ With `--json`:
 
 `blobsy doctor` includes health check results in its comprehensive diagnostics (see
 `blobsy doctor` command documentation in the [main design](blobsy-design.md)).
+
+### Command Backend Health Check Guidance
+
+Since command backends don’t have automatic health checks, users should test them
+manually before relying on them for production workflows.
+
+**Testing Procedure:**
+
+1. **Test push with small file:**
+   ```bash
+   # Track and push a small test file
+   echo "test" > test.txt
+   blobsy track test.txt
+   blobsy push test.txt
+   ```
+
+2. **Verify remote storage:**
+   - Check that the remote command actually stored the blob
+   - For `command` backends, inspect `$REMOTE_STORAGE_DIR` or run your get command
+     manually
+
+3. **Test pull:**
+   ```bash
+   # Delete local payload and restore
+   rm test.txt
+   blobsy pull test.txt
+   cat test.txt  # Should output "test"
+   ```
+
+4. **Test error handling:**
+   - Temporarily break the command (e.g., wrong credentials, bad path)
+   - Verify that blobsy shows clear error messages
+
+**Optional: User-Defined Health Command (V1.1)**
+
+In V1.1, command backends could support an optional `health_check_command` field:
+
+```yaml
+backend:
+  url: command://
+  command_push: "./custom-upload.sh ${LOCAL_FILE} ${REMOTE_KEY}"
+  command_pull: "./custom-download.sh ${REMOTE_KEY} ${LOCAL_FILE}"
+  health_check_command: "test -d ${REMOTE_STORAGE_DIR} && test -w ${REMOTE_STORAGE_DIR}"
+```
+
+This is deferred to V1.1 pending user feedback on whether it’s needed.
 
 **Implementation note:**
 

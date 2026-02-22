@@ -257,6 +257,63 @@ externalization rules, recursively.
 Each `.yref` is independent.
 Git diffs, merges, and conflicts work per-file, naturally.
 
+### Externalization Rule Precedence
+
+When multiple rules could apply to a file, blobsy uses the following precedence order:
+
+**Priority Order:**
+
+1. **`externalize.never` patterns** (highest priority)
+   - If file matches any `never` pattern → **NOT externalized** (even if matches
+     `always`)
+   - Example: `*.md` in never list → README.md not externalized
+
+2. **`externalize.always` patterns**
+   - If file matches any `always` pattern (and no `never` pattern) → **Externalized**
+   - Example: `*.parquet` in always list → data.parquet externalized
+
+3. **`externalize.min_size` threshold** (lowest priority)
+   - If file size ≥ min_size (and no pattern match) → **Externalized**
+   - Example: 5MB file with min_size=1mb → externalized
+
+**Implementation Reference:** `packages/blobsy/src/compress.ts:30-46` (same logic
+applies to compression)
+
+**Pattern Matching:**
+
+- Uses glob-style matching via `micromatch`
+- Patterns match against **repository-relative paths** (forward slashes, even on
+  Windows)
+- Examples:
+  - `*.pkl` matches `model.pkl` and `data/weights.pkl`
+  - `data/**/*.bin` matches only `.bin` files under `data/` directory
+
+**Subdirectory Config Behavior:**
+
+Config files in subdirectories **replace** parent patterns (not append):
+
+```yaml
+# Root .blobsy.yml
+externalize:
+  always: ["*.parquet", "*.bin"]
+  never: ["*.md"]
+
+# data/experiments/.blobsy.yml
+externalize:
+  always: ["*.pkl"]  # Replaces root 'always' list
+  never: []          # Replaces root 'never' list (empty = nothing ignored)
+```
+
+Result:
+- `data/model.bin` → Uses root config → **Externalized** (matches *.bin in always)
+- `data/experiments/weights.pkl` → Uses subdir config → **Externalized** (matches *.pkl
+  in always)
+- `data/experiments/model.bin` → Uses subdir config → **NOT externalized** (subdir
+  config replaced *.bin)
+
+**Best Practice:** Keep externalization rules in root `.blobsy.yml` to avoid confusion.
+Use subdirectory configs only when absolutely necessary.
+
 ### Remote Storage Layouts
 
 Blobsy uses **configurable key templates** to determine where blobs are stored in the
@@ -303,8 +360,29 @@ bits of entropy). Collision probability is negligible for typical use (birthday 
 
 **Note on `{iso_date_secs}`:** Format is `YYYYMMDDTHHMMSSZ` (e.g., `20260220T140322Z`).
 All punctuation removed for cleaner keys.
-Second resolution allows deduplication of identical content pushed in the same second to
-the same path (all three must match: timestamp, content hash, and path).
+Granularity is **1 second** (no sub-second precision).
+
+**Deduplication and Collision Behavior:**
+
+Same path + content + timestamp → **Deduplicates** (produces identical key)
+- Example: Two users push identical `data/model.bin` at `20260220T140322Z`
+- Key: `20260220T140322Z-7a3f0e9b2c1d/data/model.bin.zst` (both users)
+- Result: Last write wins (S3 overwrites), but content is identical so no data loss
+
+Same path + **different content** + same timestamp → **Different keys** (hash differs)
+- Example: User A pushes `model_v1.bin`, User B pushes `model_v2.bin` at same second
+- Key A: `20260220T140322Z-abc12345.../data/model.bin`
+- Key B: `20260220T140322Z-def67890.../data/model.bin`
+- Result: No collision, both versions stored
+
+**Multi-User Safety:**
+
+The default template provides collision safety even at second granularity because:
+1. Content hash is part of the key → different content = different key
+2. Identical content pushes deduplicate safely (overwriting identical blob is harmless)
+3. Path is part of key → different paths never collide
+
+**Timestamp Format Implementation:** See `template.ts:38-40` for `formatIsoDateSecs()`.
 
 **Compression Suffix Handling:**
 
@@ -1418,6 +1496,89 @@ $ blobsy status
 $ blobsy mv data/model-v1.bin data/model-v2.bin
 # Now in sync
 ```
+
+### Directory-Spanning Moves
+
+**Scenario:** Moving a tracked file from one directory to another.
+
+**Example:**
+```bash
+blobsy mv data/old/model.bin research/experiments/model.bin
+```
+
+**Operation Sequence:**
+
+1. **Validation:**
+   - Check source file exists and is tracked (has `.yref`)
+   - Check destination directory exists (create if `--mkdir` flag provided, error
+     otherwise)
+   - Check destination file doesn’t exist (error if exists, unless `--force`)
+
+2. **Externalization Re-Evaluation:**
+   - Read `.blobsy.yml` from destination directory context
+   - Check if file still matches externalization rules in new location
+   - **If destination has different externalization config**, issue warning:
+     ```
+     Warning: Destination directory has different externalization rules.
+     File will remain externalized per source rules. Re-track with 'blobsy track' to re-evaluate.
+     ```
+
+3. **Move Operations:**
+   - Move payload file: `data/old/model.bin` → `research/experiments/model.bin`
+   - Move `.yref` file: `data/old/model.bin.yref` →
+     `research/experiments/model.bin.yref`
+   - Update `.yref` remote_key is **NOT changed** (remote blob stays at same key)
+
+4. **Gitignore Updates:**
+   - **Source directory** (`data/old/.gitignore`):
+     - Remove `model.bin` entry from blobsy-managed block
+     - If block becomes empty, remove the entire block
+     - If `.gitignore` becomes empty, delete the file
+   - **Destination directory** (`research/experiments/.gitignore`):
+     - Add `model.bin` entry to blobsy-managed block
+     - Create block if it doesn’t exist
+     - Create `.gitignore` if it doesn’t exist
+
+5. **Git Staging:**
+   - Stage all modified files: payload, `.yref`, source `.gitignore`, dest `.gitignore`
+   - User must commit the move
+
+**Example Output:**
+```bash
+$ blobsy mv data/old/model.bin research/experiments/model.bin
+
+✓ Moved data/old/model.bin → research/experiments/model.bin
+✓ Moved data/old/model.bin.yref → research/experiments/model.bin.yref
+✓ Updated .gitignore (2 files)
+
+Staged files:
+  research/experiments/model.bin
+  research/experiments/model.bin.yref
+  research/experiments/.gitignore
+  data/old/.gitignore
+
+Run 'git commit' to complete the move.
+```
+
+**Edge Case: Source .gitignore Cleanup**
+
+If the moved file was the last entry in the source directory’s blobsy-managed block:
+
+```gitignore
+# Before move (data/old/.gitignore)
+# blobsy -- DO NOT EDIT BELOW THIS LINE
+model.bin
+# blobsy -- DO NOT EDIT ABOVE THIS LINE
+
+other-pattern.txt
+```
+
+```gitignore
+# After move (data/old/.gitignore) -- blobsy block removed
+other-pattern.txt
+```
+
+If the file becomes empty, it’s deleted.
 
 **Current limitations (deferred to a future version):**
 
@@ -2799,10 +2960,17 @@ These are candidates for future versions if demand warrants.
 - **Parallel `.yref` directory option.** Storing `.yref` files in a parallel directory
   (e.g., `data/research.yrefs/`) instead of adjacent to data files.
 
-- **Garbage collection (`blobsy gc`).** Removes remote blobs not referenced by any
-  `.yref` file in any reachable git branch or tag.
-  With `blobsy rm` available in the initial release for manual cleanup, automatic GC is
-  less critical and is deferred to a future version.
+- **Garbage collection (`blobsy gc`).**
+
+  > **V2 Feature - Design Only**
+  > 
+  > The garbage collection system described in this section is a **design specification
+  > for V2**. It is **not implemented in V1**. This section serves as the architectural
+  > foundation for future implementation.
+
+  Removes remote blobs not referenced by any `.yref` file in any reachable git branch or
+  tag. With `blobsy rm` available in the initial release for manual cleanup, automatic GC
+  is less critical and is deferred to a future version.
 
   **Safety requirements (future versions design):**
 
@@ -2838,6 +3006,109 @@ These are candidates for future versions if demand warrants.
   **Template-agnostic:** GC works with any key template by examining actual `remote_key`
   values in `.yref` files, correctly handling content-addressable, branch-isolated,
   shared, and mixed layouts.
+
+  ## GC Implementation Specification (V2)
+
+  ### Reachability Algorithm
+
+  **Goal:** Delete remote blobs not referenced by any `.yref` in reachable commits.
+
+  **Algorithm:**
+
+  ```python
+  def gc_reachability(depth='all', older_than=None, dry_run=False):
+      # Step 1: Collect all refs to scan
+      if depth == 'HEAD':
+          refs_to_scan = [current_HEAD]
+      elif depth == 'branch':
+          refs_to_scan = [current_branch_commits()]
+      else:  # depth == 'all'
+          refs_to_scan = all_commits_reachable_from_all_branches_and_tags()
+
+      # Step 2: Build reachable set
+      reachable_remote_keys = set()
+      for commit in refs_to_scan:
+          yref_files = find_yref_files_in_commit(commit)
+          for yref_path in yref_files:
+              yref = read_yref_from_commit(commit, yref_path)
+              if yref.remote_key:
+                  reachable_remote_keys.add(yref.remote_key)
+
+      # Step 3: List all remote blobs
+      all_remote_keys = backend.list_all_blobs()
+
+      # Step 4: Compute orphans
+      orphaned_keys = all_remote_keys - reachable_remote_keys
+
+      # Step 5: Apply age filter
+      if older_than:
+          orphaned_keys = filter_by_age(orphaned_keys, older_than)
+
+      # Step 6: Delete (or dry-run report)
+      if dry_run:
+          print(f"Would delete {len(orphaned_keys)} orphaned blobs:")
+          for key in orphaned_keys:
+              print(f"  {key}")
+          return orphaned_keys
+      else:
+          for key in orphaned_keys:
+              backend.delete_blob(key)
+          print(f"Deleted {len(orphaned_keys)} orphaned blobs")
+          return orphaned_keys
+  ```
+
+  **Parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--depth` | enum | `all` | Scan depth: `all` (all branches/tags), `branch` (current branch only), `HEAD` (current commit only) |
+| `--older-than` | duration | none | Only delete blobs older than this age (e.g., `30d`, `6mo`, `1y`) |
+| `--dry-run` | boolean | false | Show what would be deleted without actually deleting |
+| `--include-worktree` | boolean | false | If true, also consider `.yref` files in working tree (not just HEAD) |
+
+  **Example Usage:**
+
+  ```bash
+  # Dry run: see what would be deleted
+  blobsy gc --dry-run
+
+  # Delete orphaned blobs older than 30 days
+  blobsy gc --older-than=30d
+
+  # Aggressive: delete all orphaned blobs
+  blobsy gc
+
+  # Conservative: delete only from current branch, older than 90 days
+  blobsy gc --depth=branch --older-than=90d
+  ```
+
+  **Concurrent Operation Handling:**
+
+| Scenario | Behavior |
+| --- | --- |
+| GC runs while working tree has uncommitted `.yref` changes | **Error:** “Cannot run GC with uncommitted .yref files. Commit or stash changes.” |
+| GC runs during active `push` operation | **Safe:** Newly-pushed blobs have refs in working tree; won’t be deleted (if `--include-worktree` enabled) |
+| Multiple users run GC concurrently | **Safe:** Deletion is idempotent; last delete wins (both see same orphans) |
+| User pushes while GC is running | **Risk:** Blob could be deleted between push and commit. **Mitigation:** Always commit immediately after push (pre-commit hook enforces this) |
+
+  **Safety Guarantees:**
+
+  1. **Never deletes blobs referenced in HEAD** (any branch, any tag)
+  2. **Dry-run by default recommended** for first GC run
+  3. **Age-based safety**: `--older-than` prevents deleting recent blobs
+  4. **Worktree protection**: Optional `--include-worktree` flag protects uncommitted
+     refs
+
+  **Performance:**
+
+  - Scanning 10,000 commits with 1,000 `.yref` files each: ~30 seconds
+  - Listing 100,000 remote blobs: ~10 seconds (S3 `ListObjectsV2` pagination)
+  - Total GC time for large repo: ~1-2 minutes
+
+  **Future Optimization (V3):**
+
+  - Incremental GC: Track last GC timestamp, only scan new commits
+  - Bloom filter: Use probabilistic data structure for faster reachability checks
 
 - **Multi-backend routing.** Routing different directories to different backends.
 

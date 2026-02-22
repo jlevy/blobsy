@@ -264,6 +264,58 @@ after the last hash.
 The `.yref` file cannot use mtime because different machines, git checkouts, CI runners,
 and Docker builds produce different mtimes for identical content.
 
+### Mtime Reset Recovery
+
+**Problem:** After `git checkout`, `git cherry-pick`, or file copying, mtime changes
+even if content is identical.
+This can cause stat cache misses and false “ambiguous state” errors.
+
+**Example Scenario:**
+```bash
+git checkout feature-branch  # All files get new mtime (current time)
+blobsy sync                  # May report "ambiguous state" because mtime differs from cache
+```
+
+**Recovery Flows:**
+
+1. **Automatic (on hash recompute):**
+   - If stat cache miss occurs (mtime differs), blobsy recomputes hash (line 293-299 in
+     stat-cache-design.md)
+   - If hash matches cached hash, cache entry is updated with new mtime
+   - No user action needed for single-file operations
+
+2. **Manual (post-checkout):**
+   - User can run `blobsy verify --rebuild-cache` to revalidate all files and update
+     cache entries
+   - This hashes every tracked file and updates stat cache with current mtime
+   - Useful after bulk operations like `git checkout`, `git rebase`, or rsync
+
+3. **Escape Hatch (explicit commands):**
+   - If `blobsy sync` reports “ambiguous state”, user runs explicit `blobsy push` or
+     `blobsy pull`
+   - This establishes a new merge base in the stat cache
+   - Future syncs will work normally
+
+**Implementation Note:**
+
+The `verify` command already supports `--rebuild-cache` flag (though not heavily
+advertised). Add to CLI help text:
+
+```
+blobsy verify [options] [paths...]
+
+Options:
+  --rebuild-cache    Rebuild stat cache entries for all verified files
+                     (useful after git checkout or branch switches)
+```
+
+**Risk Mitigation:**
+
+This limitation is **rare in practice** because:
+- Most workflows involve either local edits OR git operations, not interleaved
+- Hash recomputation is fast for most files (< 100ms per file on modern hardware)
+- Users can explicitly push/pull to resolve ambiguity
+
 ### Role 2: Merge Base for Conflict Detection
 
 The cached `hash` is the merge base for three-way conflict detection.

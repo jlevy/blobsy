@@ -89,8 +89,80 @@ Every command that must be implemented for V1, with key behaviors:
 | --- | --- |
 | `blobsy status [path...]` | Offline. Show state symbols (circle/half/check/tilde/question/deleted). Compare working tree vs HEAD. Summary + actions needed. |
 | `blobsy verify [path...]` | Read and hash every file (bypass stat cache). Report ok/mismatch/missing. Exit 1 on any issue. |
-| `blobsy check-unpushed` | Find committed `.yref` files with no `remote_key` or missing remote blobs. Use git blame for attribution. |
-| `blobsy pre-push-check` | CI-friendly: verify all `.yref` files in HEAD have remote blobs. Exit 0 or 1. |
+| `blobsy check-unpushed` | **Interactive mode:** Find committed `.yref` files with no `remote_key` or missing remote blobs. Shows **file paths, commit authors (git blame), and suggested fix**. Supports `--json` for scripting. Use for: manual review, finding who committed unpushed refs, bulk repair planning. |
+| `blobsy pre-push-check` | **CI-only mode:** Verify all `.yref` files in HEAD have remote blobs. **Binary pass/fail** (exit 0 if all pushed, exit 1 if any missing). **No attribution**, **no suggestions**. Use in `.github/workflows` or git hooks to block merges if blobs not uploaded. |
+
+#### Command Comparison: `check-unpushed` vs `pre-push-check`
+
+| Aspect | `check-unpushed` | `pre-push-check` |
+| --- | --- | --- |
+| **Purpose** | Interactive diagnosis | CI gate |
+| **Output** | Detailed file list with attribution | Pass/fail only |
+| **Exit Code** | Always 0 (even if unpushed refs found) | 0 = all pushed, 1 = some missing |
+| **Git Blame** | ✅ Yes (shows author + commit) | ❌ No |
+| **Suggested Fix** | ✅ Yes ("Run blobsy push <files>") | ❌ No |
+| **JSON Support** | ✅ `--json` flag | ❌ No JSON (designed for shell exit code) |
+| **Performance** | Slower (git blame for each file) | Faster (no git operations beyond ls-tree) |
+| **Use Case** | `blobsy check-unpushed` before code review | `blobsy pre-push-check && git push` in CI |
+
+**Example Workflow:**
+
+```bash
+# Developer workflow (local)
+$ blobsy check-unpushed
+
+Unpushed refs (2 files):
+  data/model.bin (committed by alice@example.com in abc123)
+  data/weights.pkl (committed by bob@example.com in def456)
+
+Suggested fix:
+  blobsy push data/model.bin data/weights.pkl
+
+# CI workflow (.github/workflows/ci.yml)
+- name: Check blobs uploaded
+  run: blobsy pre-push-check || (echo "ERROR: Unpushed blobs detected" && exit 1)
+```
+
+**Attribution Example (check-unpushed only):**
+
+```bash
+$ blobsy check-unpushed --json
+{
+  "unpushed": [
+    {
+      "path": "data/model.bin",
+      "ref_path": "data/model.bin.yref",
+      "hash": "sha256:abc123...",
+      "remote_key": null,
+      "commit": "abc123def456",
+      "author": "Alice <alice@example.com>",
+      "author_date": "2026-02-20T14:32:00Z"
+    }
+  ]
+}
+```
+
+**CI Integration Example (pre-push-check only):**
+
+```yaml
+# .github/workflows/pr-checks.yml
+name: PR Checks
+on: pull_request
+
+jobs:
+  blobs-uploaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install blobsy
+        run: npm install -g blobsy
+      - name: Check all blobs uploaded
+        run: |
+          blobsy pre-push-check || {
+            echo "::error::Unpushed blobs detected. Run 'blobsy check-unpushed' locally to see which files."
+            exit 1
+          }
+```
 
 ### Diagnostic Commands
 
