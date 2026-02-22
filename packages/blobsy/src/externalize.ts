@@ -1,7 +1,7 @@
 /**
  * Externalization rules.
  *
- * Decide per-file whether to externalize (create .yref + gitignore) or leave in git.
+ * Decide per-file whether to externalize (create .bref + gitignore) or leave in git.
  * Only applies to directory tracking -- explicit file tracking always externalizes.
  */
 

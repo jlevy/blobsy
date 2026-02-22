@@ -97,7 +97,7 @@ $ echo "hook test data" > data/hooktest.bin
 ```console
 $ blobsy track data/hooktest.bin
 Tracking data/hooktest.bin
-Created data/hooktest.bin.yref
+Created data/hooktest.bin.bref
 Added data/hooktest.bin to .gitignore
 ? 0
 ```

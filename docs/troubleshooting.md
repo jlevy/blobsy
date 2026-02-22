@@ -95,12 +95,12 @@ Blobsy hasn’t been initialized in this repo.
 
 This is safe and idempotent.
 If the file hasn’t changed, blobsy reports “already tracked (unchanged)”. If it has
-changed, blobsy updates the `.yref` hash.
+changed, blobsy updates the `.bref` hash.
 
-### Accidentally tracking a `.yref` file
+### Accidentally tracking a `.bref` file
 
-Blobsy automatically strips the `.yref` extension from paths, so
-`blobsy track data/model.bin.yref` is equivalent to `blobsy track data/model.bin`.
+Blobsy automatically strips the `.bref` extension from paths, so
+`blobsy track data/model.bin.bref` is equivalent to `blobsy track data/model.bin`.
 
 ## Hook Manager Issues
 

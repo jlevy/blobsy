@@ -147,7 +147,7 @@ installed).
 
 ## Blobsy CLI
 
-Blobsy is a Git-native large file storage CLI. Track large files with `.yref` pointer
+Blobsy is a Git-native large file storage CLI. Track large files with `.bref` pointer
 files committed to Git, while blobs live in S3, local directories, or custom command
 backends.
 
@@ -156,7 +156,7 @@ backends.
 | Command | Purpose |
 | --- | --- |
 | `blobsy init <url>` | Initialize with backend URL |
-| `blobsy track <path...>` | Track files (creates .yref pointers) |
+| `blobsy track <path...>` | Track files (creates .bref pointers) |
 | `blobsy push` | Upload blobs to backend |
 | `blobsy pull` | Download blobs from backend |
 | `blobsy sync` | Bidirectional push + pull |
@@ -181,7 +181,7 @@ Use `--dry-run` to preview without side effects.
 - Backends implement the `Backend` interface (push/pull/exists/healthCheck)
 - Errors use `BlobsyError`/`ValidationError` with actionable `suggestions`
 - Remote keys generated via `evaluateTemplate` with `sanitizeKeyComponent` for S3 safety
-- `.yref` files include self-documenting comment header
+- `.bref` files include self-documenting comment header
 
 <!-- END BLOBSY -->
 

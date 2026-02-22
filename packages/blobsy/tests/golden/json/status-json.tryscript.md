@@ -78,7 +78,7 @@ $ blobsy status --json
 # status --json: empty repo (no tracked files)
 
 ```console
-$ rm data/model.bin.yref data/dataset.csv.yref
+$ rm data/model.bin.bref data/dataset.csv.bref
 ? 0
 ```
 

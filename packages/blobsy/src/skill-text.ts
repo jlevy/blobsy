@@ -7,7 +7,7 @@
 
 export const SKILL_BRIEF = `\
 blobsy: Git-native large file storage CLI.
-Track large files with .yref pointers in Git, store blobs in S3/local/custom backends.
+Track large files with .bref pointers in Git, store blobs in S3/local/custom backends.
 
 Commands: init, track, push, pull, sync, status, verify, untrack, rm, mv, config, health, doctor
 Global flags: --json, --quiet, --verbose, --dry-run
@@ -23,13 +23,13 @@ export const SKILL_FULL = `\
 # blobsy
 
 Git-native large file storage CLI.
-Track large files with .yref pointer files in Git while storing blobs in S3, local
+Track large files with .bref pointer files in Git while storing blobs in S3, local
 directories, or custom command backends.
 
 ## Commands
 
   blobsy init <url>          Initialize with backend URL (s3://, local:, etc.)
-  blobsy track <path...>     Track files or directories (creates .yref pointers)
+  blobsy track <path...>     Track files or directories (creates .bref pointers)
   blobsy untrack <path...>   Stop tracking (keeps local files)
   blobsy push [path...]      Upload local blobs to the configured backend
   blobsy pull [path...]      Download blobs from the configured backend
@@ -64,7 +64,7 @@ Override via environment: BLOBSY_BACKEND_URL=s3://bucket/prefix/
 
 ## Key Concepts
 
-- .yref files are YAML pointers committed to Git (format, hash, size, remote_key)
+- .bref files are YAML pointers committed to Git (format, hash, size, remote_key)
 - Content-addressable: identical files share the same blob (SHA-256)
 - Compression: zstd, gzip, or brotli (configurable per-repo)
 - Externalization rules control which files are tracked in directory scans
@@ -73,7 +73,7 @@ Override via environment: BLOBSY_BACKEND_URL=s3://bucket/prefix/
 Track and push:
   blobsy track data/model.bin
   blobsy push
-  git add data/model.bin.yref && git commit -m "Track model"
+  git add data/model.bin.bref && git commit -m "Track model"
 
 Pull after clone:
   blobsy pull
@@ -90,7 +90,7 @@ export const PRIME_TEXT = `\
 ## What is blobsy?
 
 A standalone CLI for storing large files outside Git while tracking them with
-lightweight .yref pointer files. No special server required -- works with S3,
+lightweight .bref pointer files. No special server required -- works with S3,
 local directories, or custom command backends.
 
 ## Current state
@@ -102,7 +102,7 @@ Run these to assess the repo:
 
 ## Architecture
 
-- .yref pointer files (YAML) are committed to Git
+- .bref pointer files (YAML) are committed to Git
 - Original files are added to .gitignore
 - Blobs stored in content-addressable remote storage (SHA-256)
 - Backends: AwsCliBackend (default for S3), BuiltinS3Backend (SDK fallback), LocalBackend, CommandBackend (all implement Backend interface)
@@ -111,10 +111,10 @@ Run these to assess the repo:
 ## File layout
 
   .blobsy.yml              Config (backends, compression, externalization rules)
-  data/file.bin.yref       Pointer file for data/file.bin
+  data/file.bin.bref       Pointer file for data/file.bin
   data/.gitignore          Auto-managed: gitignores tracked files
   .blobsy/stat-cache/      Local cache for fast change detection
-  .blobsy/trash/           Untracked .yref files (recoverable)
+  .blobsy/trash/           Untracked .bref files (recoverable)
 
 ## Useful commands
 

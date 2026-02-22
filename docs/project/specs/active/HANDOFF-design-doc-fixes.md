@@ -110,7 +110,7 @@ The “tests” are:
 **Implementation context (for verification):**
 - `packages/blobsy/src/template.ts:42-69` - Template evaluation
 - `packages/blobsy/src/compress.ts:30-46` - Compression decision logic
-- `packages/blobsy/src/ref.ts:19-64, 89-117` - .yref parsing/validation
+- `packages/blobsy/src/ref.ts:19-64, 89-117` - .bref parsing/validation
 - `packages/blobsy/src/config.ts:204-227` - Size parsing (1mb, 100kb)
 - `packages/blobsy/src/paths.ts:51-57, 65-69` - Path normalization + cache paths
 

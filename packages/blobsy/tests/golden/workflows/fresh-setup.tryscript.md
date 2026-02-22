@@ -39,7 +39,7 @@ $ cp small-file.txt data/model.bin && cp another-file.txt data/dataset.csv
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
@@ -47,7 +47,7 @@ Added data/model.bin to .gitignore
 ```console
 $ blobsy track data/dataset.csv
 Tracking data/dataset.csv
-Created data/dataset.csv.yref
+Created data/dataset.csv.bref
 Added data/dataset.csv to .gitignore
 ? 0
 ```

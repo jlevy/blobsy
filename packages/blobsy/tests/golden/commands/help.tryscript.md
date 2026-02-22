@@ -19,21 +19,21 @@ Options:
 
 Commands:
   init <url>             Initialize blobsy in a git repo with a backend URL
-  track <path...>        Start tracking files or directories with .yref pointers
-  untrack <path...>      Stop tracking files (keeps local files, moves .yref to trash)
-  rm <path...>           Remove tracked files: delete local + move .yref to trash
-  mv <source> <dest>     Rename or move tracked files or directories (updates .yref + .gitignore)
+  track <path...>        Start tracking files or directories with .bref pointers
+  untrack <path...>      Stop tracking files (keeps local files, moves .bref to trash)
+  rm <path...>           Remove tracked files: delete local + move .bref to trash
+  mv <source> <dest>     Rename or move tracked files or directories (updates .bref + .gitignore)
   push [path...]         Upload local blobs to the configured backend
   pull [path...]         Download blobs from the configured backend
   sync [path...]         Bidirectional sync: push unpushed + pull missing
   status [path...]       Show sync state of tracked files
-  verify [path...]       Verify local files match their .yref hashes
+  verify [path...]       Verify local files match their .bref hashes
   config [key] [value]   Show, get, or set .blobsy.yml values
   health                 Test backend connectivity and permissions
   doctor                 Run diagnostics and optionally auto-fix issues
   hooks <action>         Install or uninstall the blobsy pre-commit hook
-  check-unpushed         List committed .yref files whose blobs are not yet pushed
-  pre-push-check         CI guard: fail if any .yref is missing its remote blob
+  check-unpushed         List committed .bref files whose blobs are not yet pushed
+  pre-push-check         CI guard: fail if any .bref is missing its remote blob
   skill                  Output blobsy skill documentation (for AI agents)
   prime                  Output context primer for AI agents working in this repo
   help [command]         Display help for command
@@ -54,7 +54,7 @@ Docs: https://github.com/jlevy/blobsy
 $ blobsy track --help
 Usage: blobsy track [options] <path...>
 
-Start tracking files or directories with .yref pointers
+Start tracking files or directories with .bref pointers
 
 Arguments:
   path                   Files or directories to track
@@ -140,7 +140,7 @@ Options:
 $ blobsy verify --help
 Usage: blobsy verify [options] [path...]
 
-Verify local files match their .yref hashes
+Verify local files match their .bref hashes
 
 Arguments:
   path                   Files or directories (default: all tracked)
@@ -157,13 +157,13 @@ Options:
 $ blobsy rm --help
 Usage: blobsy rm [options] <path...>
 
-Remove tracked files: delete local + move .yref to trash
+Remove tracked files: delete local + move .bref to trash
 
 Arguments:
   path                   Files or directories to remove
 
 Options:
-  --local                Delete local file only, keep .yref and remote
+  --local                Delete local file only, keep .bref and remote
   --recursive            Required for directory removal
   -h, --help             Display help for command
 ? 0
@@ -209,7 +209,7 @@ Options:
 $ blobsy untrack --help
 Usage: blobsy untrack [options] <path...>
 
-Stop tracking files (keeps local files, moves .yref to trash)
+Stop tracking files (keeps local files, moves .bref to trash)
 
 Arguments:
   path                   Files or directories to untrack
@@ -226,7 +226,7 @@ Options:
 $ blobsy mv --help
 Usage: blobsy mv [options] <source> <dest>
 
-Rename or move tracked files or directories (updates .yref + .gitignore)
+Rename or move tracked files or directories (updates .bref + .gitignore)
 
 Arguments:
   source                 Source tracked file or directory
@@ -289,7 +289,7 @@ Options:
 $ blobsy check-unpushed --help
 Usage: blobsy check-unpushed [options]
 
-List committed .yref files whose blobs are not yet pushed
+List committed .bref files whose blobs are not yet pushed
 
 Options:
   -h, --help             Display help for command
@@ -302,7 +302,7 @@ Options:
 $ blobsy pre-push-check --help
 Usage: blobsy pre-push-check [options]
 
-CI guard: fail if any .yref is missing its remote blob
+CI guard: fail if any .bref is missing its remote blob
 
 Options:
   -h, --help             Display help for command

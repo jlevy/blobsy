@@ -41,17 +41,17 @@ local and cloud backends.
 **Test Results (last update 2026-02-21):**
 
 - `blobsy init local:../remote` → ✅ Success (backend dir must exist)
-- `blobsy track test-file.bin` → ✅ Success (.yref and .gitignore created)
+- `blobsy track test-file.bin` → ✅ Success (.bref and .gitignore created)
 - `blobsy push` → ✅ Success (zstd compression automatic for 500KB+ files)
 - `blobsy pull` → ✅ Success (hash verification working)
 - `blobsy sync` → ✅ Idempotent (no-op when up-to-date)
 - `blobsy health` → ✅ Success (both local and S3 backends)
 - `blobsy doctor` → ✅ Success (no issues detected)
-- `blobsy untrack` → ✅ Success (.yref removed, .gitignore updated)
-- `blobsy mv` → ✅ Success (file renamed, .yref updated, .gitignore updated, remote_key
+- `blobsy untrack` → ✅ Success (.bref removed, .gitignore updated)
+- `blobsy mv` → ✅ Success (file renamed, .bref updated, .gitignore updated, remote_key
   preserved)
-- `blobsy rm` → ✅ Success (local file and .yref removed, remote blob kept)
-- `blobsy rm --local` → ✅ Success (only local file removed, .yref and remote blob kept)
+- `blobsy rm` → ✅ Success (local file and .bref removed, remote blob kept)
+- `blobsy rm --local` → ✅ Success (only local file removed, .bref and remote blob kept)
 - `blobsy sync` → ✅ Success (detects local changes, pushes automatically, idempotent)
 - `blobsy hooks install/uninstall` → ✅ Success (requires blobsy in PATH to function)
 - **S3 Backend** → ✅ Success (push/pull to s3://blobsy-test/qa-test/)
@@ -84,14 +84,14 @@ local and cloud backends.
    execute (they call `exec blobsy`).
 
 3. **File Deletion Behavior**:
-   - `blobsy rm <file>`: Removes local file + .yref, **keeps remote blob** (safe
+   - `blobsy rm <file>`: Removes local file + .bref, **keeps remote blob** (safe
      deletion)
-   - `blobsy rm --local <file>`: Removes only local file, **keeps .yref + remote blob**
+   - `blobsy rm --local <file>`: Removes only local file, **keeps .bref + remote blob**
      (for re-pull later)
    - Neither command deletes from backend by default (prevents data loss)
 
 4. **Rename Behavior**: `blobsy mv` preserves the remote_key (no re-upload), just
-   updates local filenames and .yref references.
+   updates local filenames and .bref references.
 
 5. **Backend Switching**: Changing backend URLs doesn’t re-push existing files - they
    keep their original remote_key from first push.
@@ -313,14 +313,14 @@ blobsy track small-file.bin medium-file.bin large-file.bin
 
 **Verify**:
 
-- [ ] `.yref` files created for each tracked file
+- [ ] `.bref` files created for each tracked file
 - [ ] Original `.bin` files still exist
 - [ ] `.gitignore` created with entries for tracked files
 
-**Check `.yref` file structure**:
+**Check `.bref` file structure**:
 
 ```bash
-cat small-file.bin.yref
+cat small-file.bin.bref
 ```
 
 **Expected format**:
@@ -329,14 +329,14 @@ cat small-file.bin.yref
 # blobsy -- https://github.com/jlevy/blobsy
 # Run: blobsy status | blobsy --help
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:abc123...
 size: 51200
 ```
 
-**Verify .yref fields**:
+**Verify .bref fields**:
 
-- [ ] `format: blobsy-yref/0.1` present
+- [ ] `format: blobsy-bref/0.1` present
 - [ ] `hash: sha256:...` (64 hex chars after colon)
 - [ ] `size:` matches file size in bytes
 - [ ] NO `remote_key:` yet (unpushed)
@@ -359,13 +359,13 @@ large-file.bin
 **Verify**:
 
 - [ ] Each tracked file listed (one per line)
-- [ ] `.yref` files NOT in .gitignore (they should be committed)
+- [ ] `.bref` files NOT in .gitignore (they should be committed)
 
 **Troubleshooting**:
 
 - **Issue**: “File too small to externalize” **Fix**: Expected for files < 1MB (default
   `min_size`), adjust config or use larger files
-- **Issue**: Malformed .yref file **Fix**: Check YAML syntax, run `blobsy verify`
+- **Issue**: Malformed .bref file **Fix**: Check YAML syntax, run `blobsy verify`
 
 ### 2.3 Check Status Before Push
 
@@ -376,15 +376,15 @@ blobsy status
 **Expected output**:
 
 ```
-small-file.bin.yref
+small-file.bin.bref
   Local:  ✓ (sha256:abc...)
   Remote: ✗ Not pushed
 
-medium-file.bin.yref
+medium-file.bin.bref
   Local:  ✓ (sha256:def...)
   Remote: ✗ Not pushed
 
-large-file.bin.yref
+large-file.bin.bref
   Local:  ✓ (sha256:ghi...)
   Remote: ✗ Not pushed
 ```
@@ -431,16 +431,16 @@ Pushing large-file.bin...
 - [ ] Remote keys shown (ISO timestamp + hash prefix format)
 - [ ] Exit code 0
 
-**Check .yref files updated**:
+**Check .bref files updated**:
 
 ```bash
-cat large-file.bin.yref
+cat large-file.bin.bref
 ```
 
 **Expected additions**:
 
 ```yaml
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:ghi789...
 size: 5242880
 remote_key: 20260221T120000Z-ghi789.../large-file.bin
@@ -467,7 +467,7 @@ ls -lhR ../blobsy-remote/
 
 - **Issue**: Push failed with “backend not writable” **Fix**: Check `blobsy health`,
   verify backend directory permissions
-- **Issue**: Remote key not written to .yref **Fix**: Check for errors in `--verbose`
+- **Issue**: Remote key not written to .bref **Fix**: Check for errors in `--verbose`
   output, verify atomic write succeeded
 
 ### 2.5 Verify Status After Push
@@ -479,15 +479,15 @@ blobsy status
 **Expected output**:
 
 ```
-small-file.bin.yref
+small-file.bin.bref
   Local:  ✓ (sha256:abc...)
   Remote: ✓ (sha256:abc...)
 
-medium-file.bin.yref
+medium-file.bin.bref
   Local:  ✓ (sha256:def...)
   Remote: ✓ (sha256:def...)
 
-large-file.bin.yref
+large-file.bin.bref
   Local:  ✓ (sha256:ghi...)
   Remote: ✓ (sha256:ghi...)
 ```
@@ -501,7 +501,7 @@ large-file.bin.yref
 ### 2.6 Simulate Pull (Delete Local, Restore from Remote)
 
 ```bash
-# Delete local files (keep .yref)
+# Delete local files (keep .bref)
 rm small-file.bin medium-file.bin large-file.bin
 blobsy status
 ```
@@ -509,15 +509,15 @@ blobsy status
 **Expected status output**:
 
 ```
-small-file.bin.yref
+small-file.bin.bref
   Local:  ✗ Missing
   Remote: ✓ (sha256:abc...)
 
-medium-file.bin.yref
+medium-file.bin.bref
   Local:  ✗ Missing
   Remote: ✓ (sha256:def...)
 
-large-file.bin.yref
+large-file.bin.bref
   Local:  ✗ Missing
   Remote: ✓ (sha256:ghi...)
 ```
@@ -563,9 +563,9 @@ blobsy verify
 **Expected output**:
 
 ```
-✓ small-file.bin (sha256:abc... matches .yref)
-✓ medium-file.bin (sha256:def... matches .yref)
-✓ large-file.bin (sha256:ghi... matches .yref)
+✓ small-file.bin (sha256:abc... matches .bref)
+✓ medium-file.bin (sha256:def... matches .bref)
+✓ large-file.bin (sha256:ghi... matches .bref)
 All files verified successfully.
 ```
 
@@ -579,7 +579,7 @@ All files verified successfully.
 
 - **Issue**: Hash mismatch during pull **Fix**: Backend corruption or network issue,
   delete local file and re-pull with `--force`
-- **Issue**: Pull failed “file not found in backend” **Fix**: Check `.yref` remote_key
+- **Issue**: Pull failed “file not found in backend” **Fix**: Check `.bref` remote_key
   is valid, inspect backend directory
 
 ### 2.7 Test Idempotency
@@ -642,16 +642,16 @@ Pushing compressible.bin...
 ✓ Pushed 1 file
 ```
 
-**Check .yref for compression metadata**:
+**Check .bref for compression metadata**:
 
 ```bash
-cat compressible.bin.yref
+cat compressible.bin.bref
 ```
 
 **Expected fields**:
 
 ```yaml
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:xyz789...
 size: 1024000
 remote_key: 20260221T120100Z-xyz789.../compressible.bin.zst
@@ -704,7 +704,7 @@ blobsy push --verbose
 **Verify**:
 
 - [ ] Remote key has `.gz` suffix
-- [ ] `.yref` shows `compressed: gzip`
+- [ ] `.bref` shows `compressed: gzip`
 
 **Test brotli**:
 
@@ -718,7 +718,7 @@ blobsy push --verbose
 **Verify**:
 
 - [ ] Remote key has `.br` suffix
-- [ ] `.yref` shows `compressed: brotli`
+- [ ] `.bref` shows `compressed: brotli`
 
 **Round-trip all algorithms**:
 
@@ -783,8 +783,8 @@ blobsy track small.bin large.bin model.onnx notes.txt
 
 **Verify**:
 
-- [ ] Only `large.bin.yref` and `model.onnx.yref` created
-- [ ] No `.yref` for `small.bin` or `notes.txt`
+- [ ] Only `large.bin.bref` and `model.onnx.bref` created
+- [ ] No `.bref` for `small.bin` or `notes.txt`
 
 **Troubleshooting**:
 
@@ -843,23 +843,23 @@ blobsy pull large.bin 2>&1
 mv ../blobsy-remote.backup ../blobsy-remote
 ```
 
-### 4.2 Test Invalid .yref File
+### 4.2 Test Invalid .bref File
 
-**Corrupt .yref file**:
+**Corrupt .bref file**:
 
 ```bash
 # Save original
-cp large.bin.yref large.bin.yref.backup
+cp large.bin.bref large.bin.bref.backup
 
 # Break hash field
-sed -i.bak 's/sha256:/sha999:/' large.bin.yref
+sed -i.bak 's/sha256:/sha999:/' large.bin.bref
 blobsy verify large.bin 2>&1
 ```
 
 **Expected error**:
 
 ```
-✗ Error: Invalid hash algorithm in large.bin.yref: sha999
+✗ Error: Invalid hash algorithm in large.bin.bref: sha999
   Supported: sha256
 ```
 
@@ -872,21 +872,21 @@ blobsy verify large.bin 2>&1
 **Break YAML syntax**:
 
 ```bash
-echo "invalid: yaml: syntax:" > large.bin.yref
+echo "invalid: yaml: syntax:" > large.bin.bref
 blobsy status large.bin 2>&1
 ```
 
 **Expected error**:
 
 ```
-✗ Error: Failed to parse large.bin.yref
+✗ Error: Failed to parse large.bin.bref
   YAML parse error: ...
 ```
 
-**Restore .yref**:
+**Restore .bref**:
 
 ```bash
-mv large.bin.yref.backup large.bin.yref
+mv large.bin.bref.backup large.bin.bref
 ```
 
 ### 4.3 Test Missing Local File (Untracked Push)
@@ -914,8 +914,8 @@ blobsy push untracked.bin 2>&1
 **Delete remote blob, try to pull**:
 
 ```bash
-# Find remote key from .yref
-REMOTE_KEY=$(grep 'remote_key:' large.bin.yref | awk '{print $2}')
+# Find remote key from .bref
+REMOTE_KEY=$(grep 'remote_key:' large.bin.bref | awk '{print $2}')
 rm "../blobsy-remote/$REMOTE_KEY"
 rm large.bin
 blobsy pull large.bin 2>&1
@@ -925,7 +925,7 @@ blobsy pull large.bin 2>&1
 
 ```
 ✗ Error: Blob not found in backend: 20260221T...
-  File: large.bin.yref
+  File: large.bin.bref
   Backend may be incomplete or corrupted
 ```
 
@@ -952,9 +952,9 @@ blobsy push large.bin --force
 echo "modified" >> medium-file.bin
 blobsy track medium-file.bin --force  # Re-track with new hash
 
-# Simulate remote change (edit .yref directly to fake different remote hash)
+# Simulate remote change (edit .bref directly to fake different remote hash)
 FAKE_HASH="sha256:0000000000000000000000000000000000000000000000000000000000000000"
-sed -i.bak "s/hash: sha256:.*/hash: $FAKE_HASH/" medium-file.bin.yref
+sed -i.bak "s/hash: sha256:.*/hash: $FAKE_HASH/" medium-file.bin.bref
 
 # Try to sync
 blobsy sync medium-file.bin 2>&1
@@ -971,7 +971,7 @@ blobsy sync medium-file.bin 2>&1
   Resolution options:
   - Use local version:  blobsy sync medium-file.bin --force
   - Discard local:      blobsy pull medium-file.bin --force
-  - Manual resolution:  inspect file and .yref
+  - Manual resolution:  inspect file and .bref
 ```
 
 **Verify**:
@@ -1017,16 +1017,16 @@ blobsy mv original-name.bin new-name.bin
 
 ```
 ✓ Moved original-name.bin → new-name.bin
-✓ Updated .yref reference
+✓ Updated .bref reference
 ✓ Updated .gitignore
 ```
 
 **Verify**:
 
-- [ ] `new-name.bin` and `new-name.bin.yref` exist
-- [ ] `original-name.bin` and `original-name.bin.yref` deleted
+- [ ] `new-name.bin` and `new-name.bin.bref` exist
+- [ ] `original-name.bin` and `original-name.bin.bref` deleted
 - [ ] `.gitignore` updated (old name removed, new name added)
-- [ ] `.yref` remote_key still valid (unchanged)
+- [ ] `.bref` remote_key still valid (unchanged)
 
 **Test status after rename**:
 
@@ -1037,7 +1037,7 @@ blobsy status new-name.bin
 **Expected**:
 
 ```
-new-name.bin.yref
+new-name.bin.bref
   Local:  ✓ (sha256:...)
   Remote: ✓ (sha256:...)
 ```
@@ -1049,7 +1049,7 @@ new-name.bin.yref
 
 ### 5.2 Test rm (Delete Tracked File)
 
-**Delete local file and .yref (keeps remote blob)**:
+**Delete local file and .bref (keeps remote blob)**:
 
 ```bash
 blobsy rm new-name.bin
@@ -1059,14 +1059,14 @@ blobsy rm new-name.bin
 
 ```
 Removed new-name.bin
-Moved new-name.bin.yref to trash
+Moved new-name.bin.bref to trash
 Deleted local file
 ```
 
 **Verify**:
 
 - [ ] Local file deleted
-- [ ] .yref file deleted (moved to trash)
+- [ ] .bref file deleted (moved to trash)
 - [ ] .gitignore entry removed
 - [ ] Remote blob kept in backend (safe deletion - no data loss)
 
@@ -1075,7 +1075,7 @@ This prevents accidental data loss.
 To verify remote blob still exists, check backend directory or run `aws s3 ls` (for S3
 backends).
 
-**Test rm --local (keep .yref and remote)**:
+**Test rm --local (keep .bref and remote)**:
 
 ```bash
 dd if=/dev/urandom of=keep-remote.bin bs=1024 count=100
@@ -1093,7 +1093,7 @@ Deleted local file: keep-remote.bin
 **Verify**:
 
 - [ ] Local file deleted
-- [ ] .yref file KEPT (unlike regular rm)
+- [ ] .bref file KEPT (unlike regular rm)
 - [ ] Backend blob still exists (check `ls ../blobsy-remote/` or `aws s3 ls`)
 - [ ] Can later run `blobsy pull keep-remote.bin` to restore from backend
 
@@ -1177,7 +1177,7 @@ blobsy hooks install
 **Test hook prevents committing large tracked files**:
 
 ```bash
-git add large.bin large.bin.yref
+git add large.bin large.bin.bref
 git commit -m "Test commit" 2>&1
 ```
 
@@ -1194,7 +1194,7 @@ If you force-add with `-f`, then the blobsy pre-commit hook should block:
 ```
 ✗ Pre-commit check failed:
   large.bin is tracked by blobsy but not in .gitignore
-  Add to .gitignore or commit only the .yref file
+  Add to .gitignore or commit only the .bref file
 
   To bypass: git commit --no-verify
 ```
@@ -1210,11 +1210,11 @@ If you force-add with `-f`, then the blobsy pre-commit hook should block:
 - [ ] Clear error message
 - [ ] Bypass option mentioned (if hook runs)
 
-**Test hook allows .yref files**:
+**Test hook allows .bref files**:
 
 ```bash
 git reset
-git add large.bin.yref
+git add large.bin.bref
 git commit -m "Add large file reference"
 ```
 
@@ -1229,7 +1229,7 @@ git commit -m "Add large file reference"
 **Verify**:
 
 - [ ] Commit succeeds
-- [ ] Only .yref committed (check `git show --stat`)
+- [ ] Only .bref committed (check `git show --stat`)
 
 **Uninstall hook**:
 
@@ -1479,7 +1479,7 @@ blobsy doctor --verbose
 ```
 Checking repository health...
 ✓ Backend connectivity OK
-✓ All .yref files valid (10 checked)
+✓ All .bref files valid (10 checked)
 ✓ All tracked files present locally (10/10)
 ✓ All remote blobs accessible (10/10)
 ✓ Stat cache consistent (10 entries)
@@ -1495,7 +1495,7 @@ Repository is healthy.
 **Simulate issues and test doctor**:
 
 ```bash
-# Create orphaned .yref (missing local file)
+# Create orphaned .bref (missing local file)
 dd if=/dev/urandom of=orphan.bin bs=1024 count=50
 blobsy track orphan.bin
 blobsy push orphan.bin
@@ -1510,9 +1510,9 @@ blobsy doctor
 ```
 Checking repository health...
 ✓ Backend connectivity OK
-✓ All .yref files valid
+✓ All .bref files valid
 ⚠ Missing local files: 1
-  - orphan.bin (has .yref but file missing)
+  - orphan.bin (has .bref but file missing)
 ✓ All remote blobs accessible
 ✓ Stat cache mostly consistent (1 stale entry)
 
@@ -1537,7 +1537,7 @@ blobsy doctor --fix --verbose
 ```
 Checking repository health...
 ✓ Backend connectivity OK
-✓ All .yref files valid
+✓ All .bref files valid
 ⚠ Missing local files: 1
   → Pulling orphan.bin from backend...
   ✓ Restored orphan.bin
@@ -1563,7 +1563,7 @@ blobsy verify orphan.bin
 **Expected**:
 
 ```
-✓ orphan.bin (sha256:... matches .yref)
+✓ orphan.bin (sha256:... matches .bref)
 ```
 
 ### 7.3 Test Untrack (Cleanup)
@@ -1578,14 +1578,14 @@ blobsy untrack orphan.bin
 
 ```
 ✓ Untracked orphan.bin
-✓ Removed orphan.bin.yref
+✓ Removed orphan.bin.bref
 ✓ Updated .gitignore
 Local file kept: orphan.bin
 ```
 
 **Verify**:
 
-- [ ] `.yref` file deleted
+- [ ] `.bref` file deleted
 - [ ] `.gitignore` entry removed
 - [ ] Local file still exists
 
@@ -1607,13 +1607,13 @@ blobsy untrack subdir/ --recursive
 ```
 ✓ Untracked subdir/file1.bin
 ✓ Untracked subdir/file2.bin
-✓ Removed 2 .yref files
+✓ Removed 2 .bref files
 ✓ Updated .gitignore
 ```
 
 **Verify**:
 
-- [ ] All `.yref` files in subdirectory removed
+- [ ] All `.bref` files in subdirectory removed
 - [ ] Local files kept
 - [ ] `.gitignore` cleaned up
 
@@ -1635,7 +1635,7 @@ git status
 - [ ] `blobsy verify`: All files pass hash check
 - [ ] `blobsy health`: Backend connectivity OK
 - [ ] `blobsy doctor`: No issues
-- [ ] `git status`: Clean working tree (only .yref files committed)
+- [ ] `git status`: Clean working tree (only .bref files committed)
 
 **Check JSON outputs for all commands**:
 
@@ -1672,7 +1672,7 @@ blobsy verify --verbose
 **Likely causes**:
 
 - File modified after tracking (re-track with `blobsy track --force`)
-- Corrupted .yref file (restore from git or regenerate)
+- Corrupted .bref file (restore from git or regenerate)
 
 **Fix**: Re-track file or restore from remote with `blobsy pull --force`
 
@@ -1702,7 +1702,7 @@ blobsy status <file> --verbose  # See all three hashes
 
 - Use local: `blobsy sync <file> --force`
 - Use remote: `blobsy pull <file> --force`
-- Manual: inspect file and `.yref`, resolve manually
+- Manual: inspect file and `.bref`, resolve manually
 
 ### Pre-commit Hook Blocks Commit
 
@@ -1710,7 +1710,7 @@ blobsy status <file> --verbose  # See all three hashes
 git status  # Check what's staged
 ```
 
-**Solution**: Only commit `.yref` files, not the original large files (they should be in
+**Solution**: Only commit `.bref` files, not the original large files (they should be in
 .gitignore)
 
 ### Doctor Reports Issues
@@ -1723,7 +1723,7 @@ blobsy doctor --fix      # Attempt automatic repair
 **Manual fixes**:
 
 - Missing files: `blobsy pull`
-- Orphaned `.yref`: `blobsy untrack` or delete manually
+- Orphaned `.bref`: `blobsy untrack` or delete manually
 - Stale stat cache: Delete `.blobsy/stat-cache/` and run `blobsy verify`
 
 * * *
@@ -1789,13 +1789,13 @@ Key findings:
 - Hash verification and integrity checks working perfectly
 - Idempotency - all operations safe to re-run (push, pull, sync, verify)
 - JSON output valid and parseable (status, verify)
-- .yref file format clean, well-structured, and stable
+- .bref file format clean, well-structured, and stable
 - .gitignore management automatic and correct
 - Advanced operations all working:
-  - `mv`: Renames files, updates .yref and .gitignore, preserves remote_key (no
+  - `mv`: Renames files, updates .bref and .gitignore, preserves remote_key (no
     re-upload)
-  - `rm`: Removes local file and .yref, keeps remote blob
-  - `rm --local`: Removes only local file, keeps .yref and remote blob for later re-pull
+  - `rm`: Removes local file and .bref, keeps remote blob
+  - `rm --local`: Removes only local file, keeps .bref and remote blob for later re-pull
   - `sync`: Intelligently detects changes, pushes/pulls as needed, fully idempotent
   - Git hooks: Install/uninstall works correctly
 
@@ -1821,7 +1821,7 @@ Key findings:
    - This is correct behavior (avoids accidental data duplication)
    - Should be documented in user guide
 
-5. **File Deletion Behavior**: `blobsy rm` removes local+.yref but keeps remote blob
+5. **File Deletion Behavior**: `blobsy rm` removes local+.bref but keeps remote blob
    - This is safe (prevents accidental data loss)
    - Use case: clean up local workspace while preserving backend storage
    - Could add `blobsy rm --remote` flag for full deletion if needed

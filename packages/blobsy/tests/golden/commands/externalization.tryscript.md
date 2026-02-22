@@ -41,13 +41,13 @@ Scanning data/...
 # Verify only large.bin was externalized (small.txt and notes.md skipped)
 
 ```console
-$ find data/ -name '*.yref' | sort
-data/large.bin.yref
+$ find data/ -name '*.bref' | sort
+data/large.bin.bref
 ? 0
 ```
 
 ```console
-$ test ! -f data/small.txt.yref && test ! -f data/notes.md.yref && echo "correctly skipped"
+$ test ! -f data/small.txt.bref && test ! -f data/notes.md.bref && echo "correctly skipped"
 correctly skipped
 ? 0
 ```

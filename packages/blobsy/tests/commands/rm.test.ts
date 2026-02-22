@@ -41,11 +41,11 @@ describe('rm command with --remote flag', () => {
       const pushResult = await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
       expect(pushResult.exitCode).toBe(0);
 
-      // Read the .yref to get remote_key before deletion
-      const yrefPath = join(testDir, 'file.bin.yref');
-      const yrefContent = await readFile(yrefPath, 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      const remoteKey = yref.remote_key;
+      // Read the .bref to get remote_key before deletion
+      const brefPath = join(testDir, 'file.bin.bref');
+      const brefContent = await readFile(brefPath, 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      const remoteKey = bref.remote_key;
 
       expect(remoteKey).toBeDefined();
       expect(typeof remoteKey).toBe('string');
@@ -69,8 +69,8 @@ describe('rm command with --remote flag', () => {
       // Verify local file was removed
       expect(existsSync(join(testDir, 'file.bin'))).toBe(false);
 
-      // Verify .yref was moved to trash
-      expect(existsSync(yrefPath)).toBe(false);
+      // Verify .bref was moved to trash
+      expect(existsSync(brefPath)).toBe(false);
       const trashDir = join(testDir, '.blobsy', 'trash');
       expect(existsSync(trashDir)).toBe(true);
     });
@@ -82,11 +82,11 @@ describe('rm command with --remote flag', () => {
 
       // Push and verify remote_key is set
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
 
       // Only run this test if remote_key was set (push succeeded)
-      if (!yref.remote_key) {
+      if (!bref.remote_key) {
         console.warn('Skipping test: file was not pushed successfully');
         return;
       }
@@ -125,16 +125,16 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key before deletion
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
 
       // Only run if push succeeded and remote_key is set
-      if (!yref.remote_key) {
+      if (!bref.remote_key) {
         console.warn('Skipping test: file was not pushed successfully');
         return;
       }
 
-      const remoteKey = yref.remote_key;
+      const remoteKey = bref.remote_key;
       const backendBlobPath = join(backendDir, remoteKey);
 
       // Check if blob exists before deletion (may not if backend path is wrong)
@@ -174,9 +174,9 @@ describe('rm command with --remote flag', () => {
       // Should show cancellation message
       expect(output).toMatch(/cancelled|Remote deletion cancelled/i);
 
-      // Local file and .yref should still be removed regardless
+      // Local file and .bref should still be removed regardless
       expect(existsSync(join(testDir, 'file.bin'))).toBe(false);
-      expect(existsSync(join(testDir, 'file.bin.yref'))).toBe(false);
+      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(false);
 
       // Blob should still exist if it existed before (deletion cancelled)
       // Only check if we could verify it existed before
@@ -191,9 +191,9 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key before deletion
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      const remoteKey = yref.remote_key!;
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      const remoteKey = bref.remote_key!;
       const backendBlobPath = join(backendDir, remoteKey);
 
       // Spawn process to handle interactive prompt
@@ -292,9 +292,9 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['track', 'unpushed.bin'], { cwd: testDir });
 
       // Verify file has no remote_key
-      const yrefContent = await readFile(join(testDir, 'unpushed.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      expect(yref.remote_key).toBeUndefined();
+      const brefContent = await readFile(join(testDir, 'unpushed.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      expect(bref.remote_key).toBeUndefined();
 
       // Delete with --remote should succeed
       const result = await execa('blobsy', ['rm', 'unpushed.bin', '--remote', '--force'], {
@@ -313,9 +313,9 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      const remoteKey = yref.remote_key!;
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      const remoteKey = bref.remote_key!;
       const backendBlobPath = join(backendDir, remoteKey);
 
       expect(existsSync(backendBlobPath)).toBe(true);
@@ -340,15 +340,15 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['push'], { cwd: testDir });
 
       // Get remote keys
-      const yref1 = parseYaml(await readFile(join(testDir, 'file1.bin.yref'), 'utf-8')) as {
+      const bref1 = parseYaml(await readFile(join(testDir, 'file1.bin.bref'), 'utf-8')) as {
         remote_key?: string;
       };
-      const yref2 = parseYaml(await readFile(join(testDir, 'file2.bin.yref'), 'utf-8')) as {
+      const bref2 = parseYaml(await readFile(join(testDir, 'file2.bin.bref'), 'utf-8')) as {
         remote_key?: string;
       };
 
-      const blob1Path = join(backendDir, yref1.remote_key!);
-      const blob2Path = join(backendDir, yref2.remote_key!);
+      const blob1Path = join(backendDir, bref1.remote_key!);
+      const blob2Path = join(backendDir, bref2.remote_key!);
 
       expect(existsSync(blob1Path)).toBe(true);
       expect(existsSync(blob2Path)).toBe(true);
@@ -371,9 +371,9 @@ describe('rm command with --remote flag', () => {
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
 
       // Get remote key and manually delete blob to simulate backend error
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      const backendBlobPath = join(backendDir, yref.remote_key!);
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      const backendBlobPath = join(backendDir, bref.remote_key!);
 
       // Delete blob manually
       await rm(backendBlobPath);
@@ -397,7 +397,7 @@ describe('rm command with --remote flag', () => {
   });
 
   describe('--local flag behavior', () => {
-    it('should keep .yref with --local flag (for re-pull)', async () => {
+    it('should keep .bref with --local flag (for re-pull)', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
       await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
@@ -408,13 +408,13 @@ describe('rm command with --remote flag', () => {
       // Local file should be removed
       expect(existsSync(join(testDir, 'file.bin'))).toBe(false);
 
-      // .yref should still exist
-      expect(existsSync(join(testDir, 'file.bin.yref'))).toBe(true);
+      // .bref should still exist
+      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(true);
 
       // Backend blob should still exist
-      const yrefContent = await readFile(join(testDir, 'file.bin.yref'), 'utf-8');
-      const yref = parseYaml(yrefContent) as { remote_key?: string };
-      const backendBlobPath = join(backendDir, yref.remote_key!);
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      const backendBlobPath = join(backendDir, bref.remote_key!);
       expect(existsSync(backendBlobPath)).toBe(true);
     });
   });

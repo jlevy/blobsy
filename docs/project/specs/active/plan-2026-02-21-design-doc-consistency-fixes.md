@@ -145,7 +145,7 @@ Add a TODO comment at line 60 (after compress_suffix):
 - [blobsy-design.md:636-646](../../design/current/blobsy-design.md)
 - [plan-2026-02-21-blobsy-phase2-v1-completion.md:113](plan-2026-02-21-blobsy-phase2-v1-completion.md)
 
-**Problem:** The `.yref` format includes optional `compressed` and `compressed_size`
+**Problem:** The `.bref` format includes optional `compressed` and `compressed_size`
 fields. However, the design states that compression suffix handling can work two ways:
 1. Suffix in template variable (`{compress_suffix}`)
 2. Automatic suffix handling by blobsy
@@ -221,7 +221,7 @@ remote:
 ```
 
 **Compression State Storage:** The actual compression algorithm and compressed size are
-stored in the `.yref` file (fields `compressed` and `compressed_size`). The remote key
+stored in the `.bref` file (fields `compressed` and `compressed_size`). The remote key
 suffix is only a convenience for human readability.
 ````
 
@@ -262,14 +262,14 @@ Users won't know when they can safely sync uncommitted changes.
 After line 780, add new section:
 
 ```markdown
-**Uncommitted .yref Handling Details:**
+**Uncommitted .bref Handling Details:**
 
-When `blobsy sync` encounters uncommitted `.yref` files, the behavior follows this decision flow:
+When `blobsy sync` encounters uncommitted `.bref` files, the behavior follows this decision flow:
 
-1. **Check working tree state** → Compare working tree `.yref` to `HEAD:.yref`
+1. **Check working tree state** → Compare working tree `.bref` to `HEAD:.bref`
 2. **Issue warning** if uncommitted refs detected:
 ````
-Warning: 2 .yref files have uncommitted changes.
+Warning: 2 .bref files have uncommitted changes.
 Run ‘git add -A && git commit’ to commit them.
 ```
 3. **Proceed to stat cache merge** → Use three-way merge algorithm (see [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md#three-way-merge-algorithm))
@@ -285,7 +285,7 @@ Use ‘blobsy push’ or ‘blobsy pull’ explicitly.
 **Example: Uncommitted + Ambiguous**
 ```bash
 $ blobsy sync
-Warning: 1 .yref file has uncommitted changes. Run 'git add -A && git commit' to commit.
+Warning: 1 .bref file has uncommitted changes. Run 'git add -A && git commit' to commit.
 
 Syncing 1 file...
 ✗ Error: No stat cache entry for data/model.bin.
@@ -308,7 +308,7 @@ At line 334 (in the decision table), add a note column:
 ```diff
  | B | A | (none) | Ambiguous -- no merge base | **Error** (ask user) |
 +
-+**Note on uncommitted refs:** The "ambiguous" case often occurs after `git pull` when the user hasn't run `blobsy` commands yet. The working tree `.yref` differs from the file on disk, but there's no stat cache entry to determine which changed first. Solution: run explicit `blobsy push` or `blobsy pull` to establish merge base.
++**Note on uncommitted refs:** The "ambiguous" case often occurs after `git pull` when the user hasn't run `blobsy` commands yet. The working tree `.bref` differs from the file on disk, but there's no stat cache entry to determine which changed first. Solution: run explicit `blobsy push` or `blobsy pull` to establish merge base.
 ````
 
 * * *
@@ -476,10 +476,10 @@ At line 295, expand the timestamp note:
 - [plan-2026-02-21-blobsy-phase1-implementation.md:76, 171](plan-2026-02-21-blobsy-phase1-implementation.md)
 
 **Problem:** The design includes a full error scenario (lines 1290-1305) showing what
-happens if `.yref` points to the wrong file after a manual `mv` command.
+happens if `.bref` points to the wrong file after a manual `mv` command.
 However, the spec says `blobsy mv` is for files only and directory support is deferred.
 But it doesn’t specify:
-- Can you move a tracked file to a different directory and maintain `.yref` +
+- Can you move a tracked file to a different directory and maintain `.bref` +
   `.gitignore` coherence?
 - What if the destination directory has different externalization rules?
 - Does `.gitignore` remain in the source directory referencing a deleted file?
@@ -512,7 +512,7 @@ blobsy mv data/old/model.bin research/experiments/model.bin
 **Operation Sequence:**
 
 1. **Validation:**
-   - Check source file exists and is tracked (has `.yref`)
+   - Check source file exists and is tracked (has `.bref`)
    - Check destination directory exists (create if `--mkdir` flag provided, error
      otherwise)
    - Check destination file doesn’t exist (error if exists, unless `--force`)
@@ -528,9 +528,9 @@ blobsy mv data/old/model.bin research/experiments/model.bin
 
 3. **Move Operations:**
    - Move payload file: `data/old/model.bin` → `research/experiments/model.bin`
-   - Move `.yref` file: `data/old/model.bin.yref` →
-     `research/experiments/model.bin.yref`
-   - Update `.yref` remote_key is **NOT changed** (remote blob stays at same key)
+   - Move `.bref` file: `data/old/model.bin.bref` →
+     `research/experiments/model.bin.bref`
+   - Update `.bref` remote_key is **NOT changed** (remote blob stays at same key)
 
 4. **Gitignore Updates:**
    - **Source directory** (`data/old/.gitignore`):
@@ -543,7 +543,7 @@ blobsy mv data/old/model.bin research/experiments/model.bin
      - Create `.gitignore` if it doesn’t exist
 
 5. **Git Staging:**
-   - Stage all modified files: payload, `.yref`, source `.gitignore`, dest `.gitignore`
+   - Stage all modified files: payload, `.bref`, source `.gitignore`, dest `.gitignore`
    - User must commit the move
 
 **Example Output:**
@@ -551,12 +551,12 @@ blobsy mv data/old/model.bin research/experiments/model.bin
 $ blobsy mv data/old/model.bin research/experiments/model.bin
 
 ✓ Moved data/old/model.bin → research/experiments/model.bin
-✓ Moved data/old/model.bin.yref → research/experiments/model.bin.yref
+✓ Moved data/old/model.bin.bref → research/experiments/model.bin.bref
 ✓ Updated .gitignore (2 files)
 
 Staged files:
   research/experiments/model.bin
-  research/experiments/model.bin.yref
+  research/experiments/model.bin.bref
   research/experiments/.gitignore
   data/old/.gitignore
 
@@ -774,7 +774,7 @@ This is deferred to V1.1 pending user feedback on whether it’s needed.
 not uploads. The section conflates push and pull:
 - Title says "Atomic Writes" (implies push)
 - Content covers download pattern (pull)
-- No mention of atomic writes for `.yref` updates (which is actually covered elsewhere
+- No mention of atomic writes for `.bref` updates (which is actually covered elsewhere
   in temp-file-then-rename)
 
 **Impact:** Confusing for readers and potential implementation gaps.
@@ -782,9 +782,9 @@ Developers may not understand which operations are atomic.
 
 **Recommended fix:**
 - Retitle section as "Atomic Writes and Downloads"
-- Split into two subsections: "Atomic .yref Updates" and "Atomic Downloads"
-- Cross-reference the temp-file-then-rename pattern for `.yref` updates
-- Clarify that atomicity applies to: `.yref` updates (push), remote blob writes (push),
+- Split into two subsections: "Atomic .bref Updates" and "Atomic Downloads"
+- Cross-reference the temp-file-then-rename pattern for `.bref` updates
+- Clarify that atomicity applies to: `.bref` updates (push), remote blob writes (push),
   and local blob downloads (pull)
 
 **Detailed Line-Level Solution:**
@@ -802,16 +802,16 @@ At line 536, retitle and restructure:
 -We do not rely on external tools to handle atomicity.
 +Blobsy ensures atomicity for all file operations (both reads and writes) to prevent corruption and inconsistent state.
 
-+### Atomic .yref Updates (Push)
++### Atomic .bref Updates (Push)
 +
-+When `blobsy push` updates a `.yref` file, it uses **temp-file-then-rename** pattern:
++When `blobsy push` updates a `.bref` file, it uses **temp-file-then-rename** pattern:
 +
-+1. Compute new `.yref` content (hash, size, remote_key, compressed fields)
-+2. Write to temporary file `.yref.tmp-{random}`
++1. Compute new `.bref` content (hash, size, remote_key, compressed fields)
++2. Write to temporary file `.bref.tmp-{random}`
 +3. `fsync()` to ensure data reaches disk
-+4. Atomically rename `.yref.tmp-{random}` → `.yref`
++4. Atomically rename `.bref.tmp-{random}` → `.bref`
 +
-+**Atomicity guarantee:** The `.yref` file is never in a partially-written state. Either the old version exists, or the new version exists — no intermediate state.
++**Atomicity guarantee:** The `.bref` file is never in a partially-written state. Either the old version exists, or the new version exists — no intermediate state.
 +
 +**Implementation:** `packages/blobsy/src/ref.ts:67-81` (uses `atomically` package)
 +
@@ -822,7 +822,7 @@ At line 536, retitle and restructure:
 +- Failed uploads leave no partial object
 +- No temp file needed (S3 handles atomicity)
 +
-+For local backends, same temp-file-then-rename pattern as .yref files:
++For local backends, same temp-file-then-rename pattern as .bref files:
 +1. Write to `.blobsy/store/{key}.tmp-{random}`
 +2. `fsync()` to disk
 +3. Rename to `.blobsy/store/{key}`
@@ -953,34 +953,34 @@ Expected format: <number><unit> (e.g., "1mb", "100kb")
   ordering)
 - [issues-history.md:134](../../design/current/issues-history.md)
 
-**Problem:** The design proposes an optional `remote_checksum` field in `.yref` for V2.
+**Problem:** The design proposes an optional `remote_checksum` field in `.bref` for V2.
 However, the field ordering in the ref format (line 572) doesn't reserve space for this,
 and the parsing code might not ignore unknown fields.
 This creates:
 - Forward/backward compatibility risk
 - Unclear field ordering for the future version
 
-**Impact:** V1 code reading a V2 `.yref` with `remote_checksum` might fail or ignore it
+**Impact:** V1 code reading a V2 `.bref` with `remote_checksum` might fail or ignore it
 incorrectly.
 
 **Recommended fix:** Document the forward compatibility strategy:
 1. V1 parser ignores unknown fields on read (defensive parsing)
 2. Reserve field ordering position for `remote_checksum` in documentation
-3. Add note that `.yref` format is designed for forward compatibility
-4. Show example of V1 parser reading V2 `.yref` with extra fields
+3. Add note that `.bref` format is designed for forward compatibility
+4. Show example of V1 parser reading V2 `.bref` with extra fields
 
 **Detailed Line-Level Solution:**
 
 **File: `docs/project/design/current/blobsy-design.md`**
 
-After line 589 (after the YRef format table), add:
+After line 589 (after the Bref format table), add:
 
 ```markdown
 **Forward Compatibility Strategy:**
 
-The `.yref` format is designed for forward compatibility across versions:
+The `.bref` format is designed for forward compatibility across versions:
 
-1. **Format version field** (`format: blobsy-yref/0.1`):
+1. **Format version field** (`format: blobsy-bref/0.1`):
    - Major version changes (0.x → 1.x) indicate breaking changes
    - Minor version changes (0.1 → 0.2) indicate additive changes
    - V1 parser **allows** newer minor versions, **rejects** newer major versions
@@ -994,13 +994,13 @@ The `.yref` format is designed for forward compatibility across versions:
    - Fields always written in same order to minimize git diff noise
    - New fields in V2 will be appended after existing fields
 
-**Example: V1 Parser Reading V2 .yref**
+**Example: V1 Parser Reading V2 .bref**
 
-V2 `.yref` with `remote_checksum` field:
+V2 `.bref` with `remote_checksum` field:
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.2
+format: blobsy-bref/0.2
 hash: sha256:7a3f0e...
 size: 15728640
 remote_key: sha256/7a3f0e...
@@ -1010,16 +1010,16 @@ remote_checksum: etag:d41d8cd98f00b204e9800998ecf8427e  # V2 field
 ````
 
 V1 parser behavior:
-- Reads `format: blobsy-yref/0.2` → **Accepts** (minor version bump)
+- Reads `format: blobsy-bref/0.2` → **Accepts** (minor version bump)
 - Validates required fields: `hash`, `size` → ✅ Present and valid
 - Reads `remote_checksum` field → **Ignores** (unknown field)
-- Result: Successfully reads `.yref`, ignores V2-specific field
+- Result: Successfully reads `.bref`, ignores V2-specific field
 
 **Implementation:** `packages/blobsy/src/ref.ts:89-117` (validateFormatVersion function)
 
 **Reserved Field Ordering (V2 Proposal):**
 
-Future `.yref` fields will follow this order:
+Future `.bref` fields will follow this order:
 ```yaml
 format: ...
 hash: ...
@@ -1031,7 +1031,7 @@ remote_checksum: ...      # V2: Provider ETag/checksum (e.g., "etag:d41d8cd98f..
 last_verified: ...        # V2: Timestamp of last integrity check
 ```
 
-This ordering ensures V1 and V2 `.yref` files have minimal diff noise.
+This ordering ensures V1 and V2 `.bref` files have minimal diff noise.
 ```
 
 ---
@@ -1189,7 +1189,7 @@ reachability-based GC outlined, branch-cleanup semantics described for V2). Howe
 - No pseudocode or algorithm for reachability scanning
 - No specification of `--depth` or `--older-than` parameters
 - No error handling for concurrent GC and push
-- Unclear: does GC scan working tree `.yref` files or only HEAD?
+- Unclear: does GC scan working tree `.bref` files or only HEAD?
 
 **Impact:** V2 implementation will need to guess at semantics.
 May lead to inconsistent GC behavior or data loss.
@@ -1199,8 +1199,8 @@ May lead to inconsistent GC behavior or data loss.
 - **Option B**: Add explicit algorithm pseudocode for reachability scanning now
 
 If keeping in main design, add:
-- Reachability algorithm: scan HEAD `.yref` → build set → list remote → delete orphans
-- Concurrent operation handling: GC fails if working tree has uncommitted `.yref`
+- Reachability algorithm: scan HEAD `.bref` → build set → list remote → delete orphans
+- Concurrent operation handling: GC fails if working tree has uncommitted `.bref`
   changes
 - Parameter specs: `--older-than=30d`, `--depth=all|HEAD|branch`
 
@@ -1224,7 +1224,7 @@ At line 2549 (end of GC section), add complete algorithm specification:
 
 ### Reachability Algorithm
 
-**Goal:** Delete remote blobs not referenced by any `.yref` in reachable commits.
+**Goal:** Delete remote blobs not referenced by any `.bref` in reachable commits.
 
 **Algorithm:**
 
@@ -1241,11 +1241,11 @@ def gc_reachability(depth='all', older_than=None, dry_run=False):
     # Step 2: Build reachable set
     reachable_remote_keys = set()
     for commit in refs_to_scan:
-        yref_files = find_yref_files_in_commit(commit)
-        for yref_path in yref_files:
-            yref = read_yref_from_commit(commit, yref_path)
-            if yref.remote_key:
-                reachable_remote_keys.add(yref.remote_key)
+        bref_files = find_bref_files_in_commit(commit)
+        for bref_path in bref_files:
+            bref = read_bref_from_commit(commit, bref_path)
+            if bref.remote_key:
+                reachable_remote_keys.add(bref.remote_key)
 
     # Step 3: List all remote blobs
     all_remote_keys = backend.list_all_blobs()
@@ -1277,7 +1277,7 @@ def gc_reachability(depth='all', older_than=None, dry_run=False):
 | `--depth` | enum | `all` | Scan depth: `all` (all branches/tags), `branch` (current branch only), `HEAD` (current commit only) |
 | `--older-than` | duration | none | Only delete blobs older than this age (e.g., `30d`, `6mo`, `1y`) |
 | `--dry-run` | boolean | false | Show what would be deleted without actually deleting |
-| `--include-worktree` | boolean | false | If true, also consider `.yref` files in working tree (not just HEAD) |
+| `--include-worktree` | boolean | false | If true, also consider `.bref` files in working tree (not just HEAD) |
 
 **Example Usage:**
 
@@ -1299,7 +1299,7 @@ blobsy gc --depth=branch --older-than=90d
 
 | Scenario | Behavior |
 | --- | --- |
-| GC runs while working tree has uncommitted `.yref` changes | **Error:** “Cannot run GC with uncommitted .yref files. Commit or stash changes.” |
+| GC runs while working tree has uncommitted `.bref` changes | **Error:** “Cannot run GC with uncommitted .bref files. Commit or stash changes.” |
 | GC runs during active `push` operation | **Safe:** Newly-pushed blobs have refs in working tree; won’t be deleted (if `--include-worktree` enabled) |
 | Multiple users run GC concurrently | **Safe:** Deletion is idempotent; last delete wins (both see same orphans) |
 | User pushes while GC is running | **Risk:** Blob could be deleted between push and commit. **Mitigation:** Always commit immediately after push (pre-commit hook enforces this) |
@@ -1313,7 +1313,7 @@ blobsy gc --depth=branch --older-than=90d
 
 **Performance:**
 
-- Scanning 10,000 commits with 1,000 `.yref` files each: ~30 seconds
+- Scanning 10,000 commits with 1,000 `.bref` files each: ~30 seconds
 - Listing 100,000 remote blobs: ~10 seconds (S3 `ListObjectsV2` pagination)
 - Total GC time for large repo: ~1-2 minutes
 
@@ -1331,9 +1331,9 @@ blobsy gc --depth=branch --older-than=90d
 - [plan-2026-02-21-blobsy-phase1-implementation.md:92-93](plan-2026-02-21-blobsy-phase1-implementation.md)
 
 **Problem:** Two commands have overlapping purposes:
-- `blobsy check-unpushed`: Find committed `.yref` files with no `remote_key` or missing
+- `blobsy check-unpushed`: Find committed `.bref` files with no `remote_key` or missing
   blobs
-- `blobsy pre-push-check`: Verify all `.yref` files in HEAD have remote blobs
+- `blobsy pre-push-check`: Verify all `.bref` files in HEAD have remote blobs
 
 But the descriptions and use cases aren't clearly differentiated:
 - When would you use check-unpushed vs.
@@ -1365,10 +1365,10 @@ blobsy pre-push-check && git push origin main
 At lines 92-93, expand the command descriptions:
 
 ```diff
--| `blobsy check-unpushed` | Find committed `.yref` files with no `remote_key` or missing remote blobs. Use git blame for attribution. |
--| `blobsy pre-push-check` | CI-friendly: verify all `.yref` files in HEAD have remote blobs. Exit 0 or 1. |
-+| `blobsy check-unpushed` | **Interactive mode:** Find committed `.yref` files with no `remote_key` or missing remote blobs. Shows **file paths, commit authors (git blame), and suggested fix**. Supports `--json` for scripting. Use for: manual review, finding who committed unpushed refs, bulk repair planning. |
-+| `blobsy pre-push-check` | **CI-only mode:** Verify all `.yref` files in HEAD have remote blobs. **Binary pass/fail** (exit 0 if all pushed, exit 1 if any missing). **No attribution**, **no suggestions**. Use in `.github/workflows` or git hooks to block merges if blobs not uploaded. |
+-| `blobsy check-unpushed` | Find committed `.bref` files with no `remote_key` or missing remote blobs. Use git blame for attribution. |
+-| `blobsy pre-push-check` | CI-friendly: verify all `.bref` files in HEAD have remote blobs. Exit 0 or 1. |
++| `blobsy check-unpushed` | **Interactive mode:** Find committed `.bref` files with no `remote_key` or missing remote blobs. Shows **file paths, commit authors (git blame), and suggested fix**. Supports `--json` for scripting. Use for: manual review, finding who committed unpushed refs, bulk repair planning. |
++| `blobsy pre-push-check` | **CI-only mode:** Verify all `.bref` files in HEAD have remote blobs. **Binary pass/fail** (exit 0 if all pushed, exit 1 if any missing). **No attribution**, **no suggestions**. Use in `.github/workflows` or git hooks to block merges if blobs not uploaded. |
 ```
 
 After line 93, add new section:
@@ -1413,7 +1413,7 @@ $ blobsy check-unpushed --json
   "unpushed": [
     {
       "path": "data/model.bin",
-      "ref_path": "data/model.bin.yref",
+      "ref_path": "data/model.bin.bref",
       "hash": "sha256:abc123...",
       "remote_key": null,
       "commit": "abc123def456",
@@ -1502,7 +1502,7 @@ This section consolidates all features designed but deferred to future versions.
 |---------|------------------------|---------------|
 | **Garbage collection** (`blobsy gc`) | Complex safety requirements; V1 doesn't generate much orphaned data | Fully designed (see lines 2476-2549) |
 | **Branch-isolated mode** (`{git_branch}` variable) | Unclear user demand; adds complexity | Fully designed (see lines 440-459) |
-| **Remote checksum storage** (`.yref` `remote_checksum` field) | V1 content-hash sufficient for integrity; ETags are optimization | Format reserved (forward-compatible) |
+| **Remote checksum storage** (`.bref` `remote_checksum` field) | V1 content-hash sufficient for integrity; ETags are optimization | Format reserved (forward-compatible) |
 | **Export/import** (repo-to-repo blob transfer) | Complex; unclear use cases | Not designed |
 | **Dictionary compression** (shared compression dictionaries) | Minor storage savings; high complexity | Not designed |
 
@@ -1510,7 +1510,7 @@ This section consolidates all features designed but deferred to future versions.
 
 | Feature | Reason Not Implemented |
 |---------|------------------------|
-| **Nested .yref files** (ref-to-ref indirection) | Adds complexity; no clear use case |
+| **Nested .bref files** (ref-to-ref indirection) | Adds complexity; no clear use case |
 | **Blob versioning** (multiple versions of same blob) | Git already provides versioning; redundant |
 | **Partial blob download** (range requests) | Incompatible with hash verification; users should externalize smaller files |
 | **Automatic gitignore removal** (when untracking) | Too risky; users may have manual gitignore entries |
@@ -1606,18 +1606,18 @@ Note: Verify zstd Windows support and document any limitations.
 
 * * *
 
-#### Issue #21: Pre-Commit Hook Behavior with Staged .yref Files Underspecified
+#### Issue #21: Pre-Commit Hook Behavior with Staged .bref Files Underspecified
 
 **Affected files:**
 - [blobsy-implementation-notes.md:99-127](../../design/current/blobsy-implementation-notes.md)
 
 **Problem:** The hook implementation calls `push()` directly, then re-stages updated
-`.yref` files. But:
+`.bref` files. But:
 - What if push fails? Does the commit block?
 - What if re-staging fails?
   (probably shouldn’t)
 - Can user bypass the hook with `--no-verify`?
-- What if multiple staged `.yref` files; does it push all or stop on first error?
+- What if multiple staged `.bref` files; does it push all or stop on first error?
 
 **Impact:** Unpredictable commit flow if errors occur.
 Users don’t know if commit will succeed.
@@ -1661,7 +1661,7 @@ Add cross-reference from design doc to `paths.ts` implementation.
 
 * * *
 
-#### Issue #23: `.yref` Comment Header Not Self-Contained
+#### Issue #23: `.bref` Comment Header Not Self-Contained
 
 **Affected files:**
 - [blobsy-design.md:576-577](../../design/current/blobsy-design.md) (Comment header
@@ -1669,7 +1669,7 @@ Add cross-reference from design doc to `paths.ts` implementation.
 - [plan-2026-02-21-blobsy-phase2-v1-completion.md:288-292](plan-2026-02-21-blobsy-phase2-v1-completion.md)
 
 **Problem:** The comment header is just a URL and one-liner.
-An agent encountering a `.yref` file for the first time needs to run `blobsy status` or
+An agent encountering a `.bref` file for the first time needs to run `blobsy status` or
 `blobsy --help` to understand the system.
 Design says it should be “self-documenting” but the header is minimal.
 
@@ -1692,7 +1692,7 @@ Update design doc with expanded header format.
 #### Issue #24: Hash Algorithm Agility Field Name Inconsistent
 
 **Affected files:**
-- [blobsy-design.md:589](../../design/current/blobsy-design.md) (`.yref` format)
+- [blobsy-design.md:589](../../design/current/blobsy-design.md) (`.bref` format)
 - [issues-history.md:99](../../design/current/issues-history.md)
 
 **Problem:** The design shows `hash: sha256:7a3f0e...` but the field is generic.
@@ -1702,7 +1702,7 @@ If you want to support other algorithms, you’d need:
 
 Design doesn’t specify which approach for future-proofing.
 
-**Impact:** Future upgrades may require `.yref` migration.
+**Impact:** Future upgrades may require `.bref` migration.
 Unclear how to add new hash algorithms.
 
 **Recommended fix:** Document:
@@ -1926,7 +1926,7 @@ Improve clarity and completeness:
 - [ ] **Issue #20**: Add compression OS compatibility matrix
 - [ ] **Issue #21**: Document pre-commit hook error handling
 - [ ] **Issue #22**: Document Windows path handling
-- [ ] **Issue #23**: Expand `.yref` comment header
+- [ ] **Issue #23**: Expand `.bref` comment header
 - [ ] **Issue #24**: Document hash algorithm agility
 - [ ] **Issue #25**: Clarify JSON schema versioning
 - [ ] **Issue #26**: Document stat cache path structure

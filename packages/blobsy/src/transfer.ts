@@ -16,7 +16,7 @@ import type {
   BlobsyConfig,
   ResolvedBackendConfig,
   TransferResult,
-  YRef,
+  Bref,
 } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
@@ -146,7 +146,7 @@ export function createBackend(
 export async function pushFile(
   filePath: string,
   repoPath: string,
-  ref: Readonly<YRef>,
+  ref: Readonly<Bref>,
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
@@ -218,7 +218,7 @@ export async function pushFile(
 
 /** Pull a single file from remote. */
 export async function pullFile(
-  ref: YRef,
+  ref: Bref,
   localPath: string,
   config: BlobsyConfig,
   repoRoot: string,
@@ -231,7 +231,7 @@ export async function pullFile(
       path: normalizePath(toRepoRelative(localPath, repoRoot)),
       success: false,
       action: 'pull',
-      error: 'No remote_key in .yref. File has not been pushed.',
+      error: 'No remote_key in .bref. File has not been pushed.',
     };
   }
 

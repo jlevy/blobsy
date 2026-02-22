@@ -14,9 +14,9 @@ Evidence:
 
 ```text
 blobsy-design-v2.md:1106-1121
-Reads from working tree `.yref` files (can operate on uncommitted refs with warnings).
-Algorithm includes updating `.yref` hashes and `remote_key`.
-Sync can modify `.yref` files; user must commit them.
+Reads from working tree `.bref` files (can operate on uncommitted refs with warnings).
+Algorithm includes updating `.bref` hashes and `remote_key`.
+Sync can modify `.bref` files; user must commit them.
 ```
 
 ```text
@@ -26,8 +26,8 @@ Same precondition (refs must be committed).
 
 ```text
 blobsy-design-v2.md:1712-1714
-`blobsy sync` only operates on files whose `.yref` is committed to git.
-It never modifies `.yref` files (except to set `remote_key` after push).
+`blobsy sync` only operates on files whose `.bref` is committed to git.
+It never modifies `.bref` files (except to set `remote_key` after push).
 ```
 
 Impact: this creates implementation and test ambiguity on core command behavior.
@@ -145,7 +145,7 @@ Compression key derivation is also presented in two potentially conflicting ways
 ```text
 blobsy-design-v2.md:530-540
 Suffix should be in template to avoid collisions.
-Alternatively suffix handled automatically from `.yref` compression state.
+Alternatively suffix handled automatically from `.bref` compression state.
 ```
 
 Impact: implementers cannot derive a single canonical key contract.
@@ -170,7 +170,7 @@ Simple and works for tens to hundreds of files.
 
 ```text
 blobsy-design-v2.md:2146
-10,000 files = 10,000 `.yref` files.
+10,000 files = 10,000 `.bref` files.
 ```
 
 ```text

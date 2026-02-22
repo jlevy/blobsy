@@ -67,22 +67,22 @@ No issues found.
 ? 0
 ```
 
-# Doctor detects orphaned .yref (local file missing, no remote_key)
+# Doctor detects orphaned .bref (local file missing, no remote_key)
 
-Create orphan: track a file without pushing, then remove the local file so .yref exists
+Create orphan: track a file without pushing, then remove the local file so .bref exists
 but has no remote_key.
 
 ```console
 $ cp small-file.txt data/orphan.bin && blobsy track data/orphan.bin && rm data/orphan.bin
 Tracking data/orphan.bin
-Created data/orphan.bin.yref
+Created data/orphan.bin.bref
 Added data/orphan.bin to .gitignore
 ? 0
 ```
 
 ```console
 $ blobsy doctor
-  ✗  data/orphan.bin: .yref exists but local file missing and no remote_key
+  ✗  data/orphan.bin: .bref exists but local file missing and no remote_key
 
 1 issue found. Run with --fix to attempt repairs.
 ? 1

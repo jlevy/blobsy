@@ -26,18 +26,18 @@ this consolidated design.
 - [Round 6: GPT5.3 Codex review](../archive/blobsy-design-review-round6-gpt53codexextrahigh.md)
   (findings 1-6)
 
-### Resolved by Per-File `.yref` Architecture
+### Resolved by Per-File `.bref` Architecture
 
 These issues are eliminated by the architectural shift to per-file refs and
 content-addressable storage.
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
-| `blobsy-cx82` | R3 P0-1 | Versioning semantics: “latest mirror” vs “immutable snapshots” | **Resolved.** Content-addressable storage = immutable blobs. Git history of `.yref` files = full versioning. Old commits can be checked out and pulled (blobs are never overwritten). No contradiction. |
-| `blobsy-mlv9` | R3 P0-3 | `manifest_sha256` for directory pointers | **Eliminated.** No manifests, no directory pointers. Each file has its own `.yref` with its own `hash`. Git diff is meaningful per-file. |
-| `blobsy-a64l` | R3 P0-2 | Post-merge promotion workflow | **Eliminated.** Content-addressable blobs are not prefix-bound. After merge, `.yref` files on main point to the same blobs that were pushed from the feature branch. No promotion needed. |
+| `blobsy-cx82` | R3 P0-1 | Versioning semantics: “latest mirror” vs “immutable snapshots” | **Resolved.** Content-addressable storage = immutable blobs. Git history of `.bref` files = full versioning. Old commits can be checked out and pulled (blobs are never overwritten). No contradiction. |
+| `blobsy-mlv9` | R3 P0-3 | `manifest_sha256` for directory pointers | **Eliminated.** No manifests, no directory pointers. Each file has its own `.bref` with its own `hash`. Git diff is meaningful per-file. |
+| `blobsy-a64l` | R3 P0-2 | Post-merge promotion workflow | **Eliminated.** Content-addressable blobs are not prefix-bound. After merge, `.bref` files on main point to the same blobs that were pushed from the feature branch. No promotion needed. |
 | `blobsy-05j8` | R3 P0-4.2 | Delete semantics contradiction | **Eliminated.** Content-addressable storage never deletes or overwrites during sync. Old blobs remain until GC. No delete flags needed for push/pull. |
-| `blobsy-7h13` | R1 C2, R3 P0-4 | Single-file remote conflict detection | **Eliminated.** No “remote hash Z” needed. `.yref` merge conflicts handled by git. Payload-vs-ref desync detected by stat cache three-way merge (see [Conflict Detection](#conflict-detection)). Content-addressable = concurrent pushes of different content produce different keys (no overwrite). |
+| `blobsy-7h13` | R1 C2, R3 P0-4 | Single-file remote conflict detection | **Eliminated.** No “remote hash Z” needed. `.bref` merge conflicts handled by git. Payload-vs-ref desync detected by stat cache three-way merge (see [Conflict Detection](#conflict-detection)). Content-addressable = concurrent pushes of different content produce different keys (no overwrite). |
 | `blobsy-lsu9` | R3 P0-5 | Compression + transfer mechanics | **Resolved.** File-by-file orchestration (compress -> copy -> cleanup). Transfer tools used as copy engines, not diff engines. No staging directory needed. Compression is supported in the initial release via Node.js built-in `node:zlib`. |
 
 ### Resolved in Spec (Carried Forward)
@@ -52,10 +52,10 @@ These issues were resolved in the original spec and remain resolved in this desi
 | `blobsy-n23z` | R1 M2 | Format versioning | **Resolved.** `<name>/<major>.<minor>`, reject on major mismatch, warn on newer minor. |
 | `blobsy-0a9e` | R1 M3, R3 4.10 | Command backend template variables | **Resolved.** `{local}`, `{remote}`, `{relative_path}`, `{bucket}` specified. See Backend System. |
 | `blobsy-srme` | R1 M4, R3 4.8 | Which `.gitignore` to modify | **Resolved.** Same directory as tracked path. See Gitignore Management. |
-| `blobsy-v9py` | R1 M5, R3 4.3 | Detached HEAD SHA length | **Mostly eliminated.** No namespace prefixes in content-addressable mode. Detached HEAD is not special -- `.yref` files reference content hashes, not branch prefixes. |
+| `blobsy-v9py` | R1 M5, R3 4.3 | Detached HEAD SHA length | **Mostly eliminated.** No namespace prefixes in content-addressable mode. Detached HEAD is not special -- `.bref` files reference content hashes, not branch prefixes. |
 | `blobsy-bnku` | R1 M7, R3 4.4 | Push idempotency | **Resolved.** Content-addressable = inherently idempotent. Same hash = same key = no-op PUT. |
 | `blobsy-q6xr` | R3 4.4 | Pull behavior on local mods | **Resolved.** Default: error on modified files unless `--force`. See Pull section. |
-| `blobsy-txou` | R3 4.2 | Manifest canonicalization | **Eliminated.** No manifests. `.yref` files use stable key ordering. |
+| `blobsy-txou` | R3 4.2 | Manifest canonicalization | **Eliminated.** No manifests. `.bref` files use stable key ordering. |
 | `blobsy-v6eb` | R3 4.1 | Stable pointer key ordering | **Resolved.** Keys written in documented fixed order. See Ref File Format. |
 | `blobsy-mg0y` | R3 4.9 | `--json` schema version | **Resolved.** `schema_version` field in all JSON output. |
 | `blobsy-pice` | R3 4 | SDK endpoint wording | **Resolved.** Correct wording: SDK uses config object, not CLI flags. |
@@ -75,7 +75,7 @@ These issues were resolved in the original spec and remain resolved in this desi
 | --- | --- | --- | --- |
 | `blobsy-u4cs` | R1 S1, R3 4.3 | Branch name sanitization | **Eliminated.** No namespace prefixes in content-addressable mode. Branch names never appear in remote keys. |
 | `blobsy-q2dd` | R1 S4, R3 4.3 | Version namespace mode | **Eliminated.** No namespace modes. Versioning = git history. |
-| `blobsy-p8c4` | R3 4.2 | `stored_as` in manifest | **Eliminated.** No manifests. Compression state stored in `.yref`. |
+| `blobsy-p8c4` | R3 4.2 | `stored_as` in manifest | **Eliminated.** No manifests. Compression state stored in `.bref`. |
 | `blobsy-fjqj` | R3 4.7 | Compression skip list in repo config | **Addressed.** Compression rules in `.blobsy.yml`. See Compression Rules. |
 
 ### Resolved (Rounds 5-6)
@@ -96,21 +96,21 @@ Issues from round 5 and round 6 reviews that have been addressed in the current 
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
-| `blobsy-ojz7` | R5 5.1, R6-gpt5pro | Hash algorithm agility: `sha256` field bakes in algorithm | **Resolved.** `.yref` now uses `hash` field with `sha256:` prefix (e.g., `sha256:7a3f0e...`). Future algorithms can use different prefixes. |
+| `blobsy-ojz7` | R5 5.1, R6-gpt5pro | Hash algorithm agility: `sha256` field bakes in algorithm | **Resolved.** `.bref` now uses `hash` field with `sha256:` prefix (e.g., `sha256:7a3f0e...`). Future algorithms can use different prefixes. |
 | `blobsy-5o3h` | R5 5.5, R6-gpt5pro, R6-gemini | Atomic downloads: don’t rely on external tools for atomicity | **Resolved.** All downloads use temp file + hash verification + atomic rename, regardless of transfer engine. |
 | `blobsy-pqxs` | R5 3.2, R6-gpt5pro, R6-codex 4 | Branch-isolated mode contradictions (branch sanitization “eliminated” but `{git_branch}` still in templates) | **Resolved.** Branch-isolated mode and `{git_branch}` template variable deferred to future version. |
 | `blobsy-62i6` | R6-gpt5pro | Determinism as a design feature not explicit | **Addressed.** Design Decisions section added with idempotent operations, no-daemon/no-lock principles. |
-|  | R6-gpt5pro 4.5 | Rename/move is P0 gap (gitignored payloads don’t move with `git mv`) | **Resolved.** `blobsy mv` command added: moves payload, moves `.yref`, updates `.gitignore`. |
+|  | R6-gpt5pro 4.5 | Rename/move is P0 gap (gitignored payloads don’t move with `git mv`) | **Resolved.** `blobsy mv` command added: moves payload, moves `.bref`, updates `.gitignore`. |
 
 #### Safety and Correctness Issues Addressed
 
 | Bead | Review IDs | Issue | Resolution |
 | --- | --- | --- | --- |
 |  | R5 P1-5, R6-opus 3.1, R6-codex 2 | Push/commit coordination: most common user error mode | **Addressed.** `blobsy check-unpushed` and `blobsy pre-push-check` commands added. Pre-commit hook auto-pushes. Uncommitted ref warnings on push/sync. |
-|  | R6-gemini CR-1 | Split-brain: `git pull` updates `.yref` but not payload; `blobsy sync` could revert changes | **Resolved.** Stat cache used as merge base to distinguish user edits from git-updated refs. See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md). |
+|  | R6-gemini CR-1 | Split-brain: `git pull` updates `.bref` but not payload; `blobsy sync` could revert changes | **Resolved.** Stat cache used as merge base to distinguish user edits from git-updated refs. See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md). |
 | `blobsy-3si4` | R6-gemini CR-2 | Timestamp layout “age-based cleanup” guidance is dangerous (blob age != reference age) | **Revised.** Age-based cleanup marked as “Deferred” in comparison table. GC design requires scanning reachable refs, not naive prefix deletion. |
 |  | R5 P0-1, R5 5.2, R6-codex 5 | Remote key/dedup semantics inconsistent (claimed CAS but key includes path) | **Addressed.** Four layout patterns documented with explicit tradeoff comparison. Default is timestamp+hash (path-based, not pure CAS). Cross-time duplication acknowledged. Pure CAS available as Pattern 2. |
-|  | R5 P0-4, R5 5.3 | Compression/remote representation mapping: `.zst` suffix not explicit in key | **Addressed.** `{compress_suffix}` template variable documented. Compression state stored in `.yref`. Suffix prevents collisions. |
+|  | R5 P0-4, R5 5.3 | Compression/remote representation mapping: `.zst` suffix not explicit in key | **Addressed.** `{compress_suffix}` template variable documented. Compression state stored in `.bref`. Suffix prevents collisions. |
 |  | R5 P1-6, R5 5.8, R6-opus 3.4 | Stat cache correctness: racy files, clock skew, coarse mtime | **Addressed.** Companion doc [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) with full design: entry format, invalidation rules, escape hatches. |
 |  | R5 5.6 | Gitignore path relativity likely wrong in examples | **Addressed.** Explicit per-file entries in blobsy-managed block. Path handling documented. |
 |  | R5 5.9, R6-codex 3, R6-opus 3.7 | Command backend security: path traversal, shell injection, malicious endpoints | **Addressed.** Command backends disallowed from repo config by default. Security and Trust Model section. `execFile` with args arrays recommended (no `shell: true`). |
@@ -128,10 +128,10 @@ Includes issues from all review rounds.
 | R3 4.8 | Mixed directories: ignore vs include patterns | Resolved by externalization rules. |
 | R1 M11 | `command` backend as integration point | See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#backend-types). |
 | R3 5 | s5cmd as future transport engine | Deferred to a future version. The initial release ships with aws-cli + rclone + template commands. |
-| R1 S6, R3 4.7 | Compression suffix convention | Accepted: `.zst` suffix in remote; compression state in `.yref`. |
+| R1 S6, R3 4.7 | Compression suffix convention | Accepted: `.zst` suffix in remote; compression state in `.bref`. |
 | R3 4.7 | Small-file compression threshold | Built in: `compress.min_size: 100kb` default. |
 | R5 P0-3, R6-opus 3.6, R6-gpt5pro 4.10 | GC reachability and safety at scale | Deferred to V2. Design outlined with `--depth`, `--older-than`, dry-run safety, and template-agnostic scanning. |
-| `blobsy-diee` (R6-gpt5pro) | Remote checksum support (store provider ETag/checksums in `.yref`) | Deferred to V2. |
+| `blobsy-diee` (R6-gpt5pro) | Remote checksum support (store provider ETag/checksums in `.bref`) | Deferred to V2. |
 | `blobsy-76b0` (R6-gemini) | Trash command | Deferred to V2. V1 only provides `blobsy rm`. |
 | `blobsy-07e5` (R6-gemini) | Trash/GC optimization pattern documentation | Deferred to V2. |
 | `blobsy-qk6f` (R6-gemini) | Command backend cross-platform limitations documentation | Deferred. |

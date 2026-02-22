@@ -4,7 +4,7 @@ Store large files anywhere.
 Track them in Git.
 
 A simpler, more flexible, serverless alternative to Git LFS. Blobsy is a standalone CLI
-that tracks large files with lightweight `.yref` pointer files committed to Git, while
+that tracks large files with lightweight `.bref` pointer files committed to Git, while
 the actual data lives in any storage backend -- S3, local directories, or custom
 commands. No special server.
 No hosting requirements.
@@ -19,12 +19,12 @@ npm install -g blobsy
 cd my-project
 blobsy init s3://my-bucket/blobs/
 
-# Track large files (creates .yref pointers)
+# Track large files (creates .bref pointers)
 blobsy track data/model.bin
 blobsy track assets/
 
-# Commit .yref files to Git
-git add *.yref .gitignore
+# Commit .bref files to Git
+git add *.bref .gitignore
 git commit -m "Track large files with blobsy"
 
 # Push blobs to remote storage
@@ -38,20 +38,20 @@ blobsy pull
 
 ## How It Works
 
-1. `blobsy track` computes a SHA-256 hash of each file and writes a `.yref` pointer file
+1. `blobsy track` computes a SHA-256 hash of each file and writes a `.bref` pointer file
 2. The original file is added to `.gitignore` automatically
-3. You commit the `.yref` pointer file to Git (the original stays local)
+3. You commit the `.bref` pointer file to Git (the original stays local)
 4. `blobsy push` uploads the blob to your configured backend and adds `remote_key` to
-   `.yref`
-5. `blobsy pull` downloads files from remote using the `.yref` metadata
+   `.bref`
+5. `blobsy pull` downloads files from remote using the `.bref` metadata
 6. Content-addressable storage means identical files are never uploaded twice
 
-A `.yref` file after `track` (before push):
+A `.bref` file after `track` (before push):
 
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 size: 1048576
 ```
@@ -61,7 +61,7 @@ After `push`, it gains a `remote_key`:
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 size: 1048576
 remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
@@ -79,14 +79,14 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy sync [path...]` | Bidirectional sync (push + pull) |
 | `blobsy status [path...]` | Show state of tracked files |
 | `blobsy verify [path...]` | Verify local files match ref hashes |
-| `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .yref) |
+| `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .bref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
 | `blobsy config [key] [val]` | Get or set configuration |
 | `blobsy health` | Check backend connectivity |
 | `blobsy doctor [--fix]` | Diagnostics and self-repair |
 | `blobsy hooks <action>` | Install or uninstall pre-commit hook |
-| `blobsy check-unpushed` | List committed .yref files missing remote blobs |
-| `blobsy pre-push-check` | CI guard: fail if any .yref lacks remote blob |
+| `blobsy check-unpushed` | List committed .bref files missing remote blobs |
+| `blobsy pre-push-check` | CI guard: fail if any .bref lacks remote blob |
 | `blobsy skill` | Output skill documentation for AI agents |
 | `blobsy prime` | Output context primer for AI agents |
 
@@ -184,18 +184,18 @@ compress:
 
 ### Pre-push Check
 
-Ensure all committed `.yref` files have their blobs pushed before CI runs:
+Ensure all committed `.bref` files have their blobs pushed before CI runs:
 
 ```bash
 # Locally, before pushing to Git
-blobsy check-unpushed    # List any .yref files missing remote blobs
+blobsy check-unpushed    # List any .bref files missing remote blobs
 blobsy push              # Upload missing blobs
 
 # In CI pipeline (fails build if blobs missing)
 blobsy pre-push-check
 ```
 
-**Workflow:** `blobsy track` → commit `.yref` → `blobsy push` → `git push` → CI runs
+**Workflow:** `blobsy track` → commit `.bref` → `blobsy push` → `git push` → CI runs
 `pre-push-check`
 
 ### Syncing in CI
@@ -220,7 +220,7 @@ blobsy push
 | --- | --- | --- | --- |
 | Server required | No | Yes (LFS server) | No |
 | Backend flexibility | Any (S3, local, custom) | LFS server only | S3, GCS, local |
-| Git integration | `.yref` pointer files | Filter driver | `.dvc` pointer files |
+| Git integration | `.bref` pointer files | Filter driver | `.dvc` pointer files |
 | Compression | Built-in (zstd, gzip, brotli) | None | None |
 | Content-addressable | Yes (SHA-256) | Yes (OID) | Yes (MD5) |
 | JSON output | Yes (`--json`) | No | Yes |

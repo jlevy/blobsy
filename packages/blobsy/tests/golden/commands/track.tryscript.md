@@ -31,12 +31,12 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
 
-# Filesystem after tracking -- shows new .yref, .gitignore, and .blobsy/ stat cache
+# Filesystem after tracking -- shows new .bref, .gitignore, and .blobsy/ stat cache
 
 ```console
 $ find . -not -path './.git/*' -not -name '.git' | sort
@@ -50,7 +50,7 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 ./data
 ./data/.gitignore
 ./data/model.bin
-./data/model.bin.yref
+./data/model.bin.bref
 ./small-file.txt
 ? 0
 ```
@@ -58,11 +58,11 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 # Verify the ref file content
 
 ```console
-$ cat data/model.bin.yref
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 # Run: blobsy status | blobsy --help
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:d02661ea043df3668295984682388a6ac5bae0e7ebe9f27ee8216a4cc224d934
 size: 13
 ? 0
@@ -95,20 +95,20 @@ $ echo "updated content for model" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
 # Verify ref updated with new hash and size
 
 ```console
-$ grep -E 'hash|size' data/model.bin.yref
+$ grep -E 'hash|size' data/model.bin.bref
 hash: sha256:dbae774e10a267ad13610c357c9d739f7c5729092fff3ec7b9e72a4a79d4f72d
 size: 26
 ? 0
 ```
 
-# Track via .yref path (equivalent to file path)
+# Track via .bref path (equivalent to file path)
 
 ```console
 $ echo "hello blobsy" > data/model.bin
@@ -116,8 +116,8 @@ $ echo "hello blobsy" > data/model.bin
 ```
 
 ```console
-$ blobsy track data/model.bin.yref
-Updated data/model.bin.yref (hash changed)
+$ blobsy track data/model.bin.bref
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
@@ -147,20 +147,20 @@ Scanning data/research/...
 ? 0
 ```
 
-# Filesystem after directory tracking -- each file gets its own .yref
+# Filesystem after directory tracking -- each file gets its own .bref
 
 ```console
 $ find data/ | sort
 data/
 data/.gitignore
 data/model.bin
-data/model.bin.yref
+data/model.bin.bref
 data/research
 data/research/.gitignore
 data/research/data.bin
-data/research/data.bin.yref
+data/research/data.bin.bref
 data/research/report.bin
-data/research/report.bin.yref
+data/research/report.bin.bref
 ? 0
 ```
 

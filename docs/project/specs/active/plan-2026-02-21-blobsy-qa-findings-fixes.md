@@ -66,13 +66,13 @@ Comprehensive QA testing (7 phases, all backends, all compression algorithms) re
    - Original design: hooks should work reliably or provide clear instructions
 
 3. **Error Messages Too Technical** (Issue #3)
-   - “ENOENT: no such file or directory, open '/path/to/file.yref'”
+   - “ENOENT: no such file or directory, open '/path/to/file.bref'”
    - Should be: “File not tracked.
      Run: blobsy track <file>”
    - Multiple instances throughout codebase
 
 4. **No Remote Blob Deletion** (Issue #4)
-   - `blobsy rm` removes local+.yref but always keeps remote blob
+   - `blobsy rm` removes local+.bref but always keeps remote blob
    - No `--remote` flag to delete from backend
    - Original design: should support full cleanup when desired
 
@@ -81,10 +81,10 @@ Comprehensive QA testing (7 phases, all backends, all compression algorithms) re
    - Correct behavior but confusing without documentation
    - Need user guide section explaining this
 
-6. **Missing rm --local .yref Behavior** (Issue #6)
+6. **Missing rm --local .bref Behavior** (Issue #6)
    - `blobsy rm --local` removes only local file
-   - Should it keep or remove .yref?
-     Current: keeps .yref
+   - Should it keep or remove .bref?
+     Current: keeps .bref
    - Need to verify this matches design intent
 
 ## Design
@@ -419,23 +419,23 @@ describe('hooks command - absolute path', () => {
 
 **Problem:** Technical errors exposed to users:
 ```
-✗ Error: Cannot read .yref file: /path/to/file.yref: ENOENT: no such file or directory
+✗ Error: Cannot read .bref file: /path/to/file.bref: ENOENT: no such file or directory
 ```
 
 **Solution:** Wrap all file I/O errors with user-friendly context:
 
 ```typescript
 // BAD:
-const content = await fs.readFile(yrefPath, 'utf-8');
+const content = await fs.readFile(brefPath, 'utf-8');
 
 // GOOD:
 try {
-  const content = await fs.readFile(yrefPath, 'utf-8');
+  const content = await fs.readFile(brefPath, 'utf-8');
 } catch (err) {
   if (err.code === 'ENOENT') {
     throw new UserError(
-      `File not tracked: ${path.basename(yrefPath, '.yref')}`,
-      `Run: blobsy track ${path.basename(yrefPath, '.yref')}`
+      `File not tracked: ${path.basename(brefPath, '.bref')}`,
+      `Run: blobsy track ${path.basename(brefPath, '.bref')}`
     );
   }
   throw err; // Unexpected errors still bubble up
@@ -446,7 +446,7 @@ try {
 
 | Technical Error | User-Friendly Error |
 | --- | --- |
-| ENOENT on .yref read | File not tracked: <file><br>Run: blobsy track <file> |
+| ENOENT on .bref read | File not tracked: <file><br>Run: blobsy track <file> |
 | ENOENT on blob read | Blob not found in backend<br>File may not be pushed yet<br>Run: blobsy push <file> |
 | EACCES | Permission denied: <path><br>Check file/directory permissions |
 | EISDIR | Expected file, got directory: <path> |
@@ -529,11 +529,11 @@ export class UserError extends Error {
 
 #### Step 2: Wrap File Operations in ref.ts
 
-**File:** `packages/blobsy/src/ref.ts` **Function:** `readYRef()`
+**File:** `packages/blobsy/src/ref.ts` **Function:** `readBref()`
 
 **Current code** (approximate):
 ```typescript
-export async function readYRef(refPath: string): Promise<YRef> {
+export async function readBref(refPath: string): Promise<Bref> {
   const content = await readFile(refPath, 'utf-8');  // ← Can throw ENOENT
   // ... parse YAML ...
 }
@@ -541,7 +541,7 @@ export async function readYRef(refPath: string): Promise<YRef> {
 
 **Change to:**
 ```typescript
-export async function readYRef(refPath: string): Promise<YRef> {
+export async function readBref(refPath: string): Promise<Bref> {
   let content: string;
 
   try {
@@ -550,7 +550,7 @@ export async function readYRef(refPath: string): Promise<YRef> {
     const error = err as NodeJS.ErrnoException;
 
     if (error.code === 'ENOENT') {
-      const fileName = path.basename(refPath, '.yref');
+      const fileName = path.basename(refPath, '.bref');
       throw new UserError(
         `File not tracked: ${fileName}`,
         `Run: blobsy track ${fileName}`
@@ -559,7 +559,7 @@ export async function readYRef(refPath: string): Promise<YRef> {
 
     if (error.code === 'EACCES') {
       throw new UserError(
-        `Permission denied reading .yref file: ${refPath}`,
+        `Permission denied reading .bref file: ${refPath}`,
         `Check file permissions: chmod +r ${refPath}`
       );
     }
@@ -575,12 +575,12 @@ export async function readYRef(refPath: string): Promise<YRef> {
     // ... validation ...
   } catch (yamlErr) {
     throw new UserError(
-      `Failed to parse .yref file: ${path.basename(refPath)}`,
-      `File may be corrupted. Check YAML syntax or regenerate with: blobsy track --force ${path.basename(refPath, '.yref')}`
+      `Failed to parse .bref file: ${path.basename(refPath)}`,
+      `File may be corrupted. Check YAML syntax or regenerate with: blobsy track --force ${path.basename(refPath, '.bref')}`
     );
   }
 
-  return parsed as YRef;
+  return parsed as Bref;
 }
 ```
 
@@ -598,7 +598,7 @@ import { basename } from 'node:path';
  */
 
 export function fileNotTrackedError(filePath: string): UserError {
-  const fileName = basename(filePath, '.yref');
+  const fileName = basename(filePath, '.bref');
   return new UserError(
     `File not tracked: ${fileName}`,
     `Run: blobsy track ${fileName}`
@@ -641,11 +641,11 @@ export function backendNotFoundError(backendUrl: string): UserError {
   );
 }
 
-export function invalidYrefFormatError(filePath: string): UserError {
+export function invalidBrefFormatError(filePath: string): UserError {
   const fileName = basename(filePath);
   return new UserError(
-    `Invalid .yref file format: ${fileName}`,
-    `File may be corrupted. Regenerate with: blobsy track --force ${basename(fileName, '.yref')}`
+    `Invalid .bref file format: ${fileName}`,
+    `File may be corrupted. Regenerate with: blobsy track --force ${basename(fileName, '.bref')}`
   );
 }
 ```
@@ -718,7 +718,7 @@ async read(key: string): Promise<Buffer> {
 ```
 
 **Locations to Apply Error Wrapping:**
-- `packages/blobsy/src/ref.ts` - readYRef() ← DONE above
+- `packages/blobsy/src/ref.ts` - readBref() ← DONE above
 - `packages/blobsy/src/config.ts` - readConfigFile()
 - `packages/blobsy/src/cli.ts` - All file operations in commands
 - `packages/blobsy/src/backend-local.ts` - read(), write(), delete()
@@ -770,7 +770,7 @@ describe('File operations error messages', () => {
 **Problem:**
 ```bash
 $ blobsy rm large-file.bin
-# Removes local file + .yref, but remote blob remains in backend
+# Removes local file + .bref, but remote blob remains in backend
 # No way to delete remote blob
 ```
 
@@ -779,11 +779,11 @@ $ blobsy rm large-file.bin
 ```bash
 # Current behavior (safe deletion):
 $ blobsy rm file.bin
-# → Removes local file + .yref, keeps remote blob
+# → Removes local file + .bref, keeps remote blob
 
 # New behavior:
 $ blobsy rm file.bin --remote
-# → Removes local file + .yref + remote blob
+# → Removes local file + .bref + remote blob
 # → Prompts for confirmation: "Delete remote blob? This cannot be undone. (y/N)"
 
 # Force mode (no confirmation):
@@ -811,9 +811,9 @@ $ blobsy rm file.bin --remote --force
 **Change from:**
 ```typescript
   .command('rm')
-  .description('Remove tracked files: delete local + move .yref to trash')
+  .description('Remove tracked files: delete local + move .bref to trash')
   .argument('<path...>', 'Files or directories to remove')
-  .option('--local', 'Delete local file only, keep .yref and remote')
+  .option('--local', 'Delete local file only, keep .bref and remote')
   .option('--recursive', 'Required for directory removal')
   .action(wrapAction(handleRm));
 ```
@@ -821,9 +821,9 @@ $ blobsy rm file.bin --remote --force
 **Change to:**
 ```typescript
   .command('rm')
-  .description('Remove tracked files: delete local + move .yref to trash')
+  .description('Remove tracked files: delete local + move .bref to trash')
   .argument('<path...>', 'Files or directories to remove')
-  .option('--local', 'Delete local file only, keep .yref and remote')
+  .option('--local', 'Delete local file only, keep .bref and remote')
   .option('--remote', 'Also delete blob from backend (requires confirmation)')
   .option('--force', 'Skip confirmation prompts')
   .option('--recursive', 'Required for directory removal')
@@ -905,10 +905,10 @@ async function rmFile(
 ): Promise<void> {
 ```
 
-**After line 965** (after moving .yref to trash), **add remote deletion logic:**
+**After line 965** (after moving .bref to trash), **add remote deletion logic:**
 
 ```typescript
-  // Move .yref to trash
+  // Move .bref to trash
   const trashDir = join(repoRoot, '.blobsy', 'trash');
   await ensureDir(trashDir);
   const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
@@ -916,9 +916,9 @@ async function rmFile(
 
   // Delete from backend if --remote flag set
   if (deleteRemote) {
-    const yref = await readYRef(trashPath); // Read from trash copy
+    const bref = await readBref(trashPath); // Read from trash copy
 
-    if (yref.remote_key) {
+    if (bref.remote_key) {
       // Confirmation prompt (unless --force)
       if (!force && !globalOpts.quiet) {
         const readline = await import('node:readline/promises');
@@ -930,7 +930,7 @@ async function rmFile(
         const answer = await rl.question(
           `Delete blob from backend?\n` +
           `  File: ${relPath}\n` +
-          `  Remote key: ${yref.remote_key}\n` +
+          `  Remote key: ${bref.remote_key}\n` +
           `  This cannot be undone. Continue? (y/N): `
         );
 
@@ -938,7 +938,7 @@ async function rmFile(
 
         if (answer.toLowerCase() !== 'y') {
           if (!globalOpts.quiet) {
-            console.log('Remote deletion cancelled. Local file and .yref removed, remote blob kept.');
+            console.log('Remote deletion cancelled. Local file and .bref removed, remote blob kept.');
           }
           return;
         }
@@ -948,20 +948,20 @@ async function rmFile(
       try {
         const config = await resolveConfig(repoRoot);
         const backend = await createBackend(config.backends.default, repoRoot);
-        await backend.delete(yref.remote_key);
+        await backend.delete(bref.remote_key);
 
         if (!globalOpts.quiet) {
           if (globalOpts.json) {
-            console.log(formatJsonMessage(`Deleted from backend: ${yref.remote_key}`));
+            console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
           } else {
-            console.log(`Deleted from backend: ${yref.remote_key}`);
+            console.log(`Deleted from backend: ${bref.remote_key}`);
           }
         }
       } catch (err: unknown) {
         // Don't fail the whole rm operation if backend deletion fails
         // Local cleanup already succeeded
         console.warn(`Warning: Failed to delete from backend: ${(err as Error).message}`);
-        console.warn(`  Remote blob may still exist: ${yref.remote_key}`);
+        console.warn(`  Remote blob may still exist: ${bref.remote_key}`);
       }
     } else {
       if (!globalOpts.quiet) {
@@ -992,9 +992,9 @@ describe('rm command - remote deletion', () => {
     await execa('blobsy', ['push'], { cwd: testDir });
 
     // Get remote key before deletion
-    const yrefPath = join(testDir, 'file.bin.yref');
-    const yref = await readYRef(yrefPath);
-    const remoteKey = yref.remote_key!;
+    const brefPath = join(testDir, 'file.bin.bref');
+    const bref = await readBref(brefPath);
+    const remoteKey = bref.remote_key!;
 
     // Check blob exists in backend
     const backendPath = join(testDir, '..', 'backend', remoteKey);
@@ -1024,8 +1024,8 @@ describe('rm command - remote deletion', () => {
     await new Promise(resolve => child.on('close', resolve));
 
     // Blob should still exist (deletion cancelled)
-    const yref = await readYRef(join(testDir, 'file.bin.yref.trash'));
-    const backendPath = join(testDir, '..', 'backend', yref.remote_key!);
+    const bref = await readBref(join(testDir, 'file.bin.bref.trash'));
+    const backendPath = join(testDir, '..', 'backend', bref.remote_key!);
     expect(existsSync(backendPath)).toBe(true);
   });
 
@@ -1067,7 +1067,7 @@ describe('rm command - remote deletion', () => {
 ````markdown
 ## Changing Backends
 
-If you change the backend URL in `.blobsy.yml`, existing tracked files will **NOT** automatically re-push to the new backend. Each file's `.yref` contains a `remote_key` that points to the original backend location.
+If you change the backend URL in `.blobsy.yml`, existing tracked files will **NOT** automatically re-push to the new backend. Each file's `.bref` contains a `remote_key` that points to the original backend location.
 
 To migrate files to a new backend:
 
@@ -1094,16 +1094,16 @@ switching between backends for testing.
 ```bash
 $ blobsy rm file.bin --local
 # Removes: local file
-# Keeps: .yref, remote blob
+# Keeps: .bref, remote blob
 ````
 
 **Question:** Is this the intended design?
 
 **Use case analysis:**
-- **Keep .yref**: Allows later re-pull with `blobsy pull file.bin`
-- **Remove .yref**: Fully untrack locally, but preserve remote
+- **Keep .bref**: Allows later re-pull with `blobsy pull file.bin`
+- **Remove .bref**: Fully untrack locally, but preserve remote
 
-**Recommendation:** Current behavior (keep .yref) is correct - allows re-pull.
+**Recommendation:** Current behavior (keep .bref) is correct - allows re-pull.
 
 **Required action:** Document this clearly in help text and README.
 
@@ -1134,7 +1134,7 @@ $ blobsy rm file.bin --local
 
 - [ ] **Fix #3: User-friendly error messages**
   - Create `UserError` class in `core/errors.ts`
-  - Wrap all ENOENT errors for .yref files
+  - Wrap all ENOENT errors for .bref files
   - Wrap all ENOENT errors for blob reads
   - Wrap all EACCES permission errors
   - Wrap backend 404 errors

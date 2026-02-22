@@ -1,7 +1,7 @@
 /**
  * Path resolution utilities.
  *
- * Handles repo root detection, .yref suffix management, POSIX normalization,
+ * Handles repo root detection, .bref suffix management, POSIX normalization,
  * and stat cache path computation.
  */
 
@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
-import { ValidationError, YREF_EXTENSION } from './types.js';
+import { ValidationError, BREF_EXTENSION } from './types.js';
 
 /** Find the git repository root by walking up from cwd. */
 export function findRepoRoot(startDir?: string): string {
@@ -33,18 +33,18 @@ export function toRepoRelative(absolutePath: string, repoRoot: string): string {
   return normalizePath(relative(repoRoot, absolutePath));
 }
 
-/** Strip .yref extension if present: "data/model.bin.yref" -> "data/model.bin" */
-export function stripYrefExtension(path: string): string {
-  if (path.endsWith(YREF_EXTENSION)) {
-    return path.slice(0, -YREF_EXTENSION.length);
+/** Strip .bref extension if present: "data/model.bin.bref" -> "data/model.bin" */
+export function stripBrefExtension(path: string): string {
+  if (path.endsWith(BREF_EXTENSION)) {
+    return path.slice(0, -BREF_EXTENSION.length);
   }
   return path;
 }
 
-/** Append .yref extension: "data/model.bin" -> "data/model.bin.yref" */
-export function yrefPath(filePath: string): string {
-  const stripped = stripYrefExtension(filePath);
-  return `${stripped}${YREF_EXTENSION}`;
+/** Append .bref extension: "data/model.bin" -> "data/model.bin.bref" */
+export function brefPath(filePath: string): string {
+  const stripped = stripBrefExtension(filePath);
+  return `${stripped}${BREF_EXTENSION}`;
 }
 
 /** Normalize to POSIX forward slashes. */
@@ -95,28 +95,28 @@ export function isDirectory(path: string): boolean {
 }
 
 /**
- * Find all .yref files in a directory recursively.
- * Returns repo-relative paths of the data files (with .yref stripped).
+ * Find all .bref files in a directory recursively.
+ * Returns repo-relative paths of the data files (with .bref stripped).
  */
-export function findYrefFiles(dir: string, repoRoot: string): string[] {
+export function findBrefFiles(dir: string, repoRoot: string): string[] {
   const results: string[] = [];
   walkDir(dir, (filePath) => {
-    if (filePath.endsWith(YREF_EXTENSION)) {
-      results.push(toRepoRelative(stripYrefExtension(filePath), repoRoot));
+    if (filePath.endsWith(BREF_EXTENSION)) {
+      results.push(toRepoRelative(stripBrefExtension(filePath), repoRoot));
     }
   });
   return results.sort();
 }
 
 /**
- * Find all non-yref, non-hidden files in a directory for tracking.
+ * Find all non-bref, non-hidden files in a directory for tracking.
  * Returns absolute paths.
  */
 export function findTrackableFiles(dir: string): string[] {
   const results: string[] = [];
   walkDir(dir, (filePath) => {
     const name = basename(filePath);
-    if (!name.endsWith(YREF_EXTENSION) && !name.startsWith('.')) {
+    if (!name.endsWith(BREF_EXTENSION) && !name.startsWith('.')) {
       results.push(filePath);
     }
   });

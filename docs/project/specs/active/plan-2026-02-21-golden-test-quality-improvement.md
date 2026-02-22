@@ -125,12 +125,12 @@ Issues are classified by impact:
 | 5 | P1 | Status test key states | DONE -- tests all implemented states |
 | 6 | P1 | Conflict testing | DONE -- full output in conflict/two-user tests |
 | 7 | P1 | Help test missing commands | DONE -- all 19 commands |
-| 8 | P1 | Doctor test scenarios | DONE -- orphaned .yref, missing .blobsy, --fix |
+| 8 | P1 | Doctor test scenarios | DONE -- orphaned .bref, missing .blobsy, --fix |
 | 9 | P2 | Config set operation | DONE |
 | 10 | P2 | Init error cases | DONE -- S3/GCS/Azure shapes, literal errors |
-| 11 | P1 | Push-pull scenarios | DONE -- .yref paths, full output |
+| 11 | P1 | Push-pull scenarios | DONE -- .bref paths, full output |
 | 12 | P1 | Sync scenarios | DONE -- health failure, --skip-health-check |
-| 13 | P2 | Validation error cases | DONE -- malformed .yref |
+| 13 | P2 | Validation error cases | DONE -- malformed .bref |
 | 14 | P2 | Not-found pull scenario | DONE -- missing remote blob |
 | 15 | P2 | Hooks execution test | DONE -- git commit with hook |
 | 19 | P2 | Workflow remote verification | DONE -- full `find` with `[REMOTE_KEY]` |
@@ -140,7 +140,7 @@ Issues are classified by impact:
 | 23 | P1 | Shared suite-wide remote | DONE -- per-sandbox isolation |
 | 25 | P1 | skill/prime tests | DONE -- full --brief output |
 | 27 | P2 | Global flag matrix | DONE -- verbose, force, skip-health-check |
-| 28 | P2 | Path form matrix | DONE -- file, .yref, directory forms |
+| 28 | P2 | Path form matrix | DONE -- file, .bref, directory forms |
 | 17 | P3 | Quiet/dry-run with push/pull/sync | DONE -- appended to quiet.tryscript.md, dry-run.tryscript.md |
 | 18 | P3 | Compression edge cases | DONE -- gzip, brotli, min_size, never patterns |
 | 29 | P2 | JSON error assertions | DONE -- errors-json.tryscript.md |

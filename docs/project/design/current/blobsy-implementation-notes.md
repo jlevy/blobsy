@@ -103,25 +103,25 @@ the actual pre-commit logic in TypeScript.
 
 ```typescript
 async function hookPreCommit(): Promise<void> {
-  // 1. Find staged .yref files
+  // 1. Find staged .bref files
   const stagedFiles = await git("diff", "--cached", "--name-only", "--diff-filter=ACM");
-  const yrefFiles = stagedFiles.filter((f) => f.endsWith(".yref"));
+  const brefFiles = stagedFiles.filter((f) => f.endsWith(".bref"));
 
-  if (yrefFiles.length === 0) {
+  if (brefFiles.length === 0) {
     return; // Nothing to do -- exit 0
   }
 
-  console.log(`blobsy: ${yrefFiles.length} .yref file(s) staged`);
+  console.log(`blobsy: ${brefFiles.length} .bref file(s) staged`);
 
   // 2. Derive payload paths and push each blob
-  const payloadPaths = yrefFiles.map((f) => f.replace(/\.yref$/, ""));
+  const payloadPaths = brefFiles.map((f) => f.replace(/\.bref$/, ""));
 
   for (const payloadPath of payloadPaths) {
     await push(payloadPath, { quiet: true }); // calls push() directly, no subprocess
   }
 
-  // 3. Re-stage .yref files that push may have updated (remote_key written back)
-  await git("add", ...yrefFiles);
+  // 3. Re-stage .bref files that push may have updated (remote_key written back)
+  await git("add", ...brefFiles);
 
   console.log("blobsy: all blobs uploaded, proceeding with commit");
 }
@@ -135,9 +135,9 @@ async function hookPreCommit(): Promise<void> {
 - **Error handling.** If any push fails, the process exits with code 1 (blocking the
   commit). Error messages come from the standard push error handling, keeping output
   consistent with manual `blobsy push`.
-- **Re-staging.** After push writes `remote_key` back to `.yref` files, the hook
+- **Re-staging.** After push writes `remote_key` back to `.bref` files, the hook
   re-stages them via `git add` so the commit includes the updated refs.
-- **Concurrency.** For multiple `.yref` files, pushes run through the standard
+- **Concurrency.** For multiple `.bref` files, pushes run through the standard
   concurrency pool (same as `blobsy push` with multiple paths).
 
 ### Coexistence with Hook Managers
@@ -155,7 +155,7 @@ manager. Examples:
 pre-commit:
   commands:
     blobsy:
-      glob: "*.yref"
+      glob: "*.bref"
       run: blobsy hook pre-commit
 ```
 
@@ -223,37 +223,37 @@ managers).
 
 ```typescript
 async function push(filePath: string, options: PushOptions = {}): Promise<void> {
-  const yrefPath = filePath + '.yref';
-  if (!await exists(yrefPath)) {
-    throw new Error(`No .yref file found for ${filePath}. Run 'blobsy track' first.`);
+  const brefPath = filePath + '.bref';
+  if (!await exists(brefPath)) {
+    throw new Error(`No .bref file found for ${filePath}. Run 'blobsy track' first.`);
   }
 
-  const ref = await readYRef(yrefPath);
+  const ref = await readBref(brefPath);
 
   if (!await exists(filePath)) {
     throw new Error(
       `File not found: ${filePath}\n` +
       `\n` +
-      `The .yref file exists but the actual file is missing.\n` +
+      `The .bref file exists but the actual file is missing.\n` +
       `Run 'blobsy pull ${filePath}' to download it.`
     );
   }
 
   const actualHash = await computeHash(filePath);
 
-  // Verify hash matches .yref (catches file modified after track)
+  // Verify hash matches .bref (catches file modified after track)
   if (actualHash !== ref.hash && !options.force) {
     throw new Error(
       `Hash mismatch in ${filePath}:\n` +
       `\n` +
-      `  Expected (in .yref): ${ref.hash}\n` +
+      `  Expected (in .bref): ${ref.hash}\n` +
       `  Actual (file):       ${actualHash}\n` +
       `\n` +
-      `This means the file was modified after the .yref was created.\n` +
+      `This means the file was modified after the .bref was created.\n` +
       `\n` +
       `To fix:\n` +
-      `  1. Update the .yref to match current file: blobsy track ${filePath}\n` +
-      `  2. Restore file to match .yref: blobsy pull --force ${filePath}\n` +
+      `  1. Update the .bref to match current file: blobsy track ${filePath}\n` +
+      `  2. Restore file to match .bref: blobsy pull --force ${filePath}\n` +
       `  3. Force push current file (DANGER): blobsy push --force ${filePath}\n`
     );
   }
@@ -262,13 +262,13 @@ async function push(filePath: string, options: PushOptions = {}): Promise<void> 
     // Update ref to match actual file
     ref.hash = actualHash;
     ref.size = await getFileSize(filePath);
-    await writeYRef(yrefPath, ref);
+    await writeBref(brefPath, ref);
   }
 
   const remoteKey = await uploadBlob(filePath, ref);
 
   ref.remote_key = remoteKey;
-  await writeYRef(yrefPath, ref);
+  await writeBref(brefPath, ref);
 
   await updateCacheEntry(cacheDir, filePath, ref.hash);
 }
@@ -283,13 +283,13 @@ $ blobsy pull
 
 x data/model.bin: Cannot pull (no remote blob)
 
-This .yref file references a blob that doesn't exist in remote storage:
+This .bref file references a blob that doesn't exist in remote storage:
   Expected remote key: 20260220T140322Z-abc123/data/model.bin
   Remote backend: s3://my-bucket/project/
 
-This usually means someone committed the .yref file without pushing the blob.
+This usually means someone committed the .bref file without pushing the blob.
 
-Last commit of this .yref:
+Last commit of this .bref:
   commit: a1b2c3d4
   author: Alice <alice@example.com>
   date:   2026-02-20 14:03:22
@@ -306,17 +306,17 @@ To fix:
 ```
 $ blobsy check-unpushed
 
-Scanning git history for committed .yref files...
+Scanning git history for committed .bref files...
 
-Found 2 .yref files in HEAD with missing remote blobs:
+Found 2 .bref files in HEAD with missing remote blobs:
 
-  data/model.bin.yref
+  data/model.bin.bref
     Committed: 2026-02-20 14:03:22
     Author: Alice <alice@example.com>
     Commit: a1b2c3d4
     Issue: remote_key not set (never pushed)
 
-  results/output.json.yref
+  results/output.json.bref
     Committed: 2026-02-19 09:15:44
     Author: Bob <bob@example.com>
     Commit: e5f6g7h8
@@ -324,5 +324,5 @@ Found 2 .yref files in HEAD with missing remote blobs:
 
 To fix:
   Run 'blobsy push' to upload missing blobs.
-  Then commit the updated .yref files: git add *.yref && git commit -m "Add remote keys"
+  Then commit the updated .bref files: git add *.bref && git commit -m "Add remote keys"
 ```

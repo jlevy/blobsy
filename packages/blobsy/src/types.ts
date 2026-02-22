@@ -4,9 +4,9 @@
  * Central types used across the codebase. No runtime logic.
  */
 
-/** Contents of a `.yref` file -- the metadata that Git tracks for each externalized blob. */
-export interface YRef {
-  /** Format identifier, e.g. "blobsy-yref/0.1" */
+/** Contents of a `.bref` file -- the metadata that Git tracks for each externalized blob. */
+export interface Bref {
+  /** Format identifier, e.g. "blobsy-bref/0.1" */
   format: string;
   /** Content hash: "sha256:<64-char-lowercase-hex>" */
   hash: string;
@@ -20,8 +20,8 @@ export interface YRef {
   compressed_size?: number | undefined;
 }
 
-/** Stable field ordering for .yref serialization. */
-export const YREF_FIELD_ORDER = [
+/** Stable field ordering for .bref serialization. */
+export const BREF_FIELD_ORDER = [
   'format',
   'hash',
   'size',
@@ -30,10 +30,10 @@ export const YREF_FIELD_ORDER = [
   'compressed_size',
 ] as const;
 
-export const YREF_FORMAT = 'blobsy-yref/0.1';
-export const YREF_COMMENT_HEADER =
+export const BREF_FORMAT = 'blobsy-bref/0.1';
+export const BREF_COMMENT_HEADER =
   '# blobsy -- https://github.com/jlevy/blobsy\n# Run: blobsy status | blobsy --help\n\n';
-export const YREF_EXTENSION = '.yref';
+export const BREF_EXTENSION = '.bref';
 
 /** Per-file stat cache entry for fast change detection and three-way merge. */
 export interface StatCacheEntry {
@@ -121,10 +121,10 @@ export interface BlobsyConfig {
  *
  * - circle: new (tracked, not committed, not pushed)
  * - half-right: committed, not pushed to remote
- * - half-left: pushed/synced but .yref not yet committed
+ * - half-left: pushed/synced but .bref not yet committed
  * - check: fully synced (committed + pushed)
  * - tilde: local file modified since last track
- * - question: .yref exists but local file is missing
+ * - question: .bref exists but local file is missing
  * - deleted: staged for deletion (in trash)
  */
 export type FileStateSymbol = '\u25CB' | '\u25D0' | '\u25D1' | '\u2713' | '~' | '?' | '\u2297';
@@ -225,7 +225,7 @@ export interface TransferResult {
   action: 'push' | 'pull';
   bytesTransferred?: number | undefined;
   error?: string | undefined;
-  /** Ref fields updated by a successful push. Caller merges into ref before writing .yref. */
+  /** Ref fields updated by a successful push. Caller merges into ref before writing .bref. */
   refUpdates?:
     | {
         remote_key: string;

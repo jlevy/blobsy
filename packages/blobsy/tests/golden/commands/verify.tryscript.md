@@ -74,7 +74,7 @@ All files verified.
 ? 0
 ```
 
-# Verify via .yref path (equivalent) after tampering
+# Verify via .bref path (equivalent) after tampering
 
 ```console
 $ echo "tampered" > data/model.bin
@@ -82,7 +82,7 @@ $ echo "tampered" > data/model.bin
 ```
 
 ```console
-$ blobsy verify data/model.bin.yref
+$ blobsy verify data/model.bin.bref
   ✗  data/model.bin  mismatch
 
 Verification failed.

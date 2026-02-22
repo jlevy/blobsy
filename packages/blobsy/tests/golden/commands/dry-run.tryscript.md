@@ -23,10 +23,10 @@ Would track data/model.bin
 ? 0
 ```
 
-# File is NOT actually tracked (no .yref created)
+# File is NOT actually tracked (no .bref created)
 
 ```console
-$ test -f data/model.bin.yref && echo "exists" || echo "not exists"
+$ test -f data/model.bin.bref && echo "exists" || echo "not exists"
 not exists
 ? 0
 ```
@@ -36,7 +36,7 @@ not exists
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
@@ -49,10 +49,10 @@ Would untrack data/model.bin
 ? 0
 ```
 
-# File is still tracked (.yref still exists)
+# File is still tracked (.bref still exists)
 
 ```console
-$ test -f data/model.bin.yref && echo "exists" || echo "not exists"
+$ test -f data/model.bin.bref && echo "exists" || echo "not exists"
 exists
 ? 0
 ```
@@ -81,7 +81,7 @@ $ blobsy --dry-run --json track data/model.bin
   "schema_version": "0.1",
   "dry_run": true,
   "actions": [
-    "update data/model.bin.yref"
+    "update data/model.bin.bref"
   ]
 }
 ? 0

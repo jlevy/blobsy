@@ -24,7 +24,7 @@ before: |
 ```console
 $ blobsy rm data/dataset.csv
 Removed data/dataset.csv
-Moved data/dataset.csv.yref to trash
+Moved data/dataset.csv.bref to trash
 Deleted local file
 ? 0
 ```
@@ -40,7 +40,7 @@ gone
 # Verify ref gone
 
 ```console
-$ test -f data/dataset.csv.yref && echo "exists" || echo "gone"
+$ test -f data/dataset.csv.bref && echo "exists" || echo "gone"
 gone
 ? 0
 ```
@@ -55,7 +55,7 @@ model.bin
 ? 0
 ```
 
-# rm --local: delete local file only, keep .yref
+# rm --local: delete local file only, keep .bref
 
 ```console
 $ blobsy rm --local data/model.bin
@@ -72,7 +72,7 @@ gone
 ```
 
 ```console
-$ test -f data/model.bin.yref && echo "ref exists"
+$ test -f data/model.bin.bref && echo "ref exists"
 ref exists
 ? 0
 ```
@@ -82,10 +82,10 @@ ref exists
 ```console
 $ blobsy rm --recursive data/old/
 Removed data/old/file1.bin
-Moved data/old/file1.bin.yref to trash
+Moved data/old/file1.bin.bref to trash
 Deleted local file
 Removed data/old/file2.bin
-Moved data/old/file2.bin.yref to trash
+Moved data/old/file2.bin.bref to trash
 Deleted local file
 ? 0
 ```
@@ -110,6 +110,6 @@ Error: data is a directory. Use --recursive to remove all files in it.
 
 ```console
 $ blobsy rm data/nonexistent.bin 2>&1
-Error: Not tracked: data/nonexistent.bin (no .yref file found)
+Error: Not tracked: data/nonexistent.bin (no .bref file found)
 ? 1
 ```

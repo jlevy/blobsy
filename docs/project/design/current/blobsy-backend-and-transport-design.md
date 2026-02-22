@@ -501,10 +501,10 @@ setting follows the standard hierarchical config override (user-global < repo <
 directory), so a user who prefers rclone can set it globally while repos can override if
 needed.
 
-Because blobsy uses content-addressable storage and per-file `.yref` refs, it always
+Because blobsy uses content-addressable storage and per-file `.bref` refs, it always
 knows exactly which files to transfer.
 It uses transfer tools as **copy engines** (per-file `cp`/`copy`), not diff engines.
-Blobsy owns the diffing via `.yref` hashes; the transfer tool only moves bytes.
+Blobsy owns the diffing via `.bref` hashes; the transfer tool only moves bytes.
 
 **Tool detection:** Blobsy performs a lightweight capability check (binary exists +
 credentials configured + endpoint reachable), not just binary existence.
@@ -576,16 +576,16 @@ Uses the standard credential chain for the backend:
 Blobsy ensures atomicity for all file operations (both reads and writes) to prevent
 corruption and inconsistent state.
 
-### Atomic .yref Updates (Push)
+### Atomic .bref Updates (Push)
 
-When `blobsy push` updates a `.yref` file, it uses **temp-file-then-rename** pattern:
+When `blobsy push` updates a `.bref` file, it uses **temp-file-then-rename** pattern:
 
-1. Compute new `.yref` content (hash, size, remote_key, compressed fields)
-2. Write to temporary file `.yref.tmp-{random}`
+1. Compute new `.bref` content (hash, size, remote_key, compressed fields)
+2. Write to temporary file `.bref.tmp-{random}`
 3. `fsync()` to ensure data reaches disk
-4. Atomically rename `.yref.tmp-{random}` → `.yref`
+4. Atomically rename `.bref.tmp-{random}` → `.bref`
 
-**Atomicity guarantee:** The `.yref` file is never in a partially-written state.
+**Atomicity guarantee:** The `.bref` file is never in a partially-written state.
 Either the old version exists, or the new version exists — no intermediate state.
 
 **Implementation:** `packages/blobsy/src/ref.ts:67-81` (uses `atomically` package)
@@ -597,7 +597,7 @@ For S3 backends, blob uploads are atomic because S3 `PutObject` is atomic:
 - Failed uploads leave no partial object
 - No temp file needed (S3 handles atomicity)
 
-For local backends, same temp-file-then-rename pattern as .yref files:
+For local backends, same temp-file-then-rename pattern as .bref files:
 1. Write to `.blobsy/store/{key}.tmp-{random}`
 2. `fsync()` to disk
 3. Rename to `.blobsy/store/{key}`

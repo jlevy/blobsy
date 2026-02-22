@@ -36,7 +36,7 @@ $ echo "content" > data/untracked.bin
 
 ```console
 $ blobsy push data/untracked.bin 2>&1
-Error: Cannot read .yref file: [LOCAL_PATH]/data/untracked.bin.yref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.yref'
+Error: Cannot read .bref file: [LOCAL_PATH]/data/untracked.bin.bref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.bref'
 ? 1
 ```
 
@@ -44,7 +44,7 @@ Error: Cannot read .yref file: [LOCAL_PATH]/data/untracked.bin.yref: ENOENT: no 
 
 ```console
 $ blobsy untrack nonexistent.bin 2>&1
-Error: Not tracked: nonexistent.bin (no .yref file found)
+Error: Not tracked: nonexistent.bin (no .bref file found)
 ? 1
 ```
 

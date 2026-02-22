@@ -57,7 +57,7 @@ Done: 6 pushed.
 # All 6 refs have remote_key after push
 
 ```console
-$ grep -rl remote_key data/ --include='*.yref' | wc -l | tr -d ' '
+$ grep -rl remote_key data/ --include='*.bref' | wc -l | tr -d ' '
 6
 ? 0
 ```

@@ -6,7 +6,7 @@ sandbox: true
 ```console
 $ blobsy prime --brief
 blobsy: Git-native large file storage CLI.
-Track large files with .yref pointers in Git, store blobs in S3/local/custom backends.
+Track large files with .bref pointers in Git, store blobs in S3/local/custom backends.
 
 Commands: init, track, push, pull, sync, status, verify, untrack, rm, mv, config, health, doctor
 Global flags: --json, --quiet, --verbose, --dry-run

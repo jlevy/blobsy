@@ -31,7 +31,7 @@ Sync complete: 2 pushed, 0 pulled, 0 errors.
 # Both refs have remote_key after sync
 
 ```console
-$ grep -l remote_key data/*.yref | wc -l | tr -d ' '
+$ grep -l remote_key data/*.bref | wc -l | tr -d ' '
 2
 ? 0
 ```
@@ -55,7 +55,7 @@ $ echo "updated model" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
@@ -70,7 +70,7 @@ Sync complete: 1 pushed, 0 pulled, 0 errors.
 # Verify updated ref has remote_key
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```

@@ -23,7 +23,7 @@ before: |
 ```console
 $ blobsy untrack data/model.bin
 Untracked data/model.bin
-Moved data/model.bin.yref to trash
+Moved data/model.bin.bref to trash
 ? 0
 ```
 
@@ -35,10 +35,10 @@ hello blobsy
 ? 0
 ```
 
-# Verify .yref moved
+# Verify .bref moved
 
 ```console
-$ test -f data/model.bin.yref && echo "exists" || echo "gone"
+$ test -f data/model.bin.bref && echo "exists" || echo "gone"
 gone
 ? 0
 ```
@@ -56,24 +56,24 @@ $ cat data/.gitignore
 
 ```console
 $ find .blobsy/trash/ -type f | sort
-.blobsy/trash/model.bin.yref.[UNIX_TS]
+.blobsy/trash/model.bin.bref.[UNIX_TS]
 ? 0
 ```
 
-# Untrack via .yref path (re-track first)
+# Untrack via .bref path (re-track first)
 
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
 
 ```console
-$ blobsy untrack data/model.bin.yref
+$ blobsy untrack data/model.bin.bref
 Untracked data/model.bin
-Moved data/model.bin.yref to trash
+Moved data/model.bin.bref to trash
 ? 0
 ```
 
@@ -90,9 +90,9 @@ Error: data/research is a directory. Use --recursive to untrack all files in it.
 ```console
 $ blobsy untrack --recursive data/research/
 Untracked data/research/data.bin
-Moved data/research/data.bin.yref to trash
+Moved data/research/data.bin.bref to trash
 Untracked data/research/report.bin
-Moved data/research/report.bin.yref to trash
+Moved data/research/report.bin.bref to trash
 ? 0
 ```
 
@@ -105,7 +105,7 @@ file preserved
 ```
 
 ```console
-$ test -f data/research/data.bin.yref && echo "ref exists" || echo "ref gone"
+$ test -f data/research/data.bin.bref && echo "ref exists" || echo "ref gone"
 ref gone
 ? 0
 ```
@@ -123,6 +123,6 @@ $ cat data/research/.gitignore
 
 ```console
 $ blobsy untrack data/nonexistent.bin 2>&1
-Error: Not tracked: data/nonexistent.bin (no .yref file found)
+Error: Not tracked: data/nonexistent.bin (no .bref file found)
 ? 1
 ```

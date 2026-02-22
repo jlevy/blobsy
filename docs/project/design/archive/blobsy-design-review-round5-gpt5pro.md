@@ -1,4 +1,4 @@
-# Senior Technical Review: blobsy v2 (Per‑file `.yref` + Content‑Addressable Remote)
+# Senior Technical Review: blobsy v2 (Per‑file `.bref` + Content‑Addressable Remote)
 
 This review is based primarily on the **v2 design doc** (`blobsy-design-v2.md`) plus the
 attached research notes on the broader sync ecosystem, atomic writes, and backing-store
@@ -16,7 +16,7 @@ coherent, robust, and maintainable—especially for **versioning + branching wor
    from “directory manifests + namespace/promotion semantics” to **per-file refs** (“Git
    is the manifest”) removes a whole class of correctness and UX problems (post-merge
    promotion, manifest canonicalization, remote directory conflicts, etc.). The new
-   model is clean: **a `.yref` is the truth, and it merges like normal code**.
+   model is clean: **a `.bref` is the truth, and it merges like normal code**.
 
 2. **Git’s strengths are being used correctly.** The design leans on Git where Git is
    strongest: *branching, merging, history, review diffs, and conflict resolution*. A
@@ -50,11 +50,11 @@ These are the ones that can create real-world footguns or correctness failures:
    workflow friction).** The doc says sync only operates on committed refs, but later
    describes scenarios that require operating on uncommitted refs, and also says sync
    may modify refs (to set `remote_prefix`). This needs a crisp definition of what git
-   state blobsy reads (working tree vs index vs HEAD), and when `.yref` is allowed to
+   state blobsy reads (working tree vs index vs HEAD), and when `.bref` is allowed to
    change.
 
 3. **Garbage collection reachability semantics are underspecified and potentially
-   dangerous.** If GC only looks at “current `.yref` on branch heads,” you lose the
+   dangerous.** If GC only looks at “current `.bref` on branch heads,” you lose the
    “checkout old commit and pull” promise.
    If GC walks history, `.blobsy/trash` becomes far less necessary (and the doc’s stated
    rationale changes). You need to decide and specify.
@@ -144,7 +144,7 @@ The most compelling element of v2 is this invariant:
 
 > **Git stores the desired state (refs), blobsy sync materializes it (data).**
 
-Per-file `.yref` refs:
+Per-file `.bref` refs:
 
 * make diffs meaningful (per-file hash changes),
 * make merges align with Git’s merge model,
@@ -171,7 +171,7 @@ Content-addressable storage:
 Your conflict model is realistic:
 
 * Partitioned/multi-writer across *different files* is the common case and works great.
-* Same-file concurrent edits become normal Git conflicts in `.yref`.
+* Same-file concurrent edits become normal Git conflicts in `.bref`.
 
 I’d keep this: it’s simple, teaches the right mental model, and avoids inventing a
 custom conflict resolver.
@@ -188,7 +188,7 @@ This is where v2 is strongest conceptually—and where a few details need tighte
    With a global CAS namespace, “blob is already there” is true as long as both branches
    push to the same remote backend.
 
-2. **Rebase/cherry-pick semantics are naturally Git semantics.** `.yref` is just a file.
+2. **Rebase/cherry-pick semantics are naturally Git semantics.** `.bref` is just a file.
    That’s good.
 
 3. **Old commit checkout is possible** *as long as GC doesn’t remove the blobs.* This is
@@ -198,7 +198,7 @@ This is where v2 is strongest conceptually—and where a few details need tighte
 
 Your doc implies both:
 
-* “Git history of `.yref` files = full versioning,” and
+* “Git history of `.bref` files = full versioning,” and
 * “GC shouldn’t have to walk the entire git history; trash avoids it.”
 
 Those are in tension.
@@ -207,7 +207,7 @@ You need to specify **one of these** as your product contract:
 
 **Option A: Full-history preservation (git-like reachability)**
 
-* GC considers a blob “live” if referenced by any `.yref` in any commit reachable from
+* GC considers a blob “live” if referenced by any `.bref` in any commit reachable from
   selected refs (`--all`, `--branches`, `--tags`, etc.).
 * This preserves the “checkout old commit and pull” promise robustly.
 * Downside: GC must walk history (or you maintain an index/cache).
@@ -240,7 +240,7 @@ To make branching workflows reliable, you should add at least one of these:
 
 1. **CI guardrail (recommended minimal):**
 
-   * `blobsy check-remote` (or `blobsy verify --remote`) that ensures every `.yref` in
+   * `blobsy check-remote` (or `blobsy verify --remote`) that ensures every `.bref` in
      the working tree has a corresponding remote object.
    * This should be easy to run in PR checks.
 
@@ -260,13 +260,13 @@ To make branching workflows reliable, you should add at least one of these:
 
 ## 5) Detailed design review (spec-level)
 
-### 5.1 `.yref` file format
+### 5.1 `.bref` file format
 
 **What’s good**
 
 * Minimal fields: hash + size + (optional) remote metadata.
 * Stable key ordering is smart for diff/merge.
-* Format versioning (`blobsy-yref/0.1`) is the right direction.
+* Format versioning (`blobsy-bref/0.1`) is the right direction.
 
 **Gaps / improvements**
 
@@ -281,7 +281,7 @@ To make branching workflows reliable, you should add at least one of these:
 
 2. **Remote representation fields need to be sufficient to compute the remote key
    deterministically.** If compression affects the stored object name (e.g., `.zst`),
-   your `.yref` must make it possible to compute:
+   your `.bref` must make it possible to compute:
 
    * the **exact remote key**, or
    * a deterministic mapping from `(path, sha256, compression)` → key.
@@ -369,16 +369,16 @@ and “Content-Encoding tricks” introduce edge cases.
 
    * freeze it (repo-config only, and recorded per blob), or
    * make stored bytes independent of level (not realistic), or
-   * include enough info in `.yref` to interpret the stored blob.
+   * include enough info in `.bref` to interpret the stored blob.
 
 3. **Branch divergence on compression config** If two branches push the same file
    content but with different compression policies, you need to guarantee that:
 
    * they don’t overwrite the same remote object unintentionally, and
-   * `.yref` always matches what’s actually stored.
+   * `.bref` always matches what’s actually stored.
 
    The easiest way to guarantee this is: **compression affects the stored object name**
-   (suffix) and `.yref` records it.
+   (suffix) and `.bref` records it.
 
 * * *
 
@@ -480,7 +480,7 @@ But as currently described it also creates spec tension.
 **Key questions to answer**
 
 1. **Is trash required for correctness or just convenience?** If GC walks git history to
-   find all referenced `.yref` hashes, trash isn’t needed for correctness.
+   find all referenced `.bref` hashes, trash isn’t needed for correctness.
    If GC does *not* walk history, then your “versioning via git history” claim becomes
    weak.
 
@@ -556,9 +556,9 @@ These are the ones I would file as “doc correctness” tickets:
    Clarify whether it’s:
 
    * full snapshot per push, or
-   * per-push prefix containing only changed files (and `.yref` points per-file).
+   * per-push prefix containing only changed files (and `.bref` points per-file).
 
-3. **Invariant “sync only operates on committed `.yref`” conflicts with corner-case
+3. **Invariant “sync only operates on committed `.bref`” conflicts with corner-case
    scenarios** Several pitfalls described (“pushed but forgot to commit ref,” “switched
    branches without committing”) only make sense if blobsy can push based on uncommitted
    refs. Decide:
@@ -566,8 +566,8 @@ These are the ones I would file as “doc correctness” tickets:
    * does blobsy read refs from working tree, index, or HEAD?
    * and enforce consistent semantics across doc.
 
-4. **`sync` mutating `.yref` (remote_prefix) conflicts with “doesn’t modify refs”
-   messaging** The doc says it doesn’t modify `.yref` files “except to set
+4. **`sync` mutating `.bref` (remote_prefix) conflicts with “doesn’t modify refs”
+   messaging** The doc says it doesn’t modify `.bref` files “except to set
    `remote_prefix`.” That exception matters a lot; it changes how many commits users
    need and how “Git is manifest” really works.
    Clarify expected workflow.
@@ -634,7 +634,7 @@ These are the ones I would file as “doc correctness” tickets:
 
 ### P2 / future
 
-8. **Parallel `.yref` directory option sooner than later**
+8. **Parallel `.bref` directory option sooner than later**
 
    * This is mostly UX/cleanliness, but it matters for repos with many tracked files.
 

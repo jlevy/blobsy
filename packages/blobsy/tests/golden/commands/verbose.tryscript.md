@@ -24,7 +24,7 @@ $ echo "updated" > data/model.bin
 
 ```console
 $ blobsy track --verbose data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 

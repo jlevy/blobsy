@@ -195,13 +195,13 @@ describe('CLI error messages', () => {
       await writeFile(testFile, 'test content');
       await execa('blobsy', ['track', 'readonly.bin'], { cwd: testDir });
 
-      // Make the .yref file read-only
-      const yrefFile = join(testDir, 'readonly.bin.yref');
+      // Make the .bref file read-only
+      const brefFile = join(testDir, 'readonly.bin.bref');
       const { chmod } = await import('node:fs/promises');
-      await chmod(yrefFile, 0o444);
+      await chmod(brefFile, 0o444);
 
       try {
-        // Try to track again (would try to update .yref)
+        // Try to track again (would try to update .bref)
         const result = await execa('blobsy', ['track', '--force', 'readonly.bin'], {
           cwd: testDir,
           reject: false,
@@ -216,7 +216,7 @@ describe('CLI error messages', () => {
         }
       } finally {
         // Restore permissions for cleanup
-        await chmod(yrefFile, 0o644).catch(() => {
+        await chmod(brefFile, 0o644).catch(() => {
           /* ignore errors */
         });
       }

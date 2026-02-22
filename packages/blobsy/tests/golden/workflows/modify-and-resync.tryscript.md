@@ -37,14 +37,14 @@ $ echo "updated model content!!" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
 # Verify ref updated with new hash
 
 ```console
-$ grep hash data/model.bin.yref
+$ grep hash data/model.bin.bref
 hash: [HASH]
 ? 0
 ```
@@ -61,7 +61,7 @@ Done: 1 pushed.
 # Verify push updated the remote_key
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```

@@ -27,7 +27,7 @@ $ git add -A && git commit -q -m "init gzip"
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
@@ -72,7 +72,7 @@ $ printf 'backends:\n  default:\n    url: "local:remote"\ncompress:\n  algorithm
 ```console
 $ blobsy track data/dataset.csv
 Tracking data/dataset.csv
-Created data/dataset.csv.yref
+Created data/dataset.csv.bref
 Added data/dataset.csv to .gitignore
 ? 0
 ```
@@ -122,7 +122,7 @@ $ echo "tiny" > data/tiny.bin
 ```console
 $ blobsy track data/tiny.bin
 Tracking data/tiny.bin
-Created data/tiny.bin.yref
+Created data/tiny.bin.bref
 Added data/tiny.bin to .gitignore
 ? 0
 ```
@@ -172,7 +172,7 @@ $ echo "plain text" > data/notes.txt
 ```console
 $ blobsy track data/notes.txt
 Tracking data/notes.txt
-Created data/notes.txt.yref
+Created data/notes.txt.bref
 Added data/notes.txt to .gitignore
 ? 0
 ```

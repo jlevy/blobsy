@@ -17,7 +17,7 @@ It serves two purposes:
 2. **Correctness** -- Provide the merge base for three-way conflict detection during
    sync.
 
-The cache is **mandatory** for operations that modify `.yref` files (`track`, `push`,
+The cache is **mandatory** for operations that modify `.bref` files (`track`, `push`,
 `pull`, `sync`). It is optional for read-only operations (`status`, `verify`), which
 fall back to hashing all files if the cache is missing.
 
@@ -261,7 +261,7 @@ seconds-to-minutes to hash all files.
 **Why mtime is safe locally but not in refs:** The stat cache is per-machine.
 It compares a file’s current mtime against the mtime recorded *on the same machine*
 after the last hash.
-The `.yref` file cannot use mtime because different machines, git checkouts, CI runners,
+The `.bref` file cannot use mtime because different machines, git checkouts, CI runners,
 and Docker builds produce different mtimes for identical content.
 
 ### Mtime Reset Recovery
@@ -322,10 +322,10 @@ The cached `hash` is the merge base for three-way conflict detection.
 For each tracked file, blobsy has three hash states:
 
 - **Local**: hash of the file on disk
-- **Remote**: hash in the `.yref` file (from git)
+- **Remote**: hash in the `.bref` file (from git)
 - **Base**: hash in stat cache (last time blobsy touched this file)
 
-This is what distinguishes “git pull updated the .yref” from “user modified the file” --
+This is what distinguishes “git pull updated the .bref” from “user modified the file” --
 without the merge base, the two cases are indistinguishable.
 
 **The `getCachedHash` vs `getMergeBase` distinction:**
@@ -375,19 +375,19 @@ Used by `blobsy sync` to determine the correct action for each tracked file.
 
 ### Decision Table
 
-| Local | .yref | Base (cache) | Interpretation | Action |
+| Local | .bref | Base (cache) | Interpretation | Action |
 | --- | --- | --- | --- | --- |
 | A | A | A | No changes | Nothing |
 | A | A | (none) | First sync, already matching | Create cache entry |
-| A | B | A | .yref updated by git pull, local unchanged | Pull new blob |
-| B | A | A | User modified file, .yref unchanged | Push new version |
+| A | B | A | .bref updated by git pull, local unchanged | Pull new blob |
+| B | A | A | User modified file, .bref unchanged | Push new version |
 | B | B | A | User modified + already synced | Nothing |
-| B | C | A | Both local and .yref changed | **Conflict** (error) |
+| B | C | A | Both local and .bref changed | **Conflict** (error) |
 | B | A | (none) | Ambiguous -- no merge base | **Error** (ask user) |
 
 **Note on uncommitted refs:** The “ambiguous” case often occurs after `git pull` when
 the user hasn’t run `blobsy` commands yet.
-The working tree `.yref` differs from the file on disk, but there’s no stat cache entry
+The working tree `.bref` differs from the file on disk, but there’s no stat cache entry
 to determine which changed first.
 Solution: run explicit `blobsy push` or `blobsy pull` to establish merge base.
 
@@ -399,7 +399,7 @@ async function syncFile(
   filePath: string,
 ): Promise<SyncAction> {
   const localHash = await computeHash(filePath);
-  const ref = await readYRef(filePath + '.yref');
+  const ref = await readBref(filePath + '.bref');
   const baseHash = await getMergeBase(cacheDir, filePath);
 
   // Everything matches
@@ -426,12 +426,12 @@ async function syncFile(
     };
   }
 
-  // .yref changed, local unchanged → pull
+  // .bref changed, local unchanged → pull
   if (localHash === baseHash && ref.hash !== baseHash) {
     return { action: 'pull', remoteKey: ref.remote_key };
   }
 
-  // Local changed, .yref unchanged → push
+  // Local changed, .bref unchanged → push
   if (localHash !== baseHash && ref.hash === baseHash) {
     return { action: 'push', newHash: localHash };
   }
@@ -446,7 +446,7 @@ async function syncFile(
     };
   }
 
-  // Local changed to match .yref (coincidental or already synced)
+  // Local changed to match .bref (coincidental or already synced)
   await updateCacheEntry(cacheDir, filePath, localHash);
   return { action: 'up_to_date' };
 }
@@ -458,9 +458,9 @@ The cache MUST be updated atomically with the operation that changes file state:
 
 | Operation | When to update cache |
 | --- | --- |
-| `blobsy track` | After writing `.yref`, update cache with new hash |
-| `blobsy push` | After successful upload + `.yref` update |
-| `blobsy pull` | After successful download (file on disk matches `.yref`) |
+| `blobsy track` | After writing `.bref`, update cache with new hash |
+| `blobsy push` | After successful upload + `.bref` update |
+| `blobsy pull` | After successful download (file on disk matches `.bref`) |
 | `blobsy sync` | After each file’s action completes (push, pull, or no-op) |
 
 **Never** update the cache without completing the corresponding operation.
@@ -507,7 +507,7 @@ The false-negative case (content changed but mtime unchanged) requires sub-milli
 
 | Scenario | Behavior |
 | --- | --- |
-| Fresh clone (no cache) | All entries missing. If local matches .yref → create entries. If mismatch → error, ask user. |
+| Fresh clone (no cache) | All entries missing. If local matches .bref → create entries. If mismatch → error, ask user. |
 | Cache deleted | Same as fresh clone. |
 | Single entry missing | That file treated as first-sync (ambiguous if mismatched). |
 | Corrupt entry file | Skipped on read (returns null). Overwritten on next write. |
@@ -517,9 +517,9 @@ The false-negative case (content changed but mtime unchanged) requires sub-milli
 `blobsy verify --rebuild-cache` rebuilds the cache by hashing all tracked files:
 
 ```
-For each .yref file:
+For each .bref file:
   1. Hash the local file
-  2. If hash matches .yref → create cache entry (file is in sync)
+  2. If hash matches .bref → create cache entry (file is in sync)
   3. If hash differs → skip (don't create entry -- ambiguous state)
   4. If local file missing → skip
 ```

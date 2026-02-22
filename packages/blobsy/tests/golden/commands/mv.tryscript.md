@@ -44,13 +44,13 @@ gone
 # Verify new ref exists, old ref gone
 
 ```console
-$ test -f data/model-v2.bin.yref && echo "ref exists"
+$ test -f data/model-v2.bin.bref && echo "ref exists"
 ref exists
 ? 0
 ```
 
 ```console
-$ test -f data/model-v1.bin.yref && echo "exists" || echo "gone"
+$ test -f data/model-v1.bin.bref && echo "exists" || echo "gone"
 gone
 ? 0
 ```
@@ -66,10 +66,10 @@ old-data.csv
 ? 0
 ```
 
-# Move via .yref path (equivalent)
+# Move via .bref path (equivalent)
 
 ```console
-$ blobsy mv data/old-data.csv.yref data/new-data.csv
+$ blobsy mv data/old-data.csv.bref data/new-data.csv
 Moved data/old-data.csv -> data/new-data.csv
 ? 0
 ```
@@ -101,7 +101,7 @@ final-data.csv
 
 ```console
 $ blobsy mv data/nonexistent.bin data/somewhere.bin 2>&1
-Error: Not tracked: data/nonexistent.bin (no .yref file found)
+Error: Not tracked: data/nonexistent.bin (no .bref file found)
 ? 1
 ```
 
@@ -157,13 +157,13 @@ research data
 # Verify refs moved
 
 ```console
-$ test -f archive/research/model.bin.yref && echo "ref exists"
+$ test -f archive/research/model.bin.bref && echo "ref exists"
 ref exists
 ? 0
 ```
 
 ```console
-$ test -f archive/research/data.bin.yref && echo "ref exists"
+$ test -f archive/research/data.bin.bref && echo "ref exists"
 ref exists
 ? 0
 ```
@@ -171,7 +171,7 @@ ref exists
 # Verify old directory has no tracked files
 
 ```console
-$ test -f data/research/model.bin.yref && echo "exists" || echo "gone"
+$ test -f data/research/model.bin.bref && echo "exists" || echo "gone"
 gone
 ? 0
 ```

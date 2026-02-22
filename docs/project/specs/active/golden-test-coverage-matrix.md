@@ -52,7 +52,7 @@ Test files from `packages/blobsy/tests/golden/`.
 
 | File | Description |
 | --- | --- |
-| check-unpushed.tryscript.md | List committed .yref whose blobs are not pushed; push flow |
+| check-unpushed.tryscript.md | List committed .bref whose blobs are not pushed; push flow |
 | config.tryscript.md | Show, get, set .blobsy.yml values (backend, externalize, compress, remote) |
 | doctor.tryscript.md | Diagnostics, --fix, orphan detection |
 | dry-run.tryscript.md | --dry-run on track, untrack, rm with JSON |
@@ -64,7 +64,7 @@ Test files from `packages/blobsy/tests/golden/`.
 | mv.tryscript.md | Rename/move tracked files and directories |
 | pre-push-check.tryscript.md | CI guard for missing remote blobs |
 | prime.tryscript.md | AI context primer output |
-| push-pull.tryscript.md | push, pull, path handling, .yref paths |
+| push-pull.tryscript.md | push, pull, path handling, .bref paths |
 | quiet.tryscript.md | --quiet, --quiet + --verbose error |
 | rm.tryscript.md | rm, --local, --recursive |
 | skill.tryscript.md | Skill documentation for AI agents |
@@ -73,7 +73,7 @@ Test files from `packages/blobsy/tests/golden/`.
 | track.tryscript.md | Track files, directories, edge cases |
 | untrack.tryscript.md | Untrack files, --recursive |
 | verbose.tryscript.md | --verbose on track, push, status |
-| verify.tryscript.md | Verify local files match .yref hashes |
+| verify.tryscript.md | Verify local files match .bref hashes |
 
 ### echo-backend/ (4 files)
 

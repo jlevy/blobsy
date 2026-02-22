@@ -40,7 +40,7 @@ backends, polished UX, agent-friendly documentation, and a publishable npm packa
 - Sub-file delta sync -- deferred
 - Remote staleness detection via provider hashes -- deferred
 - Multi-backend routing -- deferred
-- Parallel `.yref` directory option -- deferred
+- Parallel `.bref` directory option -- deferred
 
 ## Background
 
@@ -89,7 +89,7 @@ publishing.
 | Stage 1: CLI Polish | `blobsy-nwrr` | `blobsy-t6db` (--dry-run), `blobsy-1jcr` (--quiet validation), `blobsy-kz4d` (error quality), `blobsy-f2of` (golden tests) |
 | Stage 2: S3 Backend | `blobsy-8yrt` | `blobsy-32uo` (Backend interface), `blobsy-lkpe` (backend-s3.ts), `blobsy-zqhx` (unit tests), `blobsy-ay6g` (error golden tests) |
 | Stage 3: E2E Testing + CI | `blobsy-os74` | `blobsy-ecok` (MinIO e2e), `blobsy-00fu` (CI config) |
-| Stage 4: Documentation | `blobsy-40s0` | `blobsy-j6iz` (README), `blobsy-bpzg` (CLI help), `blobsy-4jht` (skill commands), `blobsy-p5mb` (agent files), `blobsy-rdtm` (troubleshooting), `blobsy-qte5` (.yref self-doc) |
+| Stage 4: Documentation | `blobsy-40s0` | `blobsy-j6iz` (README), `blobsy-bpzg` (CLI help), `blobsy-4jht` (skill commands), `blobsy-p5mb` (agent files), `blobsy-rdtm` (troubleshooting), `blobsy-qte5` (.bref self-doc) |
 | Stage 5: Publishing | `blobsy-4qu2` | `blobsy-dtzy` (doc sync), `blobsy-cfyt` (package readiness), `blobsy-ackj` (CI/CD), `blobsy-hdi5` (deps audit) |
 
 Also open: `blobsy-u4cs` (branch name sanitization, Phase 2 scope).
@@ -285,11 +285,11 @@ Following `tbd guidelines cli-agent-skill-patterns`:
   - `<!-- BEGIN BLOBSY INTEGRATION -->` / `<!-- END BLOBSY INTEGRATION -->`
   - Workflow guide, command table, session protocol
 
-#### Self-Documenting .yref Files
+#### Self-Documenting .bref Files
 
 - [ ] Verify comment header: `# blobsy -- https://github.com/jlevy/blobsy`
 - [ ] Verify `blobsy status` and `blobsy --help` referenced in header
-- [ ] Agent encountering `.yref` for first time can learn system from header + npx
+- [ ] Agent encountering `.bref` for first time can learn system from header + npx
 
 #### Troubleshooting Guide
 
@@ -412,7 +412,7 @@ All documentation that must exist for V1:
 | CURSOR.mdc | `.cursor/rules/` | Cursor IDE agent rules |
 | AGENTS.md section | repo root | Multi-agent integration |
 | `--help` text | built-in | Per-command usage, examples |
-| `.yref` comment header | built-in | Self-documenting ref files |
+| `.bref` comment header | built-in | Self-documenting ref files |
 | skill-baseline.md | bundled in dist/ | Full skill for `blobsy skill` |
 | skill-brief.md | bundled in dist/ | Brief skill for `blobsy skill --brief` |
 

@@ -141,7 +141,7 @@ Unstable fields are matched with tryscript elision patterns.
 - `--json` output keys and structure
 - `--help` text
 - Config field names and default values
-- `.yref` file content (format version, field names, key ordering)
+- `.bref` file content (format version, field names, key ordering)
 - Echo backend command strings (except the temp file path)
 
 ### Unstable Fields (matched with patterns)
@@ -211,7 +211,7 @@ With the echo backend, golden test output shows three things:
 $ blobsy push data/model.bin
 PUSH [TMPFILE] -> test-bucket/[REMOTE_KEY]
 Pushed data/model.bin (13 B)
-Updated data/model.bin.yref (remote_key set)
+Updated data/model.bin.bref (remote_key set)
 ? 0
 ```
 
@@ -299,7 +299,7 @@ tests/
       not-found-errors.tryscript.md        # Bucket missing, blob missing
       network-errors.tryscript.md          # Timeout, DNS, connection refused
       conflict-errors.tryscript.md         # Three-way merge conflicts
-      validation-errors.tryscript.md       # Malformed .yref, bad config, bad format version
+      validation-errors.tryscript.md       # Malformed .bref, bad config, bad format version
       partial-failure.tryscript.md         # Some files succeed, some fail
     fixtures/
       small-file.txt                       # "hello blobsy\n" (known content, 13 B)
@@ -453,12 +453,12 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```
 
-# Filesystem after tracking -- shows new .yref, .gitignore, and .blobsy/ stat cache
+# Filesystem after tracking -- shows new .bref, .gitignore, and .blobsy/ stat cache
 
 ```console
 $ find . -not -path './.git/*' -not -name '.git' | sort
@@ -471,7 +471,7 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 ./data
 ./data/.gitignore
 ./data/model.bin
-./data/model.bin.yref
+./data/model.bin.bref
 ./small-file.txt
 ? 0
 ```
@@ -479,10 +479,10 @@ $ find . -not -path './.git/*' -not -name '.git' | sort
 # Verify the ref file content
 
 ```console
-$ cat data/model.bin.yref
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: [HASH]
 size: 13
 ? 0
@@ -509,17 +509,17 @@ data/model.bin already tracked (unchanged)
 ```console
 $ echo "updated content for model" > data/model.bin
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
 # Verify updated ref
 
 ```console
-$ cat data/model.bin.yref
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: [HASH]
 size: 26
 ? 0
@@ -539,20 +539,20 @@ Scanning data/research/...
 ? 0
 ```
 
-# Filesystem after directory tracking -- each file gets its own .yref
+# Filesystem after directory tracking -- each file gets its own .bref
 
 ```console
 $ find data/ | sort
 data/
 data/.gitignore
 data/model.bin
-data/model.bin.yref
+data/model.bin.bref
 data/research
 data/research/.gitignore
 data/research/data.bin
-data/research/data.bin.yref
+data/research/data.bin.bref
 data/research/report.bin
-data/research/report.bin.yref
+data/research/report.bin.bref
 ? 0
 ```
 
@@ -610,7 +610,7 @@ No tracked files.
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 $ blobsy status
 Tracked files (1):
@@ -693,7 +693,7 @@ Actions needed:
 ```console
 $ blobsy track data/dataset.csv
 Tracking data/dataset.csv
-Created data/dataset.csv.yref
+Created data/dataset.csv.bref
 Added data/dataset.csv to .gitignore
 $ blobsy status
 Tracked files (2):
@@ -853,10 +853,10 @@ remote/[REMOTE_KEY]
 # Verify ref was updated with remote_key
 
 ```console
-$ cat data/model.bin.yref
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: [HASH]
 size: 13
 remote_key: [REMOTE_KEY]
@@ -869,8 +869,8 @@ remote_key: [REMOTE_KEY]
 $ rm data/model.bin
 $ find data/ -type f | sort
 data/dataset.csv
-data/dataset.csv.yref
-data/model.bin.yref
+data/dataset.csv.bref
+data/model.bin.bref
 ? 0
 ```
 
@@ -889,9 +889,9 @@ $ cat data/model.bin
 hello blobsy
 $ find data/ -type f | sort
 data/dataset.csv
-data/dataset.csv.yref
+data/dataset.csv.bref
 data/model.bin
-data/model.bin.yref
+data/model.bin.bref
 ? 0
 ```
 
@@ -910,10 +910,10 @@ Done: 0 pulled, 1 already up to date.
 ```console
 $ echo "new content" > data/model.bin
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 $ blobsy push data/model.bin
-Warning: Operating on 1 uncommitted .yref file:
-  data/model.bin.yref (modified)
+Warning: Operating on 1 uncommitted .bref file:
+  data/model.bin.bref (modified)
 
 Pushing 1 file...
   ◑ data/model.bin (12 B) - pushed
@@ -954,7 +954,7 @@ before: |
 $ blobsy push data/model.bin
 PUSH [TMPFILE] -> test-bucket/[REMOTE_KEY]
 Pushed data/model.bin (13 B)
-Updated data/model.bin.yref (remote_key set)
+Updated data/model.bin.bref (remote_key set)
 ? 0
 ```
 
@@ -1041,11 +1041,11 @@ $ cp small-file.txt data/model.bin
 $ cp another-file.txt data/dataset.csv
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 $ blobsy track data/dataset.csv
 Tracking data/dataset.csv
-Created data/dataset.csv.yref
+Created data/dataset.csv.bref
 Added data/dataset.csv to .gitignore
 ? 0
 ```
@@ -1116,10 +1116,10 @@ $ git clone -q ../[CWD] .
 # Second user: blobs are missing, refs are present
 
 ```console
-$ cat data/model.bin.yref
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: [HASH]
 size: 13
 remote_key: [REMOTE_KEY]
@@ -1165,7 +1165,7 @@ second file
 
 Tests the critical race condition: User A modifies a tracked file locally.
 Meanwhile, User B pushes a different version and User A does `git pull`, which updates
-the `.yref`. Now User A’s local file, the `.yref`, and the stat cache all disagree.
+the `.bref`. Now User A’s local file, the `.bref`, and the stat cache all disagree.
 
 ````markdown
 ---
@@ -1206,7 +1206,7 @@ $ echo "user A version" > data/model.bin
 ```
 
 # Simulate User B: push a different version via git
-# (Manually update the .yref to simulate a git pull that brought B's changes)
+# (Manually update the .bref to simulate a git pull that brought B's changes)
 
 ```console
 $ echo "user B version" > /tmp/userb.bin
@@ -1298,10 +1298,10 @@ Tracked files: 1 total (13 B)
 Stat cache: 1 entry, 0 stale
 
 === INTEGRITY CHECKS ===
-✓ All .yref files valid YAML
-✓ All .yref format versions supported (blobsy-yref/0.1)
+✓ All .bref files valid YAML
+✓ All .bref format versions supported (blobsy-bref/0.1)
 ✓ No orphaned .gitignore entries
-✓ No .yref files missing corresponding .gitignore entries
+✓ No .bref files missing corresponding .gitignore entries
 
 No issues detected.
 ? 0
@@ -1332,11 +1332,11 @@ Tracked files: 1 total (13 B)
 Stat cache: 1 entry, 0 stale
 
 === INTEGRITY CHECKS ===
-✓ All .yref files valid YAML
-✓ All .yref format versions supported (blobsy-yref/0.1)
+✓ All .bref files valid YAML
+✓ All .bref format versions supported (blobsy-bref/0.1)
 ✓ No orphaned .gitignore entries
-✗ 1 .yref file missing corresponding .gitignore entry:
-  data/model.bin.yref -> data/model.bin not in .gitignore
+✗ 1 .bref file missing corresponding .gitignore entry:
+  data/model.bin.bref -> data/model.bin not in .gitignore
 
 1 issue detected. Run 'blobsy doctor --fix' to repair.
 ? 1
@@ -1360,11 +1360,11 @@ Tracked files: 1 total (13 B)
 Stat cache: 1 entry, 0 stale
 
 === INTEGRITY CHECKS ===
-✓ All .yref files valid YAML
-✓ All .yref format versions supported (blobsy-yref/0.1)
+✓ All .bref files valid YAML
+✓ All .bref format versions supported (blobsy-bref/0.1)
 ✓ No orphaned .gitignore entries
-✗ 1 .yref file missing corresponding .gitignore entry:
-  data/model.bin.yref -> data/model.bin not in .gitignore
+✗ 1 .bref file missing corresponding .gitignore entry:
+  data/model.bin.bref -> data/model.bin not in .gitignore
   FIXED: Added data/model.bin to .gitignore
 
 1 issue fixed.
@@ -1391,10 +1391,10 @@ Tracked files: 1 total (13 B)
 Stat cache: 1 entry, 0 stale
 
 === INTEGRITY CHECKS ===
-✓ All .yref files valid YAML
-✓ All .yref format versions supported (blobsy-yref/0.1)
+✓ All .bref files valid YAML
+✓ All .bref format versions supported (blobsy-bref/0.1)
 ✓ No orphaned .gitignore entries
-✓ No .yref files missing corresponding .gitignore entries
+✓ No .bref files missing corresponding .gitignore entries
 
 No issues detected.
 ? 0
@@ -1457,11 +1457,11 @@ Actions needed:
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
-$ cat data/model.bin.yref
+Updated data/model.bin.bref (hash changed)
+$ cat data/model.bin.bref
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: [HASH]
 size: 25
 remote_key: [REMOTE_KEY]
@@ -1472,8 +1472,8 @@ remote_key: [REMOTE_KEY]
 
 ```console
 $ blobsy push data/model.bin
-Warning: Operating on 1 uncommitted .yref file:
-  data/model.bin.yref (modified)
+Warning: Operating on 1 uncommitted .bref file:
+  data/model.bin.bref (modified)
 
 Pushing 1 file...
   ◑ data/model.bin (25 B) - pushed
@@ -1536,7 +1536,7 @@ before: |
 ```console
 $ blobsy mv data/model-v1.bin data/model-v2.bin
 Moved: data/model-v1.bin -> data/model-v2.bin
-Moved: data/model-v1.bin.yref -> data/model-v2.bin.yref
+Moved: data/model-v1.bin.bref -> data/model-v2.bin.bref
 Updated .gitignore (removed old entry, added new entry)
 
 Next: Run 'git add -A && git commit -m "Rename model"'
@@ -1550,9 +1550,9 @@ $ cat data/model-v2.bin
 hello blobsy
 $ test -f data/model-v1.bin && echo "exists" || echo "gone"
 gone
-$ test -f data/model-v2.bin.yref && echo "exists" || echo "gone"
+$ test -f data/model-v2.bin.bref && echo "exists" || echo "gone"
 exists
-$ test -f data/model-v1.bin.yref && echo "exists" || echo "gone"
+$ test -f data/model-v1.bin.bref && echo "exists" || echo "gone"
 gone
 ? 0
 ```
@@ -1563,7 +1563,7 @@ gone
 $ blobsy rm data/old-data.csv
 ⊗ data/old-data.csv (staged for deletion)
 
-Moved data/old-data.csv.yref -> .blobsy/trash/data/old-data.csv.yref
+Moved data/old-data.csv.bref -> .blobsy/trash/data/old-data.csv.bref
 Removed data/old-data.csv from .gitignore
 Deleted local file: data/old-data.csv (12 B freed)
 
@@ -1576,9 +1576,9 @@ Next: Run 'git add -A && git commit -m "Remove old-data.csv"'
 ```console
 $ test -f data/old-data.csv && echo "exists" || echo "gone"
 gone
-$ test -f data/old-data.csv.yref && echo "exists" || echo "gone"
+$ test -f data/old-data.csv.bref && echo "exists" || echo "gone"
 gone
-$ test -f .blobsy/trash/data/old-data.csv.yref && echo "exists" || echo "gone"
+$ test -f .blobsy/trash/data/old-data.csv.bref && echo "exists" || echo "gone"
 exists
 ? 0
 ```
@@ -1717,34 +1717,34 @@ before: |
   git add -A && git commit -q -m "track"
 ---
 
-# Malformed .yref file
+# Malformed .bref file
 
 ```console
-$ echo "this is not yaml: [[[" > data/model.bin.yref
+$ echo "this is not yaml: [[[" > data/model.bin.bref
 $ blobsy status 2>&1
-Error: Invalid .yref file: data/model.bin.yref
+Error: Invalid .bref file: data/model.bin.bref
 
 Failed to parse YAML: unexpected token at line 1, column 23
-Expected format: blobsy-yref/0.1 with hash and size fields.
+Expected format: blobsy-bref/0.1 with hash and size fields.
 
-To repair: delete data/model.bin.yref and run 'blobsy track data/model.bin'
+To repair: delete data/model.bin.bref and run 'blobsy track data/model.bin'
 ? 1
 ```
 
 # Unsupported format version
 
 ```console
-$ cat > data/model.bin.yref << 'EOF'
+$ cat > data/model.bin.bref << 'EOF'
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/9.0
+format: blobsy-bref/9.0
 hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
 size: 13
 EOF
 $ blobsy status 2>&1
-Error: Unsupported .yref format: data/model.bin.yref
+Error: Unsupported .bref format: data/model.bin.bref
 
-Found version blobsy-yref/9.0, but this version of blobsy supports up to blobsy-yref/0.1.
+Found version blobsy-bref/9.0, but this version of blobsy supports up to blobsy-bref/0.1.
 Upgrade blobsy to read this ref file, or re-track the file with the current version.
 ? 1
 ```
@@ -1925,9 +1925,9 @@ packages/blobsy/
 
 ### Ref File Parsing and Serialization
 
-- Parse valid `.yref` file (all fields present)
-- Parse `.yref` with optional fields missing (`remote_key` absent)
-- Parse `.yref` with compression fields
+- Parse valid `.bref` file (all fields present)
+- Parse `.bref` with optional fields missing (`remote_key` absent)
+- Parse `.bref` with compression fields
 - Reject malformed YAML
 - Reject unsupported format version (major mismatch)
 - Warn on newer minor version
@@ -1982,7 +1982,7 @@ See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for design.
 ### Path Resolution
 
 - Original file path resolves correctly
-- `.yref` path resolves to original file
+- `.bref` path resolves to original file
 - Directory path expands to contained tracked files
 - Glob patterns expand correctly
 - Relative and absolute paths both work

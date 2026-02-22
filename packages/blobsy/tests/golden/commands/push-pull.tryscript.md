@@ -21,7 +21,7 @@ before: |
 # Verify no remote_key in ref before push
 
 ```console
-$ grep remote_key data/model.bin.yref || echo "no remote_key"
+$ grep remote_key data/model.bin.bref || echo "no remote_key"
 no remote_key
 ? 0
 ```
@@ -38,7 +38,7 @@ Done: 1 pushed.
 # Verify ref updated with remote_key after push
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```
@@ -64,7 +64,7 @@ Done: 1 pushed.
 # Verify both refs have remote_key
 
 ```console
-$ grep -c remote_key data/dataset.csv.yref
+$ grep -c remote_key data/dataset.csv.bref
 1
 ? 0
 ```
@@ -72,7 +72,7 @@ $ grep -c remote_key data/dataset.csv.yref
 # Both refs have remote_key (proving both pushed)
 
 ```console
-$ grep -l remote_key data/*.yref | wc -l | tr -d ' '
+$ grep -l remote_key data/*.bref | wc -l | tr -d ' '
 2
 ? 0
 ```
@@ -117,7 +117,7 @@ $ echo "new content" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
@@ -131,32 +131,32 @@ Done: 1 pushed.
 # Verify new push updated remote_key
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```
 
-# Push via .yref path
+# Push via .bref path
 
 ```console
-$ echo "yref path test" > data/model.bin
+$ echo "bref path test" > data/model.bin
 ? 0
 ```
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
 ```console
-$ blobsy push data/model.bin.yref
+$ blobsy push data/model.bin.bref
   data/model.bin (15 B) - pushed
 Done: 1 pushed.
 ? 0
 ```
 
-# Pull via .yref path
+# Pull via .bref path
 
 ```console
 $ rm data/model.bin
@@ -164,7 +164,7 @@ $ rm data/model.bin
 ```
 
 ```console
-$ blobsy pull data/model.bin.yref
+$ blobsy pull data/model.bin.bref
   data/model.bin (15 B) - pulled
 Done: 1 pulled.
 ? 0
@@ -172,6 +172,6 @@ Done: 1 pulled.
 
 ```console
 $ cat data/model.bin
-yref path test
+bref path test
 ? 0
 ```

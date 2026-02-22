@@ -21,5 +21,5 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Global options: `--json`, `--quiet`, `--verbose`, `--dry-run`
 - Pre-commit hook integration (direct install + lefthook/husky detection)
 - Agent skill commands: `blobsy skill`, `blobsy prime`
-- Self-documenting `.yref` pointer files with comment header
+- Self-documenting `.bref` pointer files with comment header
 - S3 key sanitization for safe remote key generation

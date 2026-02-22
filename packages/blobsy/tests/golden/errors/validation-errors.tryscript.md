@@ -27,7 +27,7 @@ Error: File not found: nonexistent.bin
 
 ```console
 $ blobsy untrack nonexistent.bin 2>&1
-Error: Not tracked: nonexistent.bin (no .yref file found)
+Error: Not tracked: nonexistent.bin (no .bref file found)
 ? 1
 ```
 
@@ -35,7 +35,7 @@ Error: Not tracked: nonexistent.bin (no .yref file found)
 
 ```console
 $ blobsy rm nonexistent.bin 2>&1
-Error: Not tracked: nonexistent.bin (no .yref file found)
+Error: Not tracked: nonexistent.bin (no .bref file found)
 ? 1
 ```
 
@@ -61,38 +61,38 @@ Error: Unrecognized backend URL scheme: r2:
 ? 1
 ```
 
-# Push with malformed .yref fails
+# Push with malformed .bref fails
 
 ```console
-$ echo "not valid yaml %%%" > data/model.bin.yref
+$ echo "not valid yaml %%%" > data/model.bin.bref
 ? 0
 ```
 
 ```console
 $ blobsy push data/model.bin 2>&1
-Error: Invalid .yref file (not an object): [LOCAL_PATH]/data/model.bin.yref
+Error: Invalid .bref file (not an object): [LOCAL_PATH]/data/model.bin.bref
 ? 1
 ```
 
-# Status with malformed .yref
+# Status with malformed .bref
 
 ```console
 $ blobsy status 2>&1
-Error: Invalid .yref file (not an object): [LOCAL_PATH]/data/model.bin.yref
+Error: Invalid .bref file (not an object): [LOCAL_PATH]/data/model.bin.bref
 ? 1
 ```
 
-# Restore valid .yref
+# Restore valid .bref
 
 ```console
-$ rm data/model.bin.yref
+$ rm data/model.bin.bref
 ? 0
 ```
 
 ```console
 $ blobsy track data/model.bin
 Tracking data/model.bin
-Created data/model.bin.yref
+Created data/model.bin.bref
 Added data/model.bin to .gitignore
 ? 0
 ```

@@ -70,16 +70,16 @@ Every command that must be implemented for V1, with key behaviors:
 
 | Command | Key Behaviors |
 | --- | --- |
-| `blobsy track <path>...` | Create `.yref`, add to `.gitignore`. Single file = always externalize. Directory = apply externalization rules. Idempotent (re-track updates hash). |
-| `blobsy untrack [--recursive] <path>` | Move `.yref` to `.blobsy/trash/`, remove from `.gitignore`. Keep local file. Require `--recursive` for directories. |
-| `blobsy rm [--local\|--recursive] <path>` | Move `.yref` to trash, remove from `.gitignore`, delete local file. `--local` keeps `.yref` and remote. |
-| `blobsy mv <source> <dest>` | Move payload + `.yref`, update `.gitignore`. Preserve `remote_key`. Files only (no directories). |
+| `blobsy track <path>...` | Create `.bref`, add to `.gitignore`. Single file = always externalize. Directory = apply externalization rules. Idempotent (re-track updates hash). |
+| `blobsy untrack [--recursive] <path>` | Move `.bref` to `.blobsy/trash/`, remove from `.gitignore`. Keep local file. Require `--recursive` for directories. |
+| `blobsy rm [--local\|--recursive] <path>` | Move `.bref` to trash, remove from `.gitignore`, delete local file. `--local` keeps `.bref` and remote. |
+| `blobsy mv <source> <dest>` | Move payload + `.bref`, update `.gitignore`. Preserve `remote_key`. Files only (no directories). |
 
 ### Sync Commands
 
 | Command | Key Behaviors |
 | --- | --- |
-| `blobsy push [path...]` | Upload to remote, set `remote_key` in `.yref`. Verify hash before upload. `--force` to override. Warn on uncommitted refs. |
+| `blobsy push [path...]` | Upload to remote, set `remote_key` in `.bref`. Verify hash before upload. `--force` to override. Warn on uncommitted refs. |
 | `blobsy pull [path...]` | Download from remote. Refuse if local modified (exit 2). `--force` to overwrite. Atomic writes (temp+rename). |
 | `blobsy sync [path...]` | Bidirectional: health check, then per-file three-way merge via stat cache. Push modified, pull updated refs. Detect conflicts. |
 
@@ -89,8 +89,8 @@ Every command that must be implemented for V1, with key behaviors:
 | --- | --- |
 | `blobsy status [path...]` | Offline. Show state symbols (circle/half/check/tilde/question/deleted). Compare working tree vs HEAD. Summary + actions needed. |
 | `blobsy verify [path...]` | Read and hash every file (bypass stat cache). Report ok/mismatch/missing. Exit 1 on any issue. |
-| `blobsy check-unpushed` | **Interactive mode:** Find committed `.yref` files with no `remote_key` or missing remote blobs. Shows **file paths, commit authors (git blame), and suggested fix**. Supports `--json` for scripting. Use for: manual review, finding who committed unpushed refs, bulk repair planning. |
-| `blobsy pre-push-check` | **CI-only mode:** Verify all `.yref` files in HEAD have remote blobs. **Binary pass/fail** (exit 0 if all pushed, exit 1 if any missing). **No attribution**, **no suggestions**. Use in `.github/workflows` or git hooks to block merges if blobs not uploaded. |
+| `blobsy check-unpushed` | **Interactive mode:** Find committed `.bref` files with no `remote_key` or missing remote blobs. Shows **file paths, commit authors (git blame), and suggested fix**. Supports `--json` for scripting. Use for: manual review, finding who committed unpushed refs, bulk repair planning. |
+| `blobsy pre-push-check` | **CI-only mode:** Verify all `.bref` files in HEAD have remote blobs. **Binary pass/fail** (exit 0 if all pushed, exit 1 if any missing). **No attribution**, **no suggestions**. Use in `.github/workflows` or git hooks to block merges if blobs not uploaded. |
 
 #### Command Comparison: `check-unpushed` vs `pre-push-check`
 
@@ -131,7 +131,7 @@ $ blobsy check-unpushed --json
   "unpushed": [
     {
       "path": "data/model.bin",
-      "ref_path": "data/model.bin.yref",
+      "ref_path": "data/model.bin.bref",
       "hash": "sha256:abc123...",
       "remote_key": null,
       "commit": "abc123def456",
@@ -168,13 +168,13 @@ jobs:
 
 | Command | Key Behaviors |
 | --- | --- |
-| `blobsy doctor` | Configuration, repository state, integrity checks. Detect missing `.gitignore` entries, orphaned entries, invalid `.yref` files. `--fix` for safe repairs. |
+| `blobsy doctor` | Configuration, repository state, integrity checks. Detect missing `.gitignore` entries, orphaned entries, invalid `.bref` files. `--fix` for safe repairs. |
 
 ### Internal Commands
 
 | Command | Key Behaviors |
 | --- | --- |
-| `blobsy hook pre-commit` | Find staged `.yref` files, push blobs, re-stage updated refs. Direct function call (no subprocess). |
+| `blobsy hook pre-commit` | Find staged `.bref` files, push blobs, re-stage updated refs. Direct function call (no subprocess). |
 
 ### Global Flags
 
@@ -189,12 +189,12 @@ Exit codes: 0 = success, 1 = error, 2 = conflict
 | Module | Stage | Responsibility |
 | --- | --- | --- |
 | `cli.ts` | 1 | Commander.js entry point, all subcommand registration |
-| `types.ts` | 1 | YRef, BlobsyConfig, StatCacheEntry, FileState types |
-| `ref.ts` | 1 | Parse/serialize `.yref` files (YAML with comment header, stable key ordering) |
+| `types.ts` | 1 | Bref, BlobsyConfig, StatCacheEntry, FileState types |
+| `ref.ts` | 1 | Parse/serialize `.bref` files (YAML with comment header, stable key ordering) |
 | `config.ts` | 1 | Parse/merge `.blobsy.yml` hierarchy, apply built-in defaults |
 | `backend-url.ts` | 1 | Parse backend URLs (`s3://`, `gs://`, `azure://`, `local:`) into typed config |
 | `hash.ts` | 1 | SHA-256 streaming hashing, format as `sha256:<64-hex>` |
-| `paths.ts` | 1 | Path resolution (file, `.yref`, directory), repo-root detection |
+| `paths.ts` | 1 | Path resolution (file, `.bref`, directory), repo-root detection |
 | `gitignore.ts` | 1 | Add/remove entries in blobsy-managed block, per-directory |
 | `externalize.ts` | 1 | Externalization rules (size threshold, always/never patterns) |
 | `format.ts` | 1 | Human-readable output formatting (state symbols, sizes, tables) |
@@ -230,13 +230,13 @@ manages exit codes, and formats output (human or JSON).
 - Global options: `--json`, `--verbose`, `--help`, `--force`, `--quiet`. (`--dry-run`
   deferred to Phase 2.)
 - Exit codes: 0 = success, 1 = error, 2 = conflict.
-- Path specifications: accept original file path (`data/model.bin`), `.yref` path
-  (`data/model.bin.yref`), or directory path.
-  Normalize by stripping `.yref` suffix.
+- Path specifications: accept original file path (`data/model.bin`), `.bref` path
+  (`data/model.bin.bref`), or directory path.
+  Normalize by stripping `.bref` suffix.
 - `blobsy track <file>` always externalizes; `blobsy track <dir>` applies
   externalization rules per-file.
 - `blobsy track` is idempotent (updates hash if changed, no-op if unchanged).
-- `blobsy push` verifies local hash matches `.yref` hash before upload.
+- `blobsy push` verifies local hash matches `.bref` hash before upload.
   `--force` overrides.
 - `blobsy pull` refuses if local file modified (exit 2). `--force` overrides.
 - `blobsy untrack` and `blobsy rm` on directories require `--recursive`.
@@ -255,8 +255,8 @@ No runtime logic.
 **Key exports:**
 
 ```typescript
-interface YRef {
-  format: string              // "blobsy-yref/0.1"
+interface Bref {
+  format: string              // "blobsy-bref/0.1"
   hash: string                // "sha256:<64-char-lowercase-hex>"
   size: number                // bytes
   remote_key?: string         // evaluated template key (absent until first push)
@@ -327,23 +327,23 @@ type ErrorCategory =
 
 **Design constraints:**
 
-- `YRef` fields use stable key ordering: `format`, `hash`, `size`, `remote_key`,
+- `Bref` fields use stable key ordering: `format`, `hash`, `size`, `remote_key`,
   `compressed`, `compressed_size`.
 - `hash` format: `sha256:<64-char-lowercase-hex>`.
 - `remote_key` does NOT include bucket or global prefix.
   Full remote path is `{bucket}/{global_prefix}/{remote_key}`.
 - Format versioning: reject if major version unsupported; warn if minor is newer.
 
-#### `ref.ts` -- `.yref` File I/O
+#### `ref.ts` -- `.bref` File I/O
 
-**Responsibility:** Read and write `.yref` files.
+**Responsibility:** Read and write `.bref` files.
 Serialize/deserialize YAML with self-documenting comment header and stable field
 ordering.
 
 **Key exports:**
 
-- `readYRef(path: string): Promise<YRef>` -- parse, validate format version.
-- `writeYRef(path: string, ref: YRef): Promise<void>` -- write with comment header,
+- `readBref(path: string): Promise<Bref>` -- parse, validate format version.
+- `writeBref(path: string, ref: Bref): Promise<void>` -- write with comment header,
   stable ordering, atomic (temp+rename).
 - `validateFormatVersion(format: string): void` -- reject unsupported major, warn newer
   minor.
@@ -357,12 +357,12 @@ ordering.
   `compressed_size`. Omit absent optional fields.
 - Atomic writes via temp-file-then-rename.
 - Tolerate unknown extra fields on read (forward compatibility).
-- `.yref` example:
+- `.bref` example:
 
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 hash: sha256:7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 size: 15728640
 remote_key: sha256/7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
@@ -522,16 +522,16 @@ Format as `sha256:<64-char-lowercase-hex>`.
 
 #### `paths.ts` -- Path Resolution
 
-**Responsibility:** Resolve and normalize paths: repo root detection, `.yref` suffix
+**Responsibility:** Resolve and normalize paths: repo root detection, `.bref` suffix
 stripping/appending, POSIX normalization, stat cache path computation.
 
 **Key exports:**
 
 - `findRepoRoot(): Promise<string>` -- walk up to find `.git/` directory.
 - `toRepoRelative(absolutePath: string, repoRoot: string): string`.
-- `stripYrefExtension(path: string): string` -- `data/model.bin.yref` ->
+- `stripBrefExtension(path: string): string` -- `data/model.bin.bref` ->
   `data/model.bin`.
-- `yrefPath(filePath: string): string` -- `data/model.bin` -> `data/model.bin.yref`.
+- `brefPath(filePath: string): string` -- `data/model.bin` -> `data/model.bin.bref`.
 - `normalizePath(path: string): string` -- POSIX forward slashes, no trailing slash for
   files.
 - `getCacheEntryPath(cacheDir: string, relativePath: string): string` -- SHA-256 prefix
@@ -543,7 +543,7 @@ stripping/appending, POSIX normalization, stat cache path computation.
 
 - All path variables in remote keys (`{repo_path}`, `{dirname}`) use POSIX forward
   slashes regardless of OS. Windows backslashes converted.
-- Both `data/model.bin` and `data/model.bin.yref` accepted as input; produce identical
+- Both `data/model.bin` and `data/model.bin.bref` accepted as input; produce identical
   behavior.
 - Stat cache path: SHA-256 of repo-relative path, first 18 hex chars, 2-char prefix
   sharding (256 buckets).
@@ -587,12 +587,12 @@ raw/data.parquet
 - Entries sorted for minimal git diff noise.
 - If no `.gitignore` exists in the target directory, create one.
 - No wildcards, no negation patterns -- explicit per-file entries only.
-- `.yref` files are NOT gitignored (only data files are).
+- `.bref` files are NOT gitignored (only data files are).
 - Preserve any non-blobsy content in the `.gitignore` (only modify the managed block).
 
 #### `externalize.ts` -- Externalization Rules
 
-**Responsibility:** Decide per-file whether to externalize (`.yref` + gitignore) or
+**Responsibility:** Decide per-file whether to externalize (`.bref` + gitignore) or
 leave in git, based on config rules.
 
 **Key exports:**
@@ -682,11 +682,11 @@ merge base for three-way conflict detection during sync.
 - Tolerant of corrupt entries (skip on read, overwrite on next write).
 - Three-way merge decision table:
 
-| Local hash | .yref hash | Cache hash | Action |
+| Local hash | .bref hash | Cache hash | Action |
 | --- | --- | --- | --- |
 | A | A | A | Up to date |
 | A | A | (none) | Create cache entry |
-| A | B | A | Pull (git pull updated .yref) |
+| A | B | A | Pull (git pull updated .bref) |
 | B | A | A | Push (user modified file) |
 | B | B | A | Up to date (both changed same way) |
 | B | C | A | **Conflict** (both changed differently) |
@@ -776,8 +776,8 @@ atomic writes on pull.
 
 **Key exports:**
 
-- `pushFile(filePath: string, ref: YRef, config: BlobsyConfig): Promise<TransferResult>`.
-- `pullFile(ref: YRef, localPath: string, config: BlobsyConfig): Promise<TransferResult>`.
+- `pushFile(filePath: string, ref: Bref, config: BlobsyConfig): Promise<TransferResult>`.
+- `pullFile(ref: Bref, localPath: string, config: BlobsyConfig): Promise<TransferResult>`.
 - `syncFiles(files: FileInfo[], config: BlobsyConfig): Promise<SyncResult>`.
 - `selectTransferTool(tools: string[]): Promise<string>` -- capability check (binary
   exists, credentials valid, endpoint reachable).
@@ -806,7 +806,7 @@ atomic writes on pull.
 #### `template.ts` -- Key Template Evaluation
 
 **Responsibility:** Evaluate remote key templates to compute where blobs are stored.
-Called during `push` to set `remote_key` in `.yref`.
+Called during `push` to set `remote_key` in `.bref`.
 
 **Key exports:**
 
@@ -863,7 +863,7 @@ Decide per-file whether to compress based on config rules.
   in `node:zlib`). Also supported in 23.8.0+ and 24.13.0+.
 - Streaming in-process; no external CLI tools.
 - Hash is always of the original content (not compressed).
-- `.yref` records compression: `compressed: zstd`, `compressed_size: 4194304`.
+- `.bref` records compression: `compressed: zstd`, `compressed_size: 4194304`.
 - Compression skip list must be in repo-level config (affects remote keys).
 - Default never-compress: `*.gz`, `*.zst`, `*.zip`, `*.tar.*`, `*.parquet`, `*.png`,
   `*.jpg`, `*.jpeg`, `*.mp4`, `*.webp`, `*.avif`.
@@ -896,7 +896,7 @@ Auto-fix mode for safe repairs.
   (action required).
 - Output sections: CONFIGURATION, REPOSITORY STATE, GIT HOOKS, CONNECTIVITY, INTEGRITY
   CHECKS.
-- Detects: missing `.gitignore` entries, orphaned `.gitignore` entries, invalid `.yref`
+- Detects: missing `.gitignore` entries, orphaned `.gitignore` entries, invalid `.bref`
   files (malformed YAML, unsupported format), uncommitted refs after push, modified
   files not re-tracked, stale stat cache entries, missing pre-commit hook.
 - `--fix` safe repairs: add missing `.gitignore` entries, remove orphaned entries, clean
@@ -964,13 +964,13 @@ Build the core primitives and all commands that work without a backend.
 **Core primitives:**
 
 - [x] CLI scaffold with Commander.js: all subcommands registered with `--help`
-- [x] `types.ts`: YRef, BlobsyConfig, FileState, StatCacheEntry
-- [x] `ref.ts`: Parse/serialize `.yref` files
+- [x] `types.ts`: Bref, BlobsyConfig, FileState, StatCacheEntry
+- [x] `ref.ts`: Parse/serialize `.bref` files
 - [x] `config.ts`: Parse `.blobsy.yml`, merge hierarchy, apply defaults
 - [x] `backend-url.ts`: Parse backend URLs (`s3://`, `local:`, etc.)
   into config
 - [x] `hash.ts`: SHA-256 streaming hash
-- [x] `paths.ts`: Path resolution (file path, `.yref` path, directory expansion)
+- [x] `paths.ts`: Path resolution (file path, `.bref` path, directory expansion)
 - [x] `gitignore.ts`: Manage blobsy-managed block in `.gitignore`
 - [x] `externalize.ts`: Apply externalization rules for directory tracking
 - [x] `format.ts`: State symbols, human-readable sizes, output formatting
@@ -1000,7 +1000,7 @@ Build the core primitives and all commands that work without a backend.
   invalid
 - [x] `hash.test.ts`: Known content hash, empty file, format
 - [x] `gitignore.test.ts`: Add, remove, duplicate prevention, create new
-- [x] `path-resolution.test.ts`: File, `.yref`, directory, relative/absolute
+- [x] `path-resolution.test.ts`: File, `.bref`, directory, relative/absolute
 - [x] `externalize.test.ts`: Size threshold, always/never patterns, edge cases
 
 **Golden tests (tryscript):**
@@ -1147,9 +1147,9 @@ Every subcommand mapped to its tryscript test file(s). Tests are organized by ca
 | Test File | Error Category |
 | --- | --- |
 | `conflict-errors.tryscript.md` | Pull refuses modified, push refuses hash mismatch, sync conflict |
-| `validation-errors.tryscript.md` | Malformed `.yref`, bad config, unsupported format version |
+| `validation-errors.tryscript.md` | Malformed `.bref`, bad config, unsupported format version |
 | `partial-failure.tryscript.md` | Some files succeed, some fail (permission denied) |
-| `not-found-errors.tryscript.md` | Missing blob in remote, missing `.yref` |
+| `not-found-errors.tryscript.md` | Missing blob in remote, missing `.bref` |
 | `auth-errors.tryscript.md` | Missing/invalid credentials (Stage 3) |
 | `permission-errors.tryscript.md` | Missing write/read permissions (Stage 3) |
 | `network-errors.tryscript.md` | Timeout, DNS failure (Stage 3) |

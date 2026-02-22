@@ -3,26 +3,26 @@ import { describe, expect, it } from 'vitest';
 import {
   getCacheEntryPath,
   normalizePath,
-  stripYrefExtension,
+  stripBrefExtension,
   toRepoRelative,
-  yrefPath,
+  brefPath,
 } from '../src/paths.js';
 
 describe('paths', () => {
-  it('strips .yref extension', () => {
-    expect(stripYrefExtension('data/model.bin.yref')).toBe('data/model.bin');
+  it('strips .bref extension', () => {
+    expect(stripBrefExtension('data/model.bin.bref')).toBe('data/model.bin');
   });
 
-  it('leaves non-.yref path unchanged', () => {
-    expect(stripYrefExtension('data/model.bin')).toBe('data/model.bin');
+  it('leaves non-.bref path unchanged', () => {
+    expect(stripBrefExtension('data/model.bin')).toBe('data/model.bin');
   });
 
-  it('appends .yref extension', () => {
-    expect(yrefPath('data/model.bin')).toBe('data/model.bin.yref');
+  it('appends .bref extension', () => {
+    expect(brefPath('data/model.bin')).toBe('data/model.bin.bref');
   });
 
-  it('handles .yref input for yrefPath (idempotent)', () => {
-    expect(yrefPath('data/model.bin.yref')).toBe('data/model.bin.yref');
+  it('handles .bref input for brefPath (idempotent)', () => {
+    expect(brefPath('data/model.bin.bref')).toBe('data/model.bin.bref');
   });
 
   it('converts absolute to repo-relative', () => {

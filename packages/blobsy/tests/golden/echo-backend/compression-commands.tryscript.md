@@ -37,7 +37,7 @@ $ cp small-file.txt data/readme.txt
 ```console
 $ blobsy track data/readme.txt
 Tracking data/readme.txt
-Created data/readme.txt.yref
+Created data/readme.txt.bref
 Added data/readme.txt to .gitignore
 ? 0
 ```
@@ -57,7 +57,7 @@ Done: 1 pushed.
 # Verify ref has compression fields
 
 ```console
-$ grep compressed data/readme.txt.yref
+$ grep compressed data/readme.txt.bref
 compressed: zstd
 compressed_size: 22
 ? 0

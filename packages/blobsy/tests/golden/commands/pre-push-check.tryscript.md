@@ -38,7 +38,7 @@ Done: 1 pushed.
 # Verify push set remote_key
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```

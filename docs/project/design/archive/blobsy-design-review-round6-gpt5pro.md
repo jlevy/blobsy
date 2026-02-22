@@ -27,13 +27,13 @@ spec + corner cases → inaccuracies/nits → prioritized recommendations)*
    `sync/push` operate on uncommitted refs with warnings; elsewhere “sync only operates
    on committed refs.” Pick one model and enforce it consistently in code + docs.
 3. **Default remote key template likely creates unnecessary churn** and encourages
-   awkward “push updates .yref” workflows.
+   awkward “push updates .bref” workflows.
    A deterministic CAS-first default would simplify versioning/branching and reduce
    “two-step commit” traps.
 4. **GC is underspecified for safety at scale** (multiple clones, partial refs, S3
    listing cost, multi-repo prefixes, and “only delete what we’re sure is ours”). It’s
    feasible, but needs a stronger safety model than “list remote and diff.”
-5. **Schema/versioning for `.yref` needs future-proofing** (hash algorithm agility,
+5. **Schema/versioning for `.bref` needs future-proofing** (hash algorithm agility,
    compression metadata, remote address evolution).
 
 **Strategic direction**
@@ -83,7 +83,7 @@ dominate user perception unless addressed.
 
 ### 2.1 The “one primitive” model is excellent—keep it
 
-“One file ↔ one `.yref` ↔ one remote blob” is a powerful simplifying constraint.
+“One file ↔ one `.bref` ↔ one remote blob” is a powerful simplifying constraint.
 It turns many tricky distributed problems into:
 
 * “Git handles merge conflicts for refs”
@@ -92,7 +92,7 @@ It turns many tricky distributed problems into:
 
 ### 2.2 “Git is the manifest” is a good bet—with one caveat
 
-Using `.yref` files as the manifest is great: versare “just Git.”
+Using `.bref` files as the manifest is great: versare “just Git.”
 **Caveat:** Git only versions the ref files.
 If your data lifecycle (GC/retention) allows blobs referenced bypear, you’ve effectively
 broken “Git is the manifest” for historical checkouts.
@@ -141,7 +141,7 @@ If you keep timestamp+hash as the default, you are choosing “browsability by t
 
 * more ref churn,
 * more storage duplication,
-* more “why did my `.yref` change when I pushed?”
+* more “why did my `.bref` change when I pushed?”
   confusion.
 
 **Recommendation:** make **pure CAS the default**, and treat time/branch prefixes as
@@ -194,7 +194,7 @@ case.** Deterministic CAS keys allow pull to locate blobs without storing a time
 `remote_key` in the ref.
 2. If you must store `remote_key`, store it deterministically (CAS), and make
 timestamping a **remote metadata/tag** concern rather than part of the key.
-3. Add a “preflight”/CI check: `blobsy check-remote` that verifies every `.yref` in HEAD
+3. Add a “preflight”/CI check: `blobsy check-remote` that verifies every `.bref` in HEAD
 has a corresponding remote object (fast HEAD requests).
 4. Add an optional “safe mode” that refuses to push unless refs are staged/committed, or
 conversely refuses to exit success unless refs are staged after mutation.
@@ -203,9 +203,9 @@ conversely refuses to exit success unless refs are staged after mutation.
 
 ## 4) Detailed design review (spec-level)
 
-### 4.1 `.yref` schema + versioning
+### 4.1 `.bref` schema + versioning
 
-Current format includes `format: blobsy-yref/0.1`, `sha256`, `size`, `remote_key`, and
+Current format includes `format: blobsy-bref/0.1`, `sha256`, `size`, `remote_key`, and
 optional compression fields.
 
 **Gaps / improvements**
@@ -221,7 +221,7 @@ optional compression fields.
   size: <bytes>
   ```
 
-  **→ blobsy-ojz7: Add ‘sha256:’ prefix to hash string in .yref file format**
+  **→ blobsy-ojz7: Add ‘sha256:’ prefix to hash string in .bref file format**
 
 * **Compression correctness:** you store hash of original content (good), but for
   debugging and remote verification you may also want:
@@ -267,7 +267,7 @@ refs. “Trusted” should not mean “no escaping/sanitization.”
 You have two competing statements:
 
 * `push/sync` can operate on uncommitted refs with warnings (working tree semantics).
-* later: “`blobsy sync` only operates on files whose `.yref` is committed to git.”
+* later: “`blobsy sync` only operates on files whose `.bref` is committed to git.”
 
 Pick d align:
 
@@ -289,17 +289,17 @@ Per-file explicit ignore entries in a marked block is a solid choice.
 * existing user-managed `.gitignore` blocks and ordering,
 * path normalization (es
 * renames/moves (see below),
-* ensuring `.yref` is never ignored by broad rules (users often ignore `data/`).
+* ensuring `.bref` is never ignored by broad rules (users often ignore `data/`).
 
-You may also consider adding a `blobsy doctor` check: “your `.yref` files are ignored by
+You may also consider adding a `blobsy doctor` check: “your `.bref` files are ignored by
 Git” as a hard error.
 
 ### 4.5 Rename/move is currently a P0 gap
 
-Because payloads are gitignored, **Git cannot move the actual file**, only the `.yref`.
+Because payloads are gitignored, **Git cannot move the actual file**, only the `.bref`.
 That means:
 
-* `git mv data/a.bin.yref data/b.bin.yref` moves the ref, but the local file stays
+* `git mv data/a.bin.bref data/b.bin.bref` moves the ref, but the local file stays
   `data/a.bin`.
 * on another machine, only the ref move is seen; there is no file to rename.
 
@@ -310,7 +310,7 @@ You need one of:
 * `blobsy mv <old> <new>` that:
 
   * moves the local payload,
-  * moves the `.yref`,
+  * moves the `.bref`,
   * updates `.gitignore` entries,
   * and (optionally) avoids re-upload if CAS.
 
@@ -345,11 +345,11 @@ This gives you:
 
 **Improvements**
 
-**→ blobsy-diee: V2: Remote checksum support - store provider ETag/checksums in .yref
+**→ blobsy-diee: V2: Remote checksum support - store provider ETag/checksums in .bref
 for fast verification**
 
 * Offer an optional “fast remote verification” mode: store provider checksum/ETag values
-  in `.yref` after upload (where available) and compare via HEAD calls.
+  in `.bref` after upload (where available) and compare via HEAD calls.
 * Explicitly document multipart edge cases for ETags; do not treat ETag as MD5 except in
   known cases.
 
@@ -408,7 +408,7 @@ What’s missing:
 
 Suggested module boundaries:
 
-* `yref/` (parse, validate, canonical write order)
+* `bref/` (parse, validate, canonical write order)
 * `config/` (hierarchical resolution + deterministic merge semantics)
 * `planner/` (diff local/ref/remote → plan actions)
 * `transfer/` (engines: aws-cli, rclone, sdk, command)
@@ -441,7 +441,7 @@ A strict documentedit worked on my machine” remote incompatibilities.
 The more you can make:
 
 * remote addressing,
-* `.yref` contents,
+* `.bref` contents,
 * and outputs deterministic and stable, the less churn, fewer merge conflicts, and fewer
   “why did this change” bug reports.
 
@@ -515,7 +515,7 @@ unambiguously and test that version in CI.
 ### P1 (big quality-of-life / robustness)
 
 4. Implement “download to temp → verify → rename” for all transfer engines.
-5. Make `.yref` schema future-proof: generic `hash` field, structured `remotes`.
+5. Make `.bref` schema future-proof: generic `hash` field, structured `remotes`.
 6. Tighten config merge semantics (documented and unit-tested).
 7. Provide CI-friendly checks: `blobsy check-remote` and `blobsy check-clean`.
 
@@ -530,7 +530,7 @@ unambiguously and test that version in CI.
 
 ## 8) Final take
 
-Architecturally, **per-file `.yref` + dumb object storage + stateless CLI** is a clean,
+Architecturally, **per-file `.bref` + dumb object storage + stateless CLI** is a clean,
 modern, and defensible design.
 It can absolutely “fill a room,” but only if blobsy commits to being *boring and
 deterministic* in day-to-day workflows.

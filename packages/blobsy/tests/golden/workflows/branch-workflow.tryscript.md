@@ -45,7 +45,7 @@ $ cp another-file.txt data/results.csv
 ```console
 $ blobsy track data/results.csv
 Tracking data/results.csv
-Created data/results.csv.yref
+Created data/results.csv.bref
 Added data/results.csv to .gitignore
 ? 0
 ```
@@ -60,7 +60,7 @@ Done: 1 pushed.
 # Verify results.csv has remote_key after push
 
 ```console
-$ grep remote_key data/results.csv.yref
+$ grep remote_key data/results.csv.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```

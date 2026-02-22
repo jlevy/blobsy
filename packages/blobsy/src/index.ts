@@ -18,19 +18,19 @@ export type {
   StatCacheEntry,
   SyncAction,
   TransferResult,
-  YRef,
+  Bref,
 } from './types.js';
 
 export {
   BlobsyError,
   ConflictError,
   ValidationError,
-  YREF_FORMAT,
-  YREF_EXTENSION,
+  BREF_FORMAT,
+  BREF_EXTENSION,
 } from './types.js';
 
 export { computeHash, hashString, isValidHash } from './hash.js';
-export { readYRef, writeYRef } from './ref.js';
+export { readBref, writeBref } from './ref.js';
 export {
   resolveConfig,
   loadConfigFile,
@@ -42,8 +42,8 @@ export { parseBackendUrl, validateBackendUrl, formatBackendUrl } from './backend
 export {
   findRepoRoot,
   toRepoRelative,
-  stripYrefExtension,
-  yrefPath,
+  stripBrefExtension,
+  brefPath,
   normalizePath,
   getCacheEntryPath,
 } from './paths.js';

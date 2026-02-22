@@ -16,14 +16,14 @@ import { addGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
-  findYrefFiles,
+  findBrefFiles,
   isDirectory,
   resolveFilePath,
-  stripYrefExtension,
+  stripBrefExtension,
   toRepoRelative,
-  yrefPath,
+  brefPath,
 } from './paths.js';
-import { readYRef, writeYRef } from './ref.js';
+import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck } from './transfer.js';
 import {
@@ -52,17 +52,17 @@ export function resolveTrackedFiles(
   repoRoot: string,
 ): { relPath: string; absPath: string; refPath: string }[] {
   const targetPaths =
-    paths.length > 0 ? paths.map((p) => resolveFilePath(stripYrefExtension(p))) : [repoRoot];
+    paths.length > 0 ? paths.map((p) => resolveFilePath(stripBrefExtension(p))) : [repoRoot];
 
   const files: { relPath: string; absPath: string; refPath: string }[] = [];
   for (const tp of targetPaths) {
     if (isDirectory(tp)) {
-      const yrefFiles = findYrefFiles(tp, repoRoot);
-      for (const rel of yrefFiles) {
+      const brefFiles = findBrefFiles(tp, repoRoot);
+      for (const rel of brefFiles) {
         files.push({
           relPath: rel,
           absPath: join(repoRoot, rel),
-          refPath: join(repoRoot, yrefPath(rel)),
+          refPath: join(repoRoot, brefPath(rel)),
         });
       }
     } else {
@@ -70,7 +70,7 @@ export function resolveTrackedFiles(
       files.push({
         relPath: rel,
         absPath: tp,
-        refPath: join(repoRoot, yrefPath(rel)),
+        refPath: join(repoRoot, brefPath(rel)),
       });
     }
   }
@@ -102,7 +102,7 @@ export async function handlePush(
   if (globalOpts.dryRun) {
     const needsPush = [];
     for (const file of files) {
-      const ref = await readYRef(file.refPath);
+      const ref = await readBref(file.refPath);
       if (!ref.remote_key || opts.force) {
         needsPush.push(`push ${file.relPath}`);
       }
@@ -123,7 +123,7 @@ export async function handlePush(
   const results: TransferResult[] = [];
 
   for (const file of files) {
-    const ref = await readYRef(file.refPath);
+    const ref = await readBref(file.refPath);
 
     if (ref.remote_key && !opts.force) {
       if (!globalOpts.quiet && !globalOpts.json) {
@@ -144,7 +144,7 @@ export async function handlePush(
 
     if (result.success && result.refUpdates) {
       const updatedRef = { ...ref, ...result.refUpdates };
-      await writeYRef(file.refPath, updatedRef);
+      await writeBref(file.refPath, updatedRef);
       if (existsSync(file.absPath)) {
         const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
         await writeCacheEntry(cacheDir, entry);
@@ -206,7 +206,7 @@ export async function handlePull(
   if (globalOpts.dryRun) {
     const needsPull = [];
     for (const file of files) {
-      const ref = await readYRef(file.refPath);
+      const ref = await readBref(file.refPath);
       if (ref.remote_key) {
         needsPull.push(`pull ${file.relPath}`);
       }
@@ -227,7 +227,7 @@ export async function handlePull(
   const results: TransferResult[] = [];
 
   for (const file of files) {
-    const ref = await readYRef(file.refPath);
+    const ref = await readBref(file.refPath);
 
     if (!ref.remote_key) {
       if (!globalOpts.quiet && !globalOpts.json) {
@@ -313,7 +313,7 @@ export async function handleSync(
   if (globalOpts.dryRun) {
     const actions = [];
     for (const file of files) {
-      const ref = await readYRef(file.refPath);
+      const ref = await readBref(file.refPath);
       if (!ref.remote_key) {
         actions.push(`push ${file.relPath}`);
       } else if (!existsSync(file.absPath)) {
@@ -338,13 +338,13 @@ export async function handleSync(
   let errors = 0;
 
   for (const file of files) {
-    const ref = await readYRef(file.refPath);
+    const ref = await readBref(file.refPath);
 
     if (!ref.remote_key) {
       const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
       if (result.success && result.refUpdates) {
         const updatedRef = { ...ref, ...result.refUpdates };
-        await writeYRef(file.refPath, updatedRef);
+        await writeBref(file.refPath, updatedRef);
         if (existsSync(file.absPath)) {
           const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
           await writeCacheEntry(cacheDir, entry);
@@ -386,7 +386,7 @@ export async function handleSync(
         const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
         if (result.success && result.refUpdates) {
           const updatedRef = { ...modifiedRef, ...result.refUpdates };
-          await writeYRef(file.refPath, updatedRef);
+          await writeBref(file.refPath, updatedRef);
           const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
           await writeCacheEntry(cacheDir, entry);
           pushed++;
@@ -468,30 +468,30 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
     }
   }
 
-  const allYrefs = findYrefFiles(repoRoot, repoRoot);
-  for (const relPath of allYrefs) {
+  const allBrefs = findBrefFiles(repoRoot, repoRoot);
+  for (const relPath of allBrefs) {
     const absPath = join(repoRoot, relPath);
-    const refPath = join(repoRoot, yrefPath(relPath));
+    const refPath = join(repoRoot, brefPath(relPath));
 
     if (!existsSync(absPath) && existsSync(refPath)) {
-      const ref = await readYRef(refPath);
+      const ref = await readBref(refPath);
       if (!ref.remote_key) {
         issues.push({
           type: 'orphan',
-          message: `${relPath}: .yref exists but local file missing and no remote_key`,
+          message: `${relPath}: .bref exists but local file missing and no remote_key`,
           fixed: false,
         });
       }
     }
   }
 
-  for (const relPath of allYrefs) {
+  for (const relPath of allBrefs) {
     const absPath = join(repoRoot, relPath);
     const fileName = basename(absPath);
     const fileDir = dirname(absPath);
     const gitignorePath = join(fileDir, '.gitignore');
 
-    if (existsSync(join(repoRoot, yrefPath(relPath)))) {
+    if (existsSync(join(repoRoot, brefPath(relPath)))) {
       const { readBlobsyBlock } = await import('./gitignore.js');
       const entries = await readBlobsyBlock(gitignorePath);
       if (!entries.includes(fileName)) {
@@ -649,12 +649,12 @@ export async function handleCheckUnpushed(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
-  const allYrefs = findYrefFiles(repoRoot, repoRoot);
+  const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const unpushed: string[] = [];
 
-  for (const relPath of allYrefs) {
-    const refPath = join(repoRoot, yrefPath(relPath));
-    const ref = await readYRef(refPath);
+  for (const relPath of allBrefs) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
     if (!ref.remote_key) {
       unpushed.push(relPath);
     }
@@ -686,12 +686,12 @@ export async function handlePrePushCheck(
   const repoRoot = findRepoRoot();
   const config = await resolveConfig(repoRoot, repoRoot);
 
-  const allYrefs = findYrefFiles(repoRoot, repoRoot);
+  const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const missing: string[] = [];
 
-  for (const relPath of allYrefs) {
-    const refPath = join(repoRoot, yrefPath(relPath));
-    const ref = await readYRef(refPath);
+  for (const relPath of allBrefs) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
 
     if (!ref.remote_key) {
       missing.push(relPath);

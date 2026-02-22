@@ -31,16 +31,16 @@ import { addGitignoreEntry, removeGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
-  findYrefFiles,
+  findBrefFiles,
   findTrackableFiles,
   isDirectory,
   normalizePath,
   resolveFilePath,
-  stripYrefExtension,
+  stripBrefExtension,
   toRepoRelative,
-  yrefPath,
+  brefPath,
 } from './paths.js';
-import { readYRef, writeYRef } from './ref.js';
+import { readBref, writeBref } from './ref.js';
 import {
   getGlobalOpts,
   handlePush,
@@ -56,11 +56,11 @@ import {
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
-import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
+import type { BlobsyConfig, GlobalOptions, Bref } from './types.js';
 import {
   BlobsyError,
   FILE_STATE_SYMBOLS,
-  YREF_FORMAT,
+  BREF_FORMAT,
   ValidationError,
   UserError,
 } from './types.js';
@@ -169,23 +169,23 @@ function createProgram(): Command {
 
   program
     .command('track')
-    .description('Start tracking files or directories with .yref pointers')
+    .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option('--force', 'Skip confirmation for destructive operations')
     .action(wrapAction(handleTrack));
 
   program
     .command('untrack')
-    .description('Stop tracking files (keeps local files, moves .yref to trash)')
+    .description('Stop tracking files (keeps local files, moves .bref to trash)')
     .argument('<path...>', 'Files or directories to untrack')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleUntrack));
 
   program
     .command('rm')
-    .description('Remove tracked files: delete local + move .yref to trash')
+    .description('Remove tracked files: delete local + move .bref to trash')
     .argument('<path...>', 'Files or directories to remove')
-    .option('--local', 'Delete local file only, keep .yref and remote')
+    .option('--local', 'Delete local file only, keep .bref and remote')
     .option('--remote', 'Also delete blob from backend (requires confirmation)')
     .option('--force', 'Skip confirmation prompts')
     .option('--recursive', 'Required for directory removal')
@@ -193,7 +193,7 @@ function createProgram(): Command {
 
   program
     .command('mv')
-    .description('Rename or move tracked files or directories (updates .yref + .gitignore)')
+    .description('Rename or move tracked files or directories (updates .bref + .gitignore)')
     .argument('<source>', 'Source tracked file or directory')
     .argument('<dest>', 'Destination path')
     .action(wrapAction(handleMv));
@@ -229,7 +229,7 @@ function createProgram(): Command {
 
   program
     .command('verify')
-    .description('Verify local files match their .yref hashes')
+    .description('Verify local files match their .bref hashes')
     .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--json', 'Structured JSON output')
     .action(wrapAction(handleVerify));
@@ -262,12 +262,12 @@ function createProgram(): Command {
 
   program
     .command('check-unpushed')
-    .description('List committed .yref files whose blobs are not yet pushed')
+    .description('List committed .bref files whose blobs are not yet pushed')
     .action(wrapAction(handleCheckUnpushed));
 
   program
     .command('pre-push-check')
-    .description('CI guard: fail if any .yref is missing its remote blob')
+    .description('CI guard: fail if any .bref is missing its remote blob')
     .action(wrapAction(handlePrePushCheck));
 
   program
@@ -511,7 +511,7 @@ async function handleTrack(
   const config = await resolveConfig(repoRoot, repoRoot);
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripYrefExtension(inputPath));
+    const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
     if (isDirectory(absPath)) {
       await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts);
@@ -528,7 +528,7 @@ async function trackSingleFile(
   globalOpts: GlobalOptions,
 ): Promise<void> {
   const relPath = toRepoRelative(absPath, repoRoot);
-  const refPath = yrefPath(absPath);
+  const refPath = brefPath(absPath);
   const refRelPath = toRepoRelative(refPath, repoRoot);
   const fileDir = dirname(absPath);
   const fileName = basename(absPath);
@@ -553,7 +553,7 @@ async function trackSingleFile(
 
   // Check for existing ref
   if (existsSync(refPath)) {
-    const existingRef = await readYRef(refPath);
+    const existingRef = await readBref(refPath);
     if (existingRef.hash === hash) {
       if (!globalOpts.quiet) {
         if (globalOpts.json) {
@@ -566,7 +566,7 @@ async function trackSingleFile(
     }
 
     // Hash changed, update. Clear remote_key since old key points to old content.
-    const newRef: YRef = {
+    const newRef: Bref = {
       ...existingRef,
       hash,
       size: fileSize,
@@ -574,7 +574,7 @@ async function trackSingleFile(
       compressed: undefined,
       compressed_size: undefined,
     };
-    await writeYRef(refPath, newRef);
+    await writeBref(refPath, newRef);
 
     // Update stat cache
     const entry = await createCacheEntry(absPath, relPath, hash);
@@ -591,12 +591,12 @@ async function trackSingleFile(
   }
 
   // New tracking
-  const ref: YRef = {
-    format: YREF_FORMAT,
+  const ref: Bref = {
+    format: BREF_FORMAT,
     hash,
     size: fileSize,
   };
-  await writeYRef(refPath, ref);
+  await writeBref(refPath, ref);
 
   // Add to gitignore
   await addGitignoreEntry(fileDir, fileName);
@@ -661,14 +661,14 @@ async function trackDirectory(
       continue;
     }
 
-    const refPath = yrefPath(absFilePath);
+    const refPath = brefPath(absFilePath);
     const hash = await computeHash(absFilePath);
     const fileName = basename(absFilePath);
     const fileDir = dirname(absFilePath);
     const sizeStr = formatSize(fileSize).padStart(6);
 
     if (existsSync(refPath)) {
-      const existingRef = await readYRef(refPath);
+      const existingRef = await readBref(refPath);
       if (existingRef.hash === hash) {
         if (!globalOpts.quiet && !globalOpts.json) {
           console.log(
@@ -679,8 +679,8 @@ async function trackDirectory(
         continue;
       }
 
-      const newRef: YRef = { ...existingRef, hash, size: fileSize };
-      await writeYRef(refPath, newRef);
+      const newRef: Bref = { ...existingRef, hash, size: fileSize };
+      await writeBref(refPath, newRef);
       const entry = await createCacheEntry(absFilePath, relFilePath, hash);
       await writeCacheEntry(cacheDir, entry);
 
@@ -691,8 +691,8 @@ async function trackDirectory(
       }
       tracked++;
     } else {
-      const ref: YRef = { format: YREF_FORMAT, hash, size: fileSize };
-      await writeYRef(refPath, ref);
+      const ref: Bref = { format: BREF_FORMAT, hash, size: fileSize };
+      await writeBref(refPath, ref);
       await addGitignoreEntry(fileDir, fileName);
       const entry = await createCacheEntry(absFilePath, relFilePath, hash);
       await writeCacheEntry(cacheDir, entry);
@@ -780,10 +780,10 @@ async function getFileState(
   _relPath: string,
 ): Promise<{ symbol: string; state: string; details: string }> {
   if (!existsSync(refPath)) {
-    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.yref not found' };
+    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
   }
 
-  const ref = await readYRef(refPath);
+  const ref = await readBref(refPath);
 
   if (!existsSync(absPath)) {
     return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_file', details: 'file missing' };
@@ -796,12 +796,12 @@ async function getFileState(
   }
 
   if (ref.remote_key) {
-    // Check if .yref is committed (simplified: check if in git)
+    // Check if .bref is committed (simplified: check if in git)
     return { symbol: FILE_STATE_SYMBOLS.synced, state: 'synced', details: 'synced' };
   }
 
   // No remote_key: not pushed yet
-  // Simplified check: if .yref is committed
+  // Simplified check: if .bref is committed
   return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed' };
 }
 
@@ -826,7 +826,7 @@ async function handleVerify(
       continue;
     }
 
-    const ref = await readYRef(file.refPath);
+    const ref = await readBref(file.refPath);
 
     if (!existsSync(file.absPath)) {
       results.push({ path: file.relPath, status: 'missing' });
@@ -879,7 +879,7 @@ async function handleUntrack(
   const repoRoot = findRepoRoot();
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripYrefExtension(inputPath));
+    const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
     if (isDirectory(absPath)) {
       if (!recursive) {
@@ -887,8 +887,8 @@ async function handleUntrack(
           `${toRepoRelative(absPath, repoRoot)} is a directory. Use --recursive to untrack all files in it.`,
         );
       }
-      const yrefFiles = findYrefFiles(absPath, repoRoot);
-      for (const rel of yrefFiles) {
+      const brefFiles = findBrefFiles(absPath, repoRoot);
+      for (const rel of brefFiles) {
         await untrackFile(join(repoRoot, rel), repoRoot, globalOpts);
       }
     } else {
@@ -903,12 +903,12 @@ async function untrackFile(
   globalOpts: GlobalOptions,
 ): Promise<void> {
   const relPath = toRepoRelative(absPath, repoRoot);
-  const refPath = yrefPath(absPath);
+  const refPath = brefPath(absPath);
   const fileName = basename(absPath);
   const fileDir = dirname(absPath);
 
   if (!existsSync(refPath)) {
-    throw new ValidationError(`Not tracked: ${relPath} (no .yref file found)`);
+    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
   }
 
   if (globalOpts.dryRun) {
@@ -920,7 +920,7 @@ async function untrackFile(
     return;
   }
 
-  // Move .yref to trash
+  // Move .bref to trash
   const trashDir = join(repoRoot, '.blobsy', 'trash');
   await ensureDir(trashDir);
   const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
@@ -962,7 +962,7 @@ async function handleRm(
   }
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripYrefExtension(inputPath));
+    const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
     if (isDirectory(absPath)) {
       if (!recursive) {
@@ -970,8 +970,8 @@ async function handleRm(
           `${toRepoRelative(absPath, repoRoot)} is a directory. Use --recursive to remove all files in it.`,
         );
       }
-      const yrefFiles = findYrefFiles(absPath, repoRoot);
-      for (const rel of yrefFiles) {
+      const brefFiles = findBrefFiles(absPath, repoRoot);
+      for (const rel of brefFiles) {
         await rmFile(join(repoRoot, rel), repoRoot, localOnly, deleteRemote, force, globalOpts);
       }
     } else {
@@ -989,7 +989,7 @@ async function rmFile(
   globalOpts: GlobalOptions,
 ): Promise<void> {
   const relPath = toRepoRelative(absPath, repoRoot);
-  const refPath = yrefPath(absPath);
+  const refPath = brefPath(absPath);
   const fileName = basename(absPath);
   const fileDir = dirname(absPath);
 
@@ -1004,7 +1004,7 @@ async function rmFile(
   }
 
   if (localOnly) {
-    // Just delete local file, keep .yref
+    // Just delete local file, keep .bref
     if (existsSync(absPath)) {
       await unlink(absPath);
     }
@@ -1019,10 +1019,10 @@ async function rmFile(
   }
 
   if (!existsSync(refPath)) {
-    throw new ValidationError(`Not tracked: ${relPath} (no .yref file found)`);
+    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
   }
 
-  // Move .yref to trash
+  // Move .bref to trash
   const trashDir = join(repoRoot, '.blobsy', 'trash');
   await ensureDir(trashDir);
   const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
@@ -1030,9 +1030,9 @@ async function rmFile(
 
   // Delete from backend if --remote flag set
   if (deleteRemote) {
-    const yref = await readYRef(trashPath); // Read from trash copy
+    const bref = await readBref(trashPath); // Read from trash copy
 
-    if (yref.remote_key) {
+    if (bref.remote_key) {
       // Confirmation prompt (unless --force)
       if (!force && !globalOpts.quiet) {
         const { createInterface } = await import('node:readline/promises');
@@ -1044,7 +1044,7 @@ async function rmFile(
         const answer = await rl.question(
           `Delete blob from backend?\n` +
             `  File: ${relPath}\n` +
-            `  Remote key: ${yref.remote_key}\n` +
+            `  Remote key: ${bref.remote_key}\n` +
             `  This cannot be undone. Continue? (y/N): `,
         );
 
@@ -1053,7 +1053,7 @@ async function rmFile(
         if (answer.toLowerCase() !== 'y') {
           if (!globalOpts.quiet) {
             console.log(
-              'Remote deletion cancelled. Local file and .yref removed, remote blob kept.',
+              'Remote deletion cancelled. Local file and .bref removed, remote blob kept.',
             );
           }
           // Still continue with local cleanup below
@@ -1071,13 +1071,13 @@ async function rmFile(
           }
           const resolvedBackend = resolveBackend(config);
           const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
-          await backend.delete(yref.remote_key);
+          await backend.delete(bref.remote_key);
 
           if (!globalOpts.quiet) {
             if (globalOpts.json) {
-              console.log(formatJsonMessage(`Deleted from backend: ${yref.remote_key}`));
+              console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
             } else {
-              console.log(`Deleted from backend: ${yref.remote_key}`);
+              console.log(`Deleted from backend: ${bref.remote_key}`);
             }
           }
         } catch (err: unknown) {
@@ -1085,7 +1085,7 @@ async function rmFile(
           // Local cleanup already succeeded
           console.warn(
             `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
-              `  Remote blob may still exist: ${yref.remote_key}`,
+              `  Remote blob may still exist: ${bref.remote_key}`,
           );
         }
       }
@@ -1127,8 +1127,8 @@ async function handleMv(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
-  const srcAbs = resolveFilePath(stripYrefExtension(source));
-  const destAbs = resolveFilePath(stripYrefExtension(dest));
+  const srcAbs = resolveFilePath(stripBrefExtension(source));
+  const destAbs = resolveFilePath(stripBrefExtension(dest));
 
   if (isDirectory(srcAbs)) {
     await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts);
@@ -1137,9 +1137,9 @@ async function handleMv(
 
   const srcRel = toRepoRelative(srcAbs, repoRoot);
 
-  const srcRefPath = yrefPath(srcAbs);
+  const srcRefPath = brefPath(srcAbs);
   if (!existsSync(srcRefPath)) {
-    throw new ValidationError(`Not tracked: ${srcRel} (no .yref file found)`);
+    throw new ValidationError(`Not tracked: ${srcRel} (no .bref file found)`);
   }
 
   await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts);
@@ -1151,14 +1151,14 @@ async function handleMvDirectory(
   repoRoot: string,
   globalOpts: GlobalOptions,
 ): Promise<void> {
-  const yrefFiles = findYrefFiles(srcDir, repoRoot);
-  if (yrefFiles.length === 0) {
+  const brefFiles = findBrefFiles(srcDir, repoRoot);
+  if (brefFiles.length === 0) {
     throw new ValidationError(`No tracked files in ${toRepoRelative(srcDir, repoRoot)}`);
   }
 
   if (globalOpts.dryRun) {
-    const actions = yrefFiles.map((rel) => {
-      const filePath = rel.replace(/\.yref$/, '');
+    const actions = brefFiles.map((rel) => {
+      const filePath = rel.replace(/\.bref$/, '');
       const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
       const destPath = join(toRepoRelative(destDir, repoRoot), relFromSrc);
       return `move ${filePath} -> ${destPath}`;
@@ -1173,8 +1173,8 @@ async function handleMvDirectory(
     return;
   }
 
-  for (const relYref of yrefFiles) {
-    const filePath = relYref.replace(/\.yref$/, '');
+  for (const relBref of brefFiles) {
+    const filePath = relBref.replace(/\.bref$/, '');
     const srcFileAbs = join(repoRoot, filePath);
     const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
     const destFileAbs = join(destDir, relFromSrc);
@@ -1192,8 +1192,8 @@ async function mvSingleFile(
   const srcRel = toRepoRelative(srcAbs, repoRoot);
   const destRel = toRepoRelative(destAbs, repoRoot);
 
-  const srcRefPath = yrefPath(srcAbs);
-  const destRefPath = yrefPath(destAbs);
+  const srcRefPath = brefPath(srcAbs);
+  const destRefPath = brefPath(destAbs);
 
   if (globalOpts.dryRun) {
     if (globalOpts.json) {
@@ -1204,7 +1204,7 @@ async function mvSingleFile(
     return;
   }
 
-  const ref = await readYRef(srcRefPath);
+  const ref = await readBref(srcRefPath);
 
   if (existsSync(srcAbs)) {
     await ensureDir(dirname(destAbs));
@@ -1212,7 +1212,7 @@ async function mvSingleFile(
   }
 
   await ensureDir(dirname(destRefPath));
-  await writeYRef(destRefPath, ref);
+  await writeBref(destRefPath, ref);
   await unlink(srcRefPath);
 
   await removeGitignoreEntry(dirname(srcAbs), basename(srcAbs));

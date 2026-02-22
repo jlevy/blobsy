@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { YREF_FORMAT, isValidHash } from '../src/index.js';
+import { BREF_FORMAT, isValidHash } from '../src/index.js';
 
 describe('blobsy exports', () => {
-  it('exports YREF_FORMAT constant', () => {
-    expect(YREF_FORMAT).toBe('blobsy-yref/0.1');
+  it('exports BREF_FORMAT constant', () => {
+    expect(BREF_FORMAT).toBe('blobsy-bref/0.1');
   });
 
   it('exports isValidHash function', () => {

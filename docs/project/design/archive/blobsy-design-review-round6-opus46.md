@@ -18,7 +18,7 @@
 **Overall Assessment: Strong architecture with some implementation risks**
 
 This is a well-crafted design that makes smart architectural decisions:
-- ✅ Per-file `.yref` approach elegantly eliminates manifest complexity
+- ✅ Per-file `.bref` approach elegantly eliminates manifest complexity
 - ✅ Delegating to git for versioning/conflicts is brilliant
 - ✅ Content-addressable storage with pluggable layouts is the right choice
 - ✅ External tool delegation (aws-cli, rclone) is pragmatic
@@ -37,7 +37,7 @@ identified below.
 
 ### 1.1 Core Insight: “Git is the Manifest”
 
-**Brilliant.** The shift from manifest-based architecture to per-file `.yref` files is
+**Brilliant.** The shift from manifest-based architecture to per-file `.bref` files is
 the key innovation here:
 
 - Eliminates all manifest sync complexity
@@ -56,8 +56,8 @@ Traditional approach (manifests):
   Problem: manifest becomes a coordination bottleneck
 
 blobsy V2 approach (per-file refs):
-  file1.bin.yref -> file1 blob
-  file2.bin.yref -> file2 blob
+  file1.bin.bref -> file1 blob
+  file2.bin.bref -> file2 blob
   Git handles the "manifest" (commit tree)
   Problem: eliminated
 ```
@@ -138,8 +138,8 @@ layouts. Git LFS targets teams on GitHub/GitLab/Bitbucket.
 
 | Aspect | blobsy | DVC |
 | --- | --- | --- |
-| Ref file format | ✅ Per-file `.yref` (YAML) | ✅ Per-file `.dvc` (YAML) |
-| Directory tracking | ✅ One `.yref` per file | ⚠️ One `.dvc` for whole dir |
+| Ref file format | ✅ Per-file `.bref` (YAML) | ✅ Per-file `.dvc` (YAML) |
+| Directory tracking | ✅ One `.bref` per file | ⚠️ One `.dvc` for whole dir |
 | Hash algorithm | ✅ SHA-256 | ❌ MD5 |
 | Runtime | ✅ Node.js (ubiquitous) | ⚠️ Python (dependency) |
 | Remote browsability | ✅ Path-based templates available | ❌ Content-addressed only |
@@ -190,16 +190,16 @@ it:
 
 **Scenario 1: Pushed but not committed**
 ```bash
-$ blobsy push              # uploads data, sets remote_key in .yref
-# User forgets to git commit the .yref
-# Other users see stale .yref pointing to old hash
+$ blobsy push              # uploads data, sets remote_key in .bref
+# User forgets to git commit the .bref
+# Other users see stale .bref pointing to old hash
 # Their blobsy pull downloads old data
 ```
 
 **Scenario 2: Committed but not pushed**
 ```bash
-$ blobsy track file.bin    # updates .yref with new hash
-$ git add file.bin.yref && git commit
+$ blobsy track file.bin    # updates .bref with new hash
+$ git add file.bin.bref && git commit
 # User forgets to blobsy push
 # Other users pull from git, see the updated ref, run blobsy pull
 # Error: "missing (no remote!)" - blob doesn't exist
@@ -222,7 +222,7 @@ $ blobsy status
 
 # Git status shows uncommitted changes, but user might not notice
 $ git status
-modified: data/model.bin.yref
+modified: data/model.bin.bref
 
 # On Bob's machine after git pull (Alice didn't commit)
 $ blobsy pull
@@ -237,7 +237,7 @@ $ blobsy pull
 $ blobsy commit -m "Update model"
 # Internally runs:
 #   1. blobsy push (upload all tracked files)
-#   2. git add *.yref .gitignore
+#   2. git add *.bref .gitignore
 #   3. git commit -m "Update model"
 # Atomically keeps git and remote in sync
 ```
@@ -249,7 +249,7 @@ The manual two-step process should be “advanced usage.”
 
 ```bash
 $ blobsy sync
-Error: 2 .yref files have uncommitted changes.
+Error: 2 .bref files have uncommitted changes.
 
 Uncommitted refs:
   ◑ data/model.bin (synced but not committed)
@@ -260,7 +260,7 @@ Other users won't see your updates until you commit.
 
 Options:
   1. Run 'blobsy commit -m "message"' to push and commit atomically
-  2. Run 'git add *.yref && git commit' manually, then retry
+  2. Run 'git add *.bref && git commit' manually, then retry
   3. Run 'blobsy sync --allow-uncommitted' to force (NOT RECOMMENDED)
 
 Learn more: https://github.com/jlevy/blobsy/docs/workflows#commit-coordination
@@ -275,11 +275,11 @@ Make `--allow-uncommitted` required to bypass this check (opt-in to risky behavi
 # .git/hooks/pre-push
 # Installed by: blobsy init
 
-# Check if any .yref files are committed but data not pushed
+# Check if any .bref files are committed but data not pushed
 if blobsy check-unpushed --quiet; then
   exit 0
 else
-  echo "Error: Some .yref files are committed but data not pushed to remote."
+  echo "Error: Some .bref files are committed but data not pushed to remote."
   echo ""
   echo "Committed refs without remote data:"
   blobsy check-unpushed
@@ -293,11 +293,11 @@ fi
 
 ```bash
 $ blobsy check-unpushed
-⚠ 2 .yref files in git HEAD but remote blobs missing:
-  data/model-v2.bin.yref (committed in abc123, remote_key not set)
-  results/output.json.yref (committed in def456, remote blob not found)
+⚠ 2 .bref files in git HEAD but remote blobs missing:
+  data/model-v2.bin.bref (committed in abc123, remote_key not set)
+  results/output.json.bref (committed in def456, remote blob not found)
 
-This means you committed .yref files but forgot to push the data.
+This means you committed .bref files but forgot to push the data.
 Run 'blobsy push' to upload missing blobs.
 ```
 
@@ -368,7 +368,7 @@ key_template: "sha256/{content_sha256}"
 # Bob pushes: data/model.bin -> sha256/abc123...
 
 # Now two copies of same file in remote!
-# Git shows no conflict (different .yref remote_key values are both valid)
+# Git shows no conflict (different .bref remote_key values are both valid)
 ```
 
 This breaks deduplication and creates orphaned blobs.
@@ -436,7 +436,7 @@ Impact:
   - All future pushes will use the new template
   - Existing blobs will NOT be migrated
   - Old blobs will become unreachable (orphaned until GC)
-  - 127 existing .yref files reference old keys
+  - 127 existing .bref files reference old keys
 
 Recommendations:
   1. Run 'blobsy migrate-template' to move existing blobs (requires re-upload)
@@ -453,7 +453,7 @@ Two options:
 
 **Option A: Separate compression from identity**
 ```yaml
-# .yref file
+# .bref file
 sha256: abc123...
 size: 1048576
 remote_key: "sha256/abc123"  # No .zst suffix
@@ -462,7 +462,7 @@ compressed_size: 262144
 ```
 
 Remote key stays the same regardless of compression.
-Blobsy knows to decompress based on metadata in `.yref`.
+Blobsy knows to decompress based on metadata in `.bref`.
 
 **Option B: Version the object in key**
 ```yaml
@@ -619,7 +619,7 @@ echo "content2" > file.bin
 # Blobsy checks cache: mtime still T+0 (rounded), size still 9 bytes
 # Cache hit! Uses old hash abc123
 # Actual hash should be def456
-# BUG: Wrong hash in .yref
+# BUG: Wrong hash in .bref
 ```
 
 **Edge case 2: Clock skew**
@@ -653,11 +653,11 @@ echo "different" > file.bin  # File gets mtime=950
 ```bash
 # Commit A: file.bin with hash abc123
 blobsy track file.bin
-git add file.bin.yref && git commit
+git add file.bin.bref && git commit
 
 # Commit B: file.bin with hash def456
 # (modified by someone else)
-git pull  # Gets new .yref with hash def456
+git pull  # Gets new .bref with hash def456
 
 git checkout main  # File gets current time as mtime
 blobsy status      # Checks cache, mtime changed, re-hashes
@@ -811,13 +811,13 @@ $ blobsy push    # Starts uploading 1,000 files
 $ blobsy push    # Also starts uploading
 
 # What happens?
-# - Both processes read .yref files
+# - Both processes read .bref files
 # - Both try to upload same files concurrently
 # - S3 PUTs are safe (last write wins, but content-addressed so doesn't matter)
-# - But: both processes may write .yref files (race condition)
+# - But: both processes may write .bref files (race condition)
 ```
 
-**Risk:** `.yref` file corruption if both processes update `remote_key` simultaneously.
+**Risk:** `.bref` file corruption if both processes update `remote_key` simultaneously.
 
 **Recommendation:** Add file locking:
 
@@ -851,9 +851,9 @@ $ dd if=/dev/zero of=file.bin bs=1M count=1000 &  # 1 GB, takes 10 seconds
 # Process B runs blobsy track while file is being written
 $ blobsy track file.bin
 # File is only 400 MB so far (partial)
-# blobsy hashes 400 MB, records wrong hash in .yref
+# blobsy hashes 400 MB, records wrong hash in .bref
 # File finishes writing to 1 GB
-# .yref has hash of partial file (BUG!)
+# .bref has hash of partial file (BUG!)
 ```
 
 **Recommendation:** Skip files with recent mtime:
@@ -936,15 +936,15 @@ function trackDirectory(dirPath: string, depth = 0) {
 ```bash
 # On macOS (case-insensitive)
 $ blobsy track Data/file.bin
-Created Data/file.bin.yref
+Created Data/file.bin.bref
 
-$ git add Data/file.bin.yref
+$ git add Data/file.bin.bref
 $ git commit && git push
 
 # On Linux (case-sensitive)
 $ git pull
 $ ls -la
-# Git creates: Data/file.bin.yref
+# Git creates: Data/file.bin.bref
 
 $ blobsy pull
 Error: File not found: data/file.bin  # Lowercase!
@@ -975,7 +975,7 @@ $ blobsy track Data/file.bin
 # On macOS (NFD normalization)
 $ touch "café.txt"      # Displays as café
 $ blobsy track "café.txt"
-Created café.txt.yref
+Created café.txt.bref
 
 $ ls | hexdump
 # Shows: cafe\u0301.txt  (NFD: e + combining acute)
@@ -1006,7 +1006,7 @@ function normalizePath(p: string): string {
 ```bash
 # Directory with 100,000 tracked files
 $ blobsy status
-# Must read 100,000 .yref files (YAML parsing)
+# Must read 100,000 .bref files (YAML parsing)
 # Estimated time: 100,000 * 1ms = 100 seconds
 ```
 
@@ -1016,14 +1016,14 @@ $ blobsy status
 
    ```typescript
    const refs = await Promise.all(
-     refPaths.map(path => parseYRefFile(path))
+     refPaths.map(path => parseBrefFile(path))
    );
    ```
 
 2. **Binary format option:**
 
    ```typescript
-   // .yref.bin (optional, used automatically for repos with >1000 files)
+   // .bref.bin (optional, used automatically for repos with >1000 files)
    // 4 bytes: magic number
    // 32 bytes: sha256 (binary, not hex)
    // 8 bytes: size (uint64)
@@ -1380,7 +1380,7 @@ sync:
 
 ### 4.2 YAML Parsing Overhead
 
-Parsing 10,000 `.yref` files could be slow:
+Parsing 10,000 `.bref` files could be slow:
 
 **Estimate:**
 
@@ -1405,7 +1405,7 @@ class RefCache {
 
   async get(path: string): Promise<RefFile> {
     if (!this.cache.has(path)) {
-      this.cache.set(path, await parseYRefFile(path));
+      this.cache.set(path, await parseBrefFile(path));
     }
     return this.cache.get(path)!;
   }
@@ -1424,13 +1424,13 @@ for (const refPath of refPaths) {
 ```typescript
 // Instead of sequential:
 for (const path of refPaths) {
-  const ref = await parseYRefFile(path);
+  const ref = await parseBrefFile(path);
   refs.push(ref);
 }
 
 // Use parallel:
 const refs = await Promise.all(
-  refPaths.map(path => parseYRefFile(path))
+  refPaths.map(path => parseBrefFile(path))
 );
 // With 8-core CPU: ~8x faster (5s -> 0.6s)
 ```
@@ -1438,7 +1438,7 @@ const refs = await Promise.all(
 **3. Consider binary format for large repos (V2):**
 
 ```typescript
-// .yref.bin (optional binary format)
+// .bref.bin (optional binary format)
 // Header (48 bytes):
 //   4 bytes: magic number (0x42524546 = "BREF")
 //   4 bytes: version (0x00000001)
@@ -1459,9 +1459,9 @@ Automatically use binary format for repos with >1,000 tracked files.
 **4. Lazy loading (V2):**
 
 ```typescript
-// Only parse .yref files that are actually needed
+// Only parse .bref files that are actually needed
 // Example: blobsy push data/
-// Only load .yref files under data/, not entire repo
+// Only load .bref files under data/, not entire repo
 ```
 
 ### 4.3 Git Operations at Scale
@@ -1470,8 +1470,8 @@ Automatically use binary format for repos with >1,000 tracked files.
 
 ```bash
 # Slow: add files one by one
-$ git add file1.yref
-$ git add file2.yref
+$ git add file1.bref
+$ git add file2.bref
 # ... 10,000 times
 
 # Fast: let git find all changes
@@ -1495,7 +1495,7 @@ $ git status --porcelain
 **1. Use efficient git commands:**
 
 ```typescript
-// Instead of: git add file1.yref file2.yref ... (slow)
+// Instead of: git add file1.bref file2.bref ... (slow)
 execSync('git add -A');  // Let git find changed files (fast)
 
 // Instead of: git status (slow, human-readable)
@@ -1544,15 +1544,15 @@ $ blobsy status
 This is better than DVC (which just shows “not in cache”) or Git LFS (which hides
 state).
 
-**2. Self-documenting `.yref` files:**
+**2. Self-documenting `.bref` files:**
 
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
-format: blobsy-yref/0.1
+format: blobsy-bref/0.1
 sha256: abc123...
 ```
 
-An agent encountering a `.yref` file for the first time can understand it.
+An agent encountering a `.bref` file for the first time can understand it.
 Good for AI agents and new team members.
 
 **3. `blobsy doctor` for diagnostics:**
@@ -1599,7 +1599,7 @@ The orthogonal states (tracked, synced, committed) create 8 possible combination
 | ✓ | ✗ | ✗ | ○ | Yes (just tracked) |
 | ✓ | ✗ | ✓ | ◐ | Yes (need to push) |
 | ✓ | ✓ | ✗ | ◑ | Yes (need to commit) |
-| ✗ | -- | -- | ? | Rare (file deleted but .yref exists) |
+| ✗ | -- | -- | ? | Rare (file deleted but .bref exists) |
 | (modified) | -- | -- | ~ | Common (file changed) |
 | (deleted) | -- | -- | ⊗ | Rare (staged for deletion) |
 
@@ -1614,7 +1614,7 @@ But you can **make it learnable**.
 $ blobsy status
 ◐ data/model.bin (committed, not synced)
 
-Help: This file's .yref is in git, but the data hasn't been uploaded yet.
+Help: This file's .bref is in git, but the data hasn't been uploaded yet.
 Action: Run 'blobsy push' to upload the data to remote storage.
 ```
 
@@ -1776,7 +1776,7 @@ See Section 3.1 for detailed analysis and recommendations.
 
   This will:
     1. Re-upload all 127 files with new keys
-    2. Update all .yref files with new remote_key
+    2. Update all .bref files with new remote_key
     3. Old blobs will be orphaned (safe to GC after migration)
 
   Estimated cost: 127 PUT requests (~$0.0006)
@@ -2312,7 +2312,7 @@ class BlobsyCommands {
 
 // Easy to test with mocks
 describe('BlobsyCommands', () => {
-  it('tracks file and creates .yref', async () => {
+  it('tracks file and creates .bref', async () => {
     const mockRefManager = new MockRefFileManager();
     const mockHashComputer = new MockHashComputer();
 
@@ -2347,10 +2347,10 @@ $ blobsy init --bucket my-data --region us-east-1
 
 # 2. Track a large file
 $ blobsy track data/large-model.bin
-Created data/large-model.bin.yref
+Created data/large-model.bin.bref
 
 # 3. Commit to git
-$ git add data/large-model.bin.yref .gitignore .blobsy.yml
+$ git add data/large-model.bin.bref .gitignore .blobsy.yml
 $ git commit -m "Track large model with blobsy"
 
 # 4. Sync to remote storage
@@ -2382,10 +2382,10 @@ Every tracked file has three independent states:
 
 ### 1. Tracked (Local Filesystem)
 
-Does a `.yref` file exist for this file?
+Does a `.bref` file exist for this file?
 
-- ✓ **Tracked:** `.yref` file exists (created by `blobsy track`)
-- ✗ **Not tracked:** No `.yref` file
+- ✓ **Tracked:** `.bref` file exists (created by `blobsy track`)
+- ✗ **Not tracked:** No `.bref` file
 
 ### 2. Synced (Cloud Storage)
 
@@ -2396,10 +2396,10 @@ Does the blob exist in remote storage?
 
 ### 3. Committed (Git)
 
-Is the `.yref` file committed to git?
+Is the `.bref` file committed to git?
 
-- ✓ **Committed:** `.yref` is in git history (via `git commit`)
-- ✗ **Not committed:** `.yref` only in working directory
+- ✓ **Committed:** `.bref` is in git history (via `git commit`)
+- ✗ **Not committed:** `.bref` only in working directory
 
 ### The Complete Workflow
 
@@ -2408,7 +2408,7 @@ All three must be true for "done":
 
 1. blobsy track file.bin (Tracked ✓, Synced ✗, Committed ✗)
 2. blobsy push file.bin (Tracked ✓, Synced ✓, Committed ✗)
-3. git add & commit .yref (Tracked ✓, Synced ✓, Committed ✓)
+3. git add & commit .bref (Tracked ✓, Synced ✓, Committed ✓)
 4. git push (Share with team)
 
 ```
@@ -2427,19 +2427,19 @@ All three must be true for "done":
 ```bash
 $ blobsy push                  # Data uploaded
 # Forgot: git commit!
-$ git push                     # Only pushes old .yref
+$ git push                     # Only pushes old .bref
 # Team sees old data
 ````
 
 **Detection:**
 ```bash
 $ git status
-modified: data/model.bin.yref  # Uncommitted changes!
+modified: data/model.bin.bref  # Uncommitted changes!
 ```
 
 **Fix:**
 ```bash
-$ git add data/model.bin.yref
+$ git add data/model.bin.bref
 $ git commit -m "Update model"
 $ git push
 ```
@@ -2450,8 +2450,8 @@ $ git push
 
 **Scenario:**
 ```bash
-$ blobsy track file.bin        # Updates .yref
-$ git add file.bin.yref && git commit && git push
+$ blobsy track file.bin        # Updates .bref
+$ git add file.bin.bref && git commit && git push
 # Forgot: blobsy push!
 # Team pulls git, tries blobsy pull, gets "missing (no remote!)"
 ```
@@ -2459,8 +2459,8 @@ $ git add file.bin.yref && git commit && git push
 **Detection:**
 ```bash
 $ blobsy check-unpushed
-⚠ 1 .yref committed but data not pushed:
-  data/file.bin.yref
+⚠ 1 .bref committed but data not pushed:
+  data/file.bin.bref
 ```
 
 **Fix:**
@@ -2495,10 +2495,10 @@ $ blobsy push
 **Scenario:**
 ```bash
 $ blobsy track data/large.bin
-# Creates .yref, adds to .gitignore
+# Creates .bref, adds to .gitignore
 
 # But .gitignore wasn't committed yet!
-$ git add -A                   # Stages .yref AND large.bin (oops!)
+$ git add -A                   # Stages .bref AND large.bin (oops!)
 $ git commit                   # Large file now in git (permanent!)
 ```
 
@@ -2530,16 +2530,16 @@ $ blobsy pull
 ✗ data/model.bin: missing (no remote!)
 ````
 
-**Cause:** `.yref` file references a blob that doesn’t exist in remote storage.
+**Cause:** `.bref` file references a blob that doesn’t exist in remote storage.
 
 **Scenarios:**
-1. Someone committed .yref but forgot to push data
+1. Someone committed .bref but forgot to push data
 2. Blob was deleted from remote (e.g., manual deletion)
 3. Wrong backend configuration (looking at wrong bucket)
 
 **Fix:**
 1. If you have the file locally: `blobsy push data/model.bin`
-2. If you don’t have the file: Ask the person who committed the .yref to push
+2. If you don’t have the file: Ask the person who committed the .bref to push
 3. Check backend config: `blobsy doctor`
 
 ### “Hash mismatch” error
@@ -2552,7 +2552,7 @@ $ blobsy verify
   Actual:   def456...
 ```
 
-**Cause:** Local file content doesn’t match the hash in `.yref`.
+**Cause:** Local file content doesn’t match the hash in `.bref`.
 
 **Scenarios:**
 1. File was modified after tracking
@@ -2560,7 +2560,7 @@ $ blobsy verify
 3. Wrong file at this path
 
 **Fix:**
-1. If file was intentionally modified: `blobsy track data/model.bin` (update .yref)
+1. If file was intentionally modified: `blobsy track data/model.bin` (update .bref)
 2. If file is corrupted: `blobsy pull --force data/model.bin` (re-download)
 3. If file is wrong: Check git history to find correct version
 
@@ -2658,7 +2658,7 @@ $ blobsy config unset key_template
 4. **Commit and push:**
 
    ```bash
-   $ git add *.yref .gitignore .blobsy.yml
+   $ git add *.bref .gitignore .blobsy.yml
    $ git commit -m "Migrate from Git LFS to blobsy"
    $ blobsy sync
    $ git push
@@ -2710,7 +2710,7 @@ blobsy is a standalone Node.js CLI.
 5. **Commit and push:**
 
    ```bash
-   $ git add *.yref .gitignore .blobsy.yml
+   $ git add *.bref .gitignore .blobsy.yml
    $ git commit -m "Migrate from DVC to blobsy"
    $ blobsy sync
    $ git push
@@ -2799,7 +2799,7 @@ blobsy is a standalone Node.js CLI.
 ### 9.3 Defer to V2 (Can Wait)
 
 11. **Batched transfers** - Already in V2 plan
-12. **Binary .yref format** - For repos with >1,000 files
+12. **Binary .bref format** - For repos with >1,000 files
 13. **Remote verification** - `blobsy verify --remote`
 14. **Selective pull** - `--include`, `--exclude`, `--max-size`
 15. **Template migration tool** - Convert between layouts
@@ -2846,7 +2846,7 @@ blobsy is a standalone Node.js CLI.
 ### 10.1 Strengths (What Makes This Design Great)
 
 1. **Architectural elegance**
-   - Per-file `.yref` approach is brilliant
+   - Per-file `.bref` approach is brilliant
    - "Git is the manifest" eliminates massive complexity
    - Delegation to git and external tools is pragmatic
 
@@ -2858,7 +2858,7 @@ blobsy is a standalone Node.js CLI.
 3. **Thoughtful principles**
    - Simple, transparent, externalize
    - Unopinionated where it doesn't matter
-   - One primitive (file + .yref)
+   - One primitive (file + .bref)
 
 4. **Good V1/V2 scoping**
    - V1 is achievable and useful
@@ -2891,7 +2891,7 @@ blobsy is a standalone Node.js CLI.
 **This is a solid V1 design that fills a real gap in the ecosystem.**
 
 The architectural choices are sound:
-- Per-file `.yref` approach is cleaner than DVC's manifest-based system
+- Per-file `.bref` approach is cleaner than DVC's manifest-based system
 - Content-addressable storage is the right choice
 - Delegating to git for versioning is brilliant
 - Pluggable backends solve the vendor lock-in problem

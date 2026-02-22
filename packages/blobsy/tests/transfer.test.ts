@@ -5,8 +5,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
 import { resolveBackend, pushFile, pullFile, blobExists, runHealthCheck } from '../src/transfer.js';
 import { computeHash } from '../src/hash.js';
-import type { BlobsyConfig, YRef } from '../src/types.js';
-import { YREF_FORMAT } from '../src/types.js';
+import type { BlobsyConfig, Bref } from '../src/types.js';
+import { BREF_FORMAT } from '../src/types.js';
 
 describe('resolveBackend', () => {
   it('resolves the default backend', () => {
@@ -83,7 +83,7 @@ describe('push/pull integration with local backend', () => {
     await writeFile(filePath, 'push test content');
     const hash = await computeHash(filePath);
 
-    const ref: YRef = { format: YREF_FORMAT, hash, size: 17 };
+    const ref: Bref = { format: BREF_FORMAT, hash, size: 17 };
     const result = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
 
     expect(result.success).toBe(true);
@@ -97,7 +97,7 @@ describe('push/pull integration with local backend', () => {
     await writeFile(filePath, 'pull test content');
     const hash = await computeHash(filePath);
 
-    const ref: YRef = { format: YREF_FORMAT, hash, size: 17 };
+    const ref: Bref = { format: BREF_FORMAT, hash, size: 17 };
     const pushResult = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
     expect(pushResult.success).toBe(true);
     const updatedRef = { ...ref, ...pushResult.refUpdates };
@@ -115,11 +115,12 @@ describe('push/pull integration with local backend', () => {
     await writeFile(filePath, 'exists test');
     const hash = await computeHash(filePath);
 
-    const ref: YRef = { format: YREF_FORMAT, hash, size: 11 };
+    const ref: Bref = { format: BREF_FORMAT, hash, size: 11 };
     const result = await pushFile(filePath, 'data.bin', ref, config, repoRoot);
-    const updatedRef = { ...ref, ...result.refUpdates };
+    expect(result.success).toBe(true);
+    expect(result.refUpdates?.remote_key).toBeDefined();
 
-    await expect(blobExists(updatedRef.remote_key!, config, repoRoot)).resolves.toBe(true);
+    await expect(blobExists(result.refUpdates!.remote_key, config, repoRoot)).resolves.toBe(true);
   });
 
   it('blobExists returns false for missing key', async () => {

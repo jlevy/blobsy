@@ -4,7 +4,7 @@
 
 ## High-Level Assessment
 
-The architectural shift to a per-file `.yref` model (Git as the manifest) is an elegant,
+The architectural shift to a per-file `.bref` model (Git as the manifest) is an elegant,
 robust solution. By eliminating centralized manifests and delegating conflict resolution
 entirely to Git, you remove the most complex edge cases of bidirectional sync.
 The decision to use external tools (like `rclone` or `aws-cli`) as dumb transfer engines
@@ -21,27 +21,27 @@ The **File State Model** and `blobsy sync` algorithm have a race condition regar
 “locally modified” files are detected.
 
 **The Scenario:**
-1. User A modifies `model.bin`, runs `blobsy sync` (pushes blob, updates `.yref`), and
+1. User A modifies `model.bin`, runs `blobsy sync` (pushes blob, updates `.bref`), and
    pushes to Git.
-2. User B runs `git pull`. Git updates `model.bin.yref` in User B’s working tree to User
+2. User B runs `git pull`. Git updates `model.bin.bref` in User B’s working tree to User
    A’s new hash. However, Git *ignores* `model.bin`, so User B’s local `model.bin` is
    still the old file.
 3. User B runs `blobsy sync`.
-4. According to the design: *“Algorithm for each `.yref`… 7. If local differs from ref:
+4. According to the design: *“Algorithm for each `.bref`… 7. If local differs from ref:
    update ref, then push (combined track + push).”*
 
 **The Result:** Blobsy sees that User B’s local `model.bin` hash differs from the new
-`.yref` hash. It incorrectly assumes User B has *modified* the file locally.
-It overwrites User A’s `.yref` with the old hash and pushes the old data back to the
+`.bref` hash. It incorrectly assumes User B has *modified* the file locally.
+It overwrites User A’s `.bref` with the old hash and pushes the old data back to the
 remote. User A’s changes are effectively reverted.
 
 **The Fix:** You must use the **Stat Cache** as the baseline to distinguish between a
 user edit and a Git update.
 * If `local_mtime` **matches** the stat cache: The user hasn’t touched the file.
-  If the `.yref` hash differs from the stat cache hash, it means Git updated the `.yref`
+  If the `.bref` hash differs from the stat cache hash, it means Git updated the `.bref`
   underneath us. **Action:** Pull the new blob to update the local file.
 * If `local_mtime` **differs** from the stat cache: The user edited the file.
-  **Action:** Hash the new file, update `.yref`, and push.
+  **Action:** Hash the new file, update `.bref`, and push.
 
 * * *
 
@@ -60,12 +60,12 @@ This is highly dangerous and will corrupt repositories.
    pointing to the `20260101T...` remote key.
 3. On June 1st, an admin deletes all `202601*` prefixes to “clean up old blobs.”
 
-**The Result:** The live `main` branch is now broken because its `.yref` points to a
+**The Result:** The live `main` branch is now broken because its `.bref` points to a
 deleted blob. Age of the *blob creation* does not equal age of the *reference*.
 
 **The Fix:** Remove the claim that age-based prefix cleanup is safe.
 If you want safe GC, you must rely on the `blobsy gc` approach (scanning all reachable
-Git commits for active `.yref` keys), making pure CAS (`Pattern 2`) or Branch-Isolated
+Git commits for active `.bref` keys), making pure CAS (`Pattern 2`) or Branch-Isolated
 (`Pattern 3`) safer defaults since they don’t tempt admins into performing naive
 prefix-based `rm -rf`.
 

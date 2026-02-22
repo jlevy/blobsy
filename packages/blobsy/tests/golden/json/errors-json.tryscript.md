@@ -41,7 +41,7 @@ $ echo "content" > data/untracked.bin
 $ blobsy push --json data/untracked.bin 2>&1
 {
   "schema_version": "0.1",
-  "error": "Cannot read .yref file: [LOCAL_PATH]/data/untracked.bin.yref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.yref'",
+  "error": "Cannot read .bref file: [LOCAL_PATH]/data/untracked.bin.bref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.bref'",
   "type": "validation"
 }
 ? 1

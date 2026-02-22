@@ -38,7 +38,7 @@ $ echo "user A changes" > data/model.bin
 
 ```console
 $ blobsy track data/model.bin
-Updated data/model.bin.yref (hash changed)
+Updated data/model.bin.bref (hash changed)
 ? 0
 ```
 
@@ -61,7 +61,7 @@ remote/[REMOTE_KEY]
 # Verify force push updated the ref
 
 ```console
-$ grep remote_key data/model.bin.yref
+$ grep remote_key data/model.bin.bref
 remote_key: [REMOTE_KEY]
 ? 0
 ```
