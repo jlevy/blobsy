@@ -19,28 +19,46 @@ npm install -g blobsy
 cd my-project
 blobsy init s3://my-bucket/blobs/
 
-# Track large files
+# Track large files (creates .yref pointers)
 blobsy track data/model.bin
 blobsy track assets/
+
+# Commit .yref files to Git
+git add *.yref .gitignore
+git commit -m "Track large files with blobsy"
 
 # Push blobs to remote storage
 blobsy push
 
 # On another machine, pull blobs back
+git clone <repo>
+cd <repo>
 blobsy pull
 ```
 
 ## How It Works
 
 1. `blobsy track` computes a SHA-256 hash of each file and writes a `.yref` pointer file
-2. The pointer file is committed to Git; the original file is gitignored
-3. `blobsy push` uploads the file to your configured backend (S3, local, etc.)
-4. `blobsy pull` downloads files from remote using the `.yref` metadata
-5. Content-addressable storage means identical files are never uploaded twice
+2. The original file is added to `.gitignore` automatically
+3. You commit the `.yref` pointer file to Git (the original stays local)
+4. `blobsy push` uploads the blob to your configured backend and adds `remote_key` to
+   `.yref`
+5. `blobsy pull` downloads files from remote using the `.yref` metadata
+6. Content-addressable storage means identical files are never uploaded twice
 
-A `.yref` file looks like this:
+A `.yref` file after `track` (before push):
 
+```yaml
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.1
+hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+size: 1048576
 ```
+
+After `push`, it gains a `remote_key`:
+
+```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 
 format: blobsy-yref/0.1
@@ -66,7 +84,11 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy config [key] [val]` | Get or set configuration |
 | `blobsy health` | Check backend connectivity |
 | `blobsy doctor [--fix]` | Diagnostics and self-repair |
-| `blobsy hooks <action>` | Manage pre-commit hook |
+| `blobsy hooks <action>` | Install or uninstall pre-commit hook |
+| `blobsy check-unpushed` | List committed .yref files missing remote blobs |
+| `blobsy pre-push-check` | CI guard: fail if any .yref lacks remote blob |
+| `blobsy skill` | Output skill documentation for AI agents |
+| `blobsy prime` | Output context primer for AI agents |
 
 ### Global Options
 
@@ -106,6 +128,9 @@ backends:
   default:
     url: local:../blob-storage
 ```
+
+**Note:** Create the directory first: `mkdir -p ../blob-storage` (init doesn’t
+auto-create local directories).
 
 ### Custom Command
 
@@ -154,11 +179,19 @@ compress:
 
 ### Pre-push Check
 
-Add to your CI pipeline to catch missing blobs:
+Ensure all committed `.yref` files have their blobs pushed before CI runs:
 
 ```bash
+# Locally, before pushing to Git
+blobsy check-unpushed    # List any .yref files missing remote blobs
+blobsy push              # Upload missing blobs
+
+# In CI pipeline (fails build if blobs missing)
 blobsy pre-push-check
 ```
+
+**Workflow:** `blobsy track` → commit `.yref` → `blobsy push` → `git push` → CI runs
+`pre-push-check`
 
 ### Syncing in CI
 
