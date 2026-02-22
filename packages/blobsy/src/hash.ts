@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 
+/** Prefix for formatted hash strings (identifies algorithm) */
 const HASH_PREFIX = 'sha256:';
 
 /** Stream a file through SHA-256 and return formatted hash. */

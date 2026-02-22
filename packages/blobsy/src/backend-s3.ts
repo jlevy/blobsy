@@ -247,7 +247,16 @@ function suggestionsForCategory(category: ErrorCategory): string[] | undefined {
         'Check your network connection.',
         'If using a custom endpoint, verify it is reachable.',
       ];
-    default:
+    case 'permission':
+    case 'quota':
+    case 'storage_full':
+    case 'validation':
+    case 'conflict':
+    case 'unknown':
       return undefined;
+    default: {
+      const _exhaustive: never = category;
+      return undefined;
+    }
   }
 }

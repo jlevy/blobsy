@@ -57,14 +57,26 @@ export function normalizePath(path: string): string {
 }
 
 /**
+ * Length of the hash prefix used for stat cache file naming.
+ * Using 18 hex chars (72 bits) provides sufficient uniqueness while keeping paths short.
+ */
+const STAT_CACHE_HASH_LENGTH = 18;
+
+/** Length of directory prefix for sharding stat cache entries (2 chars = 256 subdirs) */
+const STAT_CACHE_SHARD_PREFIX_LENGTH = 2;
+
+/**
  * Compute the stat cache entry path.
  *
  * SHA-256 of repo-relative path, first 18 hex chars, 2-char prefix sharding.
  * Example: ".blobsy/stat-cache/a1/a1b2c3d4e5f6g7h8i9.json"
  */
 export function getCacheEntryPath(cacheDir: string, relativePath: string): string {
-  const hash = createHash('sha256').update(relativePath).digest('hex').substring(0, 18);
-  const prefix = hash.substring(0, 2);
+  const hash = createHash('sha256')
+    .update(relativePath)
+    .digest('hex')
+    .substring(0, STAT_CACHE_HASH_LENGTH);
+  const prefix = hash.substring(0, STAT_CACHE_SHARD_PREFIX_LENGTH);
   return join(cacheDir, prefix, `${hash}.json`);
 }
 

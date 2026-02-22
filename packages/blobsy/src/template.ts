@@ -10,6 +10,12 @@ import { basename, dirname } from 'node:path';
 import { parseHash } from './hash.js';
 import { normalizePath } from './paths.js';
 
+/**
+ * Length of short hash for remote key templates.
+ * 12 hex chars (48 bits) provides good collision resistance while keeping keys short.
+ */
+const SHORT_HASH_LENGTH = 12;
+
 export interface TemplateVars {
   hash: string;
   repoPath: string;
@@ -41,7 +47,7 @@ export function sanitizeKeyComponent(value: string): string {
 /** Evaluate a key template with the given variables. */
 export function evaluateTemplate(template: string, vars: TemplateVars): string {
   const hexHash = parseHash(vars.hash);
-  const shortHash = hexHash.substring(0, 12);
+  const shortHash = hexHash.substring(0, SHORT_HASH_LENGTH);
   const ts = vars.timestamp ?? new Date();
   const isoDateSecs = formatIsoDateSecs(ts);
   const repoPath = normalizePath(vars.repoPath);
@@ -90,7 +96,10 @@ export function getCompressSuffix(algorithm: string | undefined): string {
       return '.gz';
     case 'brotli':
       return '.br';
-    default:
+    case 'none':
+    case undefined:
       return '';
+    default:
+      throw new Error(`Unknown compression algorithm: ${algorithm}`);
   }
 }

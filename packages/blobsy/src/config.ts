@@ -201,6 +201,12 @@ export function getConfigPath(repoRoot: string): string {
   return join(repoRoot, CONFIG_FILENAME);
 }
 
+/** Bytes per kilobyte (base-2) */
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = BYTES_PER_KB * 1024;
+const BYTES_PER_GB = BYTES_PER_MB * 1024;
+const BYTES_PER_TB = BYTES_PER_GB * 1024;
+
 /** Parse a human-readable size string (e.g. "1mb", "100kb") to bytes. */
 export function parseSize(size: string | number): number {
   if (typeof size === 'number') {
@@ -217,10 +223,10 @@ export function parseSize(size: string | number): number {
 
   const multipliers: Record<string, number> = {
     b: 1,
-    kb: 1024,
-    mb: 1024 * 1024,
-    gb: 1024 * 1024 * 1024,
-    tb: 1024 * 1024 * 1024 * 1024,
+    kb: BYTES_PER_KB,
+    mb: BYTES_PER_MB,
+    gb: BYTES_PER_GB,
+    tb: BYTES_PER_TB,
   };
 
   return Math.floor(value * multipliers[unit]!);
@@ -228,7 +234,11 @@ export function parseSize(size: string | number): number {
 
 /** Get the effective externalize config, using defaults if not specified. */
 export function getExternalizeConfig(config: BlobsyConfig): ExternalizeConfig {
-  const defaults = getBuiltinDefaults().externalize!;
+  const builtinDefaults = getBuiltinDefaults();
+  if (!builtinDefaults.externalize) {
+    throw new Error('Internal error: builtin defaults missing externalize config');
+  }
+  const defaults = builtinDefaults.externalize;
   if (!config.externalize) {
     return defaults;
   }
@@ -241,7 +251,11 @@ export function getExternalizeConfig(config: BlobsyConfig): ExternalizeConfig {
 
 /** Get the effective compress config, using defaults if not specified. */
 export function getCompressConfig(config: BlobsyConfig): CompressConfig {
-  const defaults = getBuiltinDefaults().compress!;
+  const builtinDefaults = getBuiltinDefaults();
+  if (!builtinDefaults.compress) {
+    throw new Error('Internal error: builtin defaults missing compress config');
+  }
+  const defaults = builtinDefaults.compress;
   if (!config.compress) {
     return defaults;
   }

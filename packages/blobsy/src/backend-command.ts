@@ -16,6 +16,12 @@ import type { Backend } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
 
+/** Timeout for exists check commands (shorter than push/pull) */
+const EXISTS_CHECK_TIMEOUT_MS = 30000;
+
+/** Timeout for push/pull commands */
+const TRANSFER_COMMAND_TIMEOUT_MS = 60000;
+
 export interface CommandTemplateVars {
   local: string;
   remote: string;
@@ -205,7 +211,7 @@ export function commandBlobExists(existsCommand: string, vars: CommandTemplateVa
   try {
     execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
+      timeout: EXISTS_CHECK_TIMEOUT_MS,
     });
     return true;
   } catch (err) {
@@ -244,7 +250,7 @@ function executeCommandDirect(
   try {
     execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000,
+      timeout: TRANSFER_COMMAND_TIMEOUT_MS,
       env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
     });
   } catch (err) {

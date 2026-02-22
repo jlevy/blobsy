@@ -11,6 +11,13 @@ import { resolve } from 'node:path';
 import type { BackendType, ParsedBackendUrl } from './types.js';
 import { ValidationError } from './types.js';
 
+/** Minimum bucket name length for cloud backends (S3/GCS/Azure standard) */
+const MIN_BUCKET_NAME_LENGTH = 3;
+
+/** Maximum bucket name length for cloud backends (S3/GCS/Azure standard) */
+const MAX_BUCKET_NAME_LENGTH = 63;
+
+/** Supported backend URL schemes and their corresponding backend types */
 const SUPPORTED_SCHEMES: Record<string, BackendType> = {
   's3:': 's3',
   'gs:': 'gcs',
@@ -121,8 +128,10 @@ function parseLocalUrl(url: string): ParsedBackendUrl {
 }
 
 function validateBucketName(bucket: string, _type: BackendType, url: string): void {
-  if (bucket.length < 3 || bucket.length > 63) {
-    throw new ValidationError(`Bucket name must be 3-63 characters: "${bucket}" in ${url}`);
+  if (bucket.length < MIN_BUCKET_NAME_LENGTH || bucket.length > MAX_BUCKET_NAME_LENGTH) {
+    throw new ValidationError(
+      `Bucket name must be ${MIN_BUCKET_NAME_LENGTH}-${MAX_BUCKET_NAME_LENGTH} characters: "${bucket}" in ${url}`,
+    );
   }
 
   if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(bucket)) {

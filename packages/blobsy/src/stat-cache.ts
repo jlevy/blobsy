@@ -15,6 +15,7 @@ import type { StatCacheEntry } from './types.js';
 import { ensureDir } from './fs-utils.js';
 import { getCacheEntryPath } from './paths.js';
 
+/** Relative path to stat cache directory within repo (machine-local, gitignored) */
 const STAT_CACHE_DIR = '.blobsy/stat-cache';
 
 /** Get the stat cache directory path for a repo. */

@@ -101,7 +101,11 @@ export class LocalBackend implements Backend {
   }
 }
 
-// Legacy function exports for backward compatibility with existing tests
+/**
+ * Standalone helper functions used by tests.
+ * New code should use LocalBackend class directly.
+ */
+
 export async function localPush(
   localPath: string,
   remoteDir: string,

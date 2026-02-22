@@ -8,7 +8,16 @@
 import type { BlobsyError, FileStateSymbol, TransferResult } from './types.js';
 import { FILE_STATE_SYMBOLS } from './types.js';
 
+/** JSON schema version for blobsy output */
 const SCHEMA_VERSION = '0.1';
+
+/** Bytes per kilobyte (base-2) */
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = BYTES_PER_KB * 1024;
+const BYTES_PER_GB = BYTES_PER_MB * 1024;
+
+/** Threshold for showing one decimal place in size formatting */
+const SIZE_DECIMAL_THRESHOLD = 10;
 
 /** Format a file state line for status output. */
 export function formatFileState(symbol: FileStateSymbol, path: string, details: string): string {
@@ -17,19 +26,19 @@ export function formatFileState(symbol: FileStateSymbol, path: string, details: 
 
 /** Format bytes as human-readable size (B, KB, MB, GB). */
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) {
+  if (bytes < BYTES_PER_KB) {
     return `${bytes} B`;
   }
-  if (bytes < 1024 * 1024) {
-    const kb = bytes / 1024;
-    return kb >= 10 ? `${Math.round(kb)} KB` : `${kb.toFixed(1)} KB`;
+  if (bytes < BYTES_PER_MB) {
+    const kb = bytes / BYTES_PER_KB;
+    return kb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(kb)} KB` : `${kb.toFixed(1)} KB`;
   }
-  if (bytes < 1024 * 1024 * 1024) {
-    const mb = bytes / (1024 * 1024);
-    return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
+  if (bytes < BYTES_PER_GB) {
+    const mb = bytes / BYTES_PER_MB;
+    return mb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
   }
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 10 ? `${Math.round(gb)} GB` : `${gb.toFixed(1)} GB`;
+  const gb = bytes / BYTES_PER_GB;
+  return gb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(gb)} GB` : `${gb.toFixed(1)} GB`;
 }
 
 /** Wrap data in a JSON envelope with schema_version. */

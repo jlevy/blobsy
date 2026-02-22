@@ -11,7 +11,10 @@ import { join } from 'node:path';
 
 import { writeFile } from 'atomically';
 
+/** Start marker for blobsy-managed block in .gitignore files */
 const BLOCK_START = '# >>> blobsy-managed (do not edit) >>>';
+
+/** End marker for blobsy-managed block in .gitignore files */
 const BLOCK_END = '# <<< blobsy-managed <<<';
 
 /** Add a file entry to the blobsy-managed block in a directory's .gitignore. */
