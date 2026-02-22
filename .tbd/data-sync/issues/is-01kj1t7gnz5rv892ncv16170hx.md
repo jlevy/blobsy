@@ -3,14 +3,16 @@ type: is
 id: is-01kj1t7gnz5rv892ncv16170hx
 title: "Issue #14: GCS Backend URL Parsing Not Documented"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 1
+version: 3
 spec_path: docs/project/specs/active/plan-2026-02-21-design-doc-consistency-fixes.md
 labels: []
 dependencies: []
 parent_id: is-01kj1r95ng1rbb5qqh6sw7zrth
 created_at: 2026-02-22T04:37:53.470Z
-updated_at: 2026-02-22T04:37:53.470Z
+updated_at: 2026-02-22T05:22:40.623Z
+closed_at: 2026-02-22T05:22:40.622Z
+close_reason: Added V1 Scope note explaining GCS/Azure URL parsing vs backend implementation mismatch
 ---
 Document that GCS URL parsing exists but backend deferred to V1.1. Add clear error message to backend-url.ts. Update phase1-implementation.md:363.
