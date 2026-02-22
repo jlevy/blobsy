@@ -1,13 +1,13 @@
 /**
- * S3 backend.
+ * Built-in S3 backend (AWS SDK).
  *
- * AWS S3 (and S3-compatible) storage backend using @aws-sdk/client-s3.
- * Supports standard AWS credentials, custom endpoints (MinIO, R2, etc.),
- * SHA-256 checksums, atomic downloads via temp-file-then-rename.
+ * Fallback S3 backend using @aws-sdk/client-s3 directly. Used when the
+ * aws CLI is not installed or when explicitly selected via
+ * sync.tools: [aws-sdk] in .blobsy.yml.
  */
 
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { rename, unlink, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -32,7 +32,7 @@ export interface S3BackendConfig {
   endpoint?: string;
 }
 
-export class S3Backend implements Backend {
+export class BuiltinS3Backend implements Backend {
   readonly type = 's3' as const;
   private readonly client: S3Client;
   private readonly bucket: string;
@@ -63,8 +63,7 @@ export class S3Backend implements Backend {
     }
 
     const key = this.fullKey(remoteKey);
-    const fileSize = statSync(localPath).size;
-    const body = createReadStream(localPath);
+    const body = await readFile(localPath);
 
     try {
       await this.client.send(
@@ -72,8 +71,7 @@ export class S3Backend implements Backend {
           Bucket: this.bucket,
           Key: key,
           Body: body,
-          ContentLength: fileSize,
-          ChecksumAlgorithm: 'SHA256',
+          ContentLength: body.length,
         }),
       );
     } catch (err) {

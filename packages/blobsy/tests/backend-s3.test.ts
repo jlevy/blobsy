@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import { S3Backend } from '../src/backend-s3.js';
+import { BuiltinS3Backend } from '../src/backend-s3.js';
 import { BlobsyError } from '../src/types.js';
 
 const mockSend = vi.fn();
@@ -35,12 +35,12 @@ vi.mock('@aws-sdk/client-s3', () => ({
   },
 }));
 
-describe('S3Backend', () => {
-  let backend: S3Backend;
+describe('BuiltinS3Backend', () => {
+  let backend: BuiltinS3Backend;
 
   beforeEach(() => {
     mockSend.mockReset();
-    backend = new S3Backend({
+    backend = new BuiltinS3Backend({
       bucket: 'test-bucket',
       prefix: 'blobs/',
       region: 'us-east-1',
@@ -119,7 +119,7 @@ describe('S3Backend', () => {
   });
 
   it('works without prefix', async () => {
-    const noPrefix = new S3Backend({ bucket: 'test-bucket' });
+    const noPrefix = new BuiltinS3Backend({ bucket: 'test-bucket' });
     mockSend.mockResolvedValueOnce({});
     await noPrefix.exists('remote-key/file.bin');
     const call = mockSend.mock.calls[0]![0] as { input: { Key: string } };

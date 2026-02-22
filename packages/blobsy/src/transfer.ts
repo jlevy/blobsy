@@ -23,7 +23,8 @@ import { computeHash } from './hash.js';
 import { parseBackendUrl, resolveLocalPath } from './backend-url.js';
 import { LocalBackend } from './backend-local.js';
 import { CommandBackend } from './backend-command.js';
-import { S3Backend } from './backend-s3.js';
+import { BuiltinS3Backend } from './backend-s3.js';
+import { AwsCliBackend, isAwsCliAvailable } from './backend-aws-cli.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
 import { getCompressConfig } from './config.js';
@@ -91,7 +92,11 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
 }
 
 /** Create a Backend instance from resolved config. */
-export function createBackend(config: ResolvedBackendConfig, repoRoot: string): Backend {
+export function createBackend(
+  config: ResolvedBackendConfig,
+  repoRoot: string,
+  tools?: string[],
+): Backend {
   switch (config.type) {
     case 'local': {
       const remotePath = resolveLocalPath(config.path ?? '', repoRoot);
@@ -107,12 +112,22 @@ export function createBackend(config: ResolvedBackendConfig, repoRoot: string): 
     }
     case 's3': {
       const parsed = config.url ? parseBackendUrl(config.url) : undefined;
-      return new S3Backend({
+      const s3Config = {
         bucket: config.bucket ?? parsed?.bucket ?? '',
         prefix: config.prefix ?? parsed?.prefix,
         region: config.region,
         endpoint: config.endpoint,
-      });
+      };
+
+      if (tools?.includes('aws-sdk')) {
+        return new BuiltinS3Backend(s3Config);
+      }
+
+      if (isAwsCliAvailable()) {
+        return new AwsCliBackend(s3Config);
+      }
+
+      return new BuiltinS3Backend(s3Config);
     }
     case 'gcs':
     case 'azure':
@@ -136,7 +151,7 @@ export async function pushFile(
   repoRoot: string,
 ): Promise<TransferResult> {
   const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot);
+  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
   const compressConfig = getCompressConfig(config);
 
   // Determine compression
@@ -209,7 +224,7 @@ export async function pullFile(
   repoRoot: string,
 ): Promise<TransferResult> {
   const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot);
+  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
 
   if (!ref.remote_key) {
     return {
@@ -283,13 +298,13 @@ export async function blobExists(
   repoRoot: string,
 ): Promise<boolean> {
   const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot);
+  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
   return backend.exists(remoteKey);
 }
 
 /** Run a health check on the configured backend. */
 export async function runHealthCheck(config: BlobsyConfig, repoRoot: string): Promise<void> {
   const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot);
+  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
   await backend.healthCheck();
 }
