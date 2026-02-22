@@ -6,13 +6,19 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, basename } from 'node:path';
 
 import { writeFile } from 'atomically';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import type { YRef } from './types.js';
-import { YREF_COMMENT_HEADER, YREF_FIELD_ORDER, YREF_FORMAT, ValidationError } from './types.js';
+import {
+  YREF_COMMENT_HEADER,
+  YREF_FIELD_ORDER,
+  YREF_FORMAT,
+  ValidationError,
+  UserError,
+} from './types.js';
 import { ensureDir } from './fs-utils.js';
 
 /** Parse a .yref file, validate format version. */
@@ -20,17 +26,34 @@ export async function readYRef(path: string): Promise<YRef> {
   let content: string;
   try {
     content = await readFile(path, 'utf-8');
-  } catch (err) {
-    throw new ValidationError(`Cannot read .yref file: ${path}: ${(err as Error).message}`);
+  } catch (err: unknown) {
+    const error = err as NodeJS.ErrnoException;
+
+    if (error.code === 'ENOENT') {
+      const fileName = basename(path, '.yref');
+      throw new UserError(`File not tracked: ${fileName}`, `Run: blobsy track ${fileName}`);
+    }
+
+    if (error.code === 'EACCES') {
+      throw new UserError(
+        `Permission denied reading .yref file: ${path}`,
+        `Check file permissions: chmod +r ${path}`,
+      );
+    }
+
+    // Unexpected error - re-throw as ValidationError
+    throw new ValidationError(`Cannot read .yref file: ${path}: ${error.message}`);
   }
 
   let parsed: unknown;
   try {
     parsed = parseYaml(content);
-  } catch (err) {
-    throw new ValidationError(`Malformed YAML in .yref file: ${path}: ${(err as Error).message}`, [
-      'Check that the .yref file contains valid YAML.',
-    ]);
+  } catch (_err: unknown) {
+    const fileName = basename(path);
+    throw new UserError(
+      `Invalid .yref file format: ${fileName}`,
+      `File may be corrupted. Regenerate with: blobsy track --force ${basename(fileName, '.yref')}`,
+    );
   }
 
   if (typeof parsed !== 'object' || parsed === null) {

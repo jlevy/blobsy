@@ -58,6 +58,7 @@
     "@types/node": "^24.0.0",
     "@types/picomatch": "^4.0.2",
     "@vitest/coverage-v8": "^4.0.18",
+    "execa": "^9.6.1",
     "publint": "^0.3.17",
     "tryscript": "^0.1.7",
     "tsdown": "^0.20.3",

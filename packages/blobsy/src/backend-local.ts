@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type { Backend } from './types.js';
-import { BlobsyError } from './types.js';
+import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
 
@@ -26,7 +26,28 @@ export class LocalBackend implements Backend {
   async push(localPath: string, remoteKey: string): Promise<void> {
     const destPath = join(this.remoteDir, remoteKey);
     await ensureDir(dirname(destPath));
-    await copyFile(localPath, destPath);
+
+    try {
+      await copyFile(localPath, destPath);
+    } catch (err: unknown) {
+      const error = err as NodeJS.ErrnoException;
+
+      if (error.code === 'ENOENT') {
+        throw new UserError(
+          `Cannot push: source file not found: ${localPath}`,
+          `Check that the file exists`,
+        );
+      }
+
+      if (error.code === 'EACCES') {
+        throw new UserError(
+          `Permission denied writing to backend: ${this.remoteDir}`,
+          `Check backend directory permissions`,
+        );
+      }
+
+      throw error; // Re-throw unexpected errors
+    }
   }
 
   async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
@@ -44,7 +65,20 @@ export class LocalBackend implements Backend {
     await ensureDir(dirname(localPath));
 
     try {
-      await copyFile(srcPath, tmpPath);
+      try {
+        await copyFile(srcPath, tmpPath);
+      } catch (err: unknown) {
+        const error = err as NodeJS.ErrnoException;
+
+        if (error.code === 'EACCES') {
+          throw new UserError(
+            `Permission denied reading from backend: ${this.remoteDir}`,
+            `Check backend directory permissions`,
+          );
+        }
+
+        throw error; // Re-throw for outer catch
+      }
 
       if (expectedHash) {
         const actualHash = await computeHash(tmpPath);
@@ -58,7 +92,20 @@ export class LocalBackend implements Backend {
         }
       }
 
-      await rename(tmpPath, localPath);
+      try {
+        await rename(tmpPath, localPath);
+      } catch (err: unknown) {
+        const error = err as NodeJS.ErrnoException;
+
+        if (error.code === 'EACCES') {
+          throw new UserError(
+            `Permission denied writing file: ${localPath}`,
+            `Check directory permissions`,
+          );
+        }
+
+        throw error; // Re-throw for outer catch
+      }
     } catch (err) {
       try {
         await unlink(tmpPath);

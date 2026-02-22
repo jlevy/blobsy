@@ -21,7 +21,7 @@ import {
 import type { S3ClientConfig } from '@aws-sdk/client-s3';
 
 import type { Backend, ErrorCategory } from './types.js';
-import { BlobsyError } from './types.js';
+import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
 
@@ -63,7 +63,22 @@ export class BuiltinS3Backend implements Backend {
     }
 
     const key = this.fullKey(remoteKey);
-    const body = await readFile(localPath);
+    let body: Buffer;
+
+    try {
+      body = await readFile(localPath);
+    } catch (err: unknown) {
+      const error = err as NodeJS.ErrnoException;
+
+      if (error.code === 'EACCES') {
+        throw new UserError(
+          `Permission denied reading file: ${localPath}`,
+          `Check file permissions`,
+        );
+      }
+
+      throw error; // Re-throw unexpected errors
+    }
 
     try {
       await this.client.send(
@@ -116,7 +131,20 @@ export class BuiltinS3Backend implements Backend {
         }
       }
 
-      await rename(tmpPath, localPath);
+      try {
+        await rename(tmpPath, localPath);
+      } catch (err: unknown) {
+        const error = err as NodeJS.ErrnoException;
+
+        if (error.code === 'EACCES') {
+          throw new UserError(
+            `Permission denied writing file: ${localPath}`,
+            `Check directory permissions`,
+          );
+        }
+
+        throw error; // Re-throw for outer catch
+      }
     } catch (err) {
       try {
         if (existsSync(tmpPath)) {
@@ -125,7 +153,7 @@ export class BuiltinS3Backend implements Backend {
       } catch {
         // Ignore cleanup
       }
-      if (err instanceof BlobsyError) {
+      if (err instanceof BlobsyError || err instanceof UserError) {
         throw err;
       }
       throw this.wrapError(err, `pull from s3://${this.bucket}/${key}`);

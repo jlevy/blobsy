@@ -57,7 +57,13 @@ import {
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
 import type { BlobsyConfig, GlobalOptions, YRef } from './types.js';
-import { BlobsyError, FILE_STATE_SYMBOLS, YREF_FORMAT, ValidationError } from './types.js';
+import {
+  BlobsyError,
+  FILE_STATE_SYMBOLS,
+  YREF_FORMAT,
+  ValidationError,
+  UserError,
+} from './types.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -322,7 +328,15 @@ function wrapAction(handler: ActionHandler): ActionHandler {
         ? getGlobalOpts(cmd)
         : { json: false, quiet: false, verbose: false, dryRun: false };
 
-      if (err instanceof BlobsyError) {
+      if (err instanceof UserError) {
+        // User-friendly errors with hints
+        if (globalOpts.json) {
+          console.error(formatJsonError(err));
+        } else {
+          console.error(err.format());
+        }
+        process.exitCode = err.exitCode;
+      } else if (err instanceof BlobsyError) {
         if (globalOpts.json) {
           console.error(formatJsonError(err));
         } else {
@@ -357,19 +371,8 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     const absPath = resolveLocalPath(parsed.path, repoRoot);
 
     if (!existsSync(absPath)) {
-      // Check parent directory exists and is writable
-      const parentDir = dirname(absPath);
-
-      if (!existsSync(parentDir)) {
-        throw new ValidationError(
-          `Cannot create backend directory: ${absPath}\n` +
-            `  Parent directory does not exist: ${parentDir}\n` +
-            `  Create parent first: mkdir -p ${parentDir}`,
-        );
-      }
-
       try {
-        // Create backend directory
+        // Create backend directory (with all parent directories if needed)
         await ensureDir(absPath);
 
         if (!globalOpts.quiet && !globalOpts.json) {
@@ -379,12 +382,24 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
         }
       } catch (err: unknown) {
         const error = err as NodeJS.ErrnoException;
+        const parentDir = dirname(absPath);
+
+        if (error.code === 'ENOENT') {
+          // This shouldn't happen with recursive: true, but just in case
+          throw new ValidationError(
+            `Cannot create backend directory: ${absPath}\n` +
+              `  Parent directory does not exist: ${parentDir}\n` +
+              `  Create parent first: mkdir -p ${parentDir}`,
+          );
+        }
+
         if (error.code === 'EACCES') {
           throw new ValidationError(
             `Permission denied creating backend directory: ${absPath}\n` +
-              `  Parent directory not writable: ${parentDir}`,
+              `  Check directory permissions`,
           );
         }
+
         throw error; // Re-throw unexpected errors
       }
     }
