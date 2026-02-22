@@ -333,6 +333,12 @@ Used by `blobsy sync` to determine the correct action for each tracked file.
 | B | C | A | Both local and .yref changed | **Conflict** (error) |
 | B | A | (none) | Ambiguous -- no merge base | **Error** (ask user) |
 
+**Note on uncommitted refs:** The “ambiguous” case often occurs after `git pull` when
+the user hasn’t run `blobsy` commands yet.
+The working tree `.yref` differs from the file on disk, but there’s no stat cache entry
+to determine which changed first.
+Solution: run explicit `blobsy push` or `blobsy pull` to establish merge base.
+
 ### Sync Per-File Logic
 
 ```typescript

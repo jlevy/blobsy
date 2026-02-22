@@ -4,6 +4,24 @@
 
 **Status:** Draft
 
+* * *
+**V1 Implementation Scope:**
+
+✅ **Implemented in V1.0:**
+- S3 backend via built-in `@aws-sdk/client-s3` (native TypeScript implementation)
+- Local filesystem backend
+
+⏸️ **Deferred to V1.1+:**
+- Transfer tool delegation (aws-cli, rclone, s5cmd) - fully designed but not implemented
+- GCS backend (`gs://`)
+- Azure Blob Storage backend (`az://`)
+
+V1.0 ships with robust S3 and local support.
+Tool delegation and additional cloud providers are planned for V1.1. See
+[issues-history.md](issues-history.md) for implementation rationale.
+
+* * *
+
 This document covers how blobs are stored, transferred, and validated on the backend.
 See also [blobsy-design.md](blobsy-design.md) for the overall design (ref files, state
 model, CLI commands).
@@ -457,6 +475,15 @@ backends:
 The AWS CLI and rclone support `--endpoint-url` for S3-compatible stores.
 `@aws-sdk/client-s3` supports custom endpoints via its client configuration object.
 
+> **🚧 V1.1 Feature - Not Implemented in V1.0**
+> 
+> The transfer tool delegation system described in this section is fully designed but
+> deferred to V1.1. V1.0 uses built-in `@aws-sdk/client-s3` for all S3 operations.
+> 
+> Reason for deferral: Built-in SDK provides better error handling, progress reporting,
+> and cross-platform consistency.
+> External tools add complexity without significant benefit for V1 use cases.
+
 ## Transfer Delegation
 
 `blobsy` does not implement high-performance transfers.
@@ -499,6 +526,17 @@ This means blobsy supports three transfer modes in the initial release:
    Works with SCP, rsync, curl, or any tool that can copy a file.
 3. **Built-in SDK** (`@aws-sdk/client-s3`) -- fallback when no external tool is
    available. Slower, but zero external dependencies.
+
+**V1 Implementation Note:**
+
+In V1, all S3 transfers use the built-in SDK (`@aws-sdk/client-s3`). The `sync.tools`
+config option is accepted but ignored.
+Setting it to `["aws-cli"]` or `["rclone"]` will log a warning:
+
+```
+Warning: sync.tools is set to ["aws-cli"] but tool delegation is not implemented in V1.0.
+Using built-in S3 SDK. Tool delegation will be available in V1.1.
+```
 
 ## Compression and Transfer Interaction
 

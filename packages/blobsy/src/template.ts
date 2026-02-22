@@ -57,6 +57,8 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     filename: sanitizeKeyComponent(filename),
     dirname: sanitizeKeyComponent(dirWithSlash),
     compress_suffix: vars.compressSuffix,
+    // TODO(V2): Add git_branch variable resolution
+    // gitBranch: await resolveGitBranch(),
   };
 
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => {

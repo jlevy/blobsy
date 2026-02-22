@@ -281,8 +281,19 @@ is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 | `{repo_path}` | Repository-relative path | `data/research/model.bin` |
 | `{filename}` | Filename only | `model.bin` |
 | `{dirname}` | Directory path only | `data/research/` |
-| `{git_branch}` (Deferred) | Current git branch | `main`, `feature/x` |
+| `{git_branch}` | Current git branch | `main`, `feature/x` |
 | `{compress_suffix}` | Compression suffix based on algorithm | `.zst`, `.gz`, `.br`, or empty string |
+
+**V1 Implementation Status:**
+- ✅ Implemented: `{iso_date_secs}`, `{content_sha256}`, `{content_sha256_short}`,
+  `{repo_path}`, `{filename}`, `{dirname}`, `{compress_suffix}`
+- ⏸️ Deferred to V2: `{git_branch}` (see implementation rationale in
+  [issues-history.md](issues-history.md#L101))
+
+The `{git_branch}` variable and branch-isolated storage mode are fully designed for V2
+but not implemented in V1. If you specify a template containing `{git_branch}` in V1,
+`blobsy push` will issue a warning and leave the variable unexpanded (e.g.,
+`{git_branch}/sha256/...` as a literal path).
 
 Any text outside `{...}` is kept as-is (literal prefix/suffix).
 
@@ -295,9 +306,65 @@ All punctuation removed for cleaner keys.
 Second resolution allows deduplication of identical content pushed in the same second to
 the same path (all three must match: timestamp, content hash, and path).
 
-**Note on `{compress_suffix}`:** Automatically set based on compression configuration.
-The default is `.zst` (zstd) or empty string (no compression).
-This ensures compressed and uncompressed versions of the same file don’t collide.
+**Compression Suffix Handling:**
+
+The `{compress_suffix}` variable is **automatically evaluated** based on the compression
+decision made by `shouldCompress()` (see `compress.ts:30-46`). The suffix is determined
+as follows:
+
+1. **Compression Decision** (per file):
+   - Check if file matches `compress.never` patterns → **No compression**, suffix = `''`
+   - Check if file matches `compress.always` patterns → **Compress**, suffix based on
+     algorithm
+   - Check if file size ≥ `compress.min_size` → **Compress**, suffix based on algorithm
+   - Otherwise → **No compression**, suffix = `''`
+
+2. **Suffix Mapping** (see `template.ts:82-94`):
+   ```
+   zstd → '.zst'
+   gzip → '.gz'
+   brotli → '.br'
+   no compression → ''
+   ```
+
+3. **Template Evaluation**:
+   - If your template includes `{compress_suffix}`, it expands to the suffix (or empty
+     string)
+   - If your template omits `{compress_suffix}`, compressed and uncompressed versions
+     **will collide** on the same remote key
+
+**Best Practice:** Always include `{compress_suffix}` in custom templates to prevent
+collisions.
+
+**Default Behavior:** The default template
+(`'{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}'`) includes the
+suffix, so users don’t need to think about this unless they customize
+`remote.key_template`.
+
+**Example Collision Scenario:**
+```yaml
+# ❌ BAD: Custom template without compress_suffix
+remote:
+  key_template: '{content_sha256}/{repo_path}'
+
+# Result: compressed and uncompressed versions collide
+# - First push (uncompressed): key = sha256-abc123.../data/model.bin
+# - Second push (now compressed): key = sha256-abc123.../data/model.bin ← Same key!
+```
+
+```yaml
+# ✅ GOOD: Include compress_suffix
+remote:
+  key_template: '{content_sha256}/{repo_path}{compress_suffix}'
+
+# Result: compressed and uncompressed versions have different keys
+# - Uncompressed: sha256-abc123.../data/model.bin
+# - Compressed: sha256-abc123.../data/model.bin.zst ← Different key
+```
+
+**Compression State Storage:** The actual compression algorithm and compressed size are
+stored in the `.yref` file (fields `compressed` and `compressed_size`). The remote key
+suffix is only a convenience for human readability.
 
 **Note on path separators:** All path variables (`{repo_path}`, `{dirname}`) use POSIX
 forward slashes (`/`) in remote keys, regardless of the local OS. On Windows,
@@ -437,6 +504,8 @@ s3://my-datasets/project-alpha/
 **Use when:** You want clear separation between branches, or are working with
 experimental/temporary branches that should be cleanly removed.
 
+**V2 Specification (Not Implemented in V1):**
+
 **Error behavior (V2 specification):**
 
 - **Detached HEAD:** If `{git_branch}` is used but the working tree is in detached HEAD
@@ -447,9 +516,11 @@ experimental/temporary branches that should be cleanly removed.
   blobs.
 - **Unnamed branch:** Same error if HEAD points to a branch that has no name (orphan
   branch state).
-- **Branch name sanitization:** The resolved branch name is passed through
-  `sanitizeKeyComponent()` to handle characters problematic for S3 keys (e.g.,
-  `feature/model-v2` becomes `feature/model-v2` -- forward slashes are preserved).
+- **Branch name sanitization:** The resolved branch name will be passed through
+  `sanitizeKeyComponent()` (implemented in `template.ts:25-39`) which handles characters
+  problematic for S3 keys.
+  Forward slashes are **preserved** to create directory-like structure (e.g.,
+  `feature/model-v2` → `feature/model-v2/sha256/...` in remote storage).
 
 **Explicit cleanup semantics (V2 specification):**
 
@@ -725,6 +796,48 @@ Actions needed:
   Run 'blobsy pull data/missing.bin' or 'blobsy rm data/missing.bin'
   Run 'git add -A && git commit' to commit 2 refs and finalize deletion
 ```
+
+**Uncommitted .yref Handling Details:**
+
+When `blobsy sync` encounters uncommitted `.yref` files, the behavior follows this
+decision flow:
+
+1. **Check working tree state** → Compare working tree `.yref` to `HEAD:.yref`
+2. **Issue warning** if uncommitted refs detected:
+   ```
+   Warning: 2 .yref files have uncommitted changes.
+   Run 'git add -A && git commit' to commit them.
+   ```
+3. **Proceed to stat cache merge** → Use three-way merge algorithm (see
+   [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md#three-way-merge-algorithm))
+4. **Error if ambiguous** → No merge base exists (see line 356-368 of
+   stat-cache-design.md):
+   ```
+   Error: No stat cache entry for data/model.bin.
+   Cannot distinguish local edit from git pull.
+   Use 'blobsy push' or 'blobsy pull' explicitly.
+   ```
+
+**Precedence:** Warning is shown first, but ambiguous state can still cause error.
+Sync proceeds only if stat cache state is **unambiguous**.
+
+**Example: Uncommitted + Ambiguous**
+```bash
+$ blobsy sync
+Warning: 1 .yref file has uncommitted changes. Run 'git add -A && git commit' to commit.
+
+Syncing 1 file...
+✗ Error: No stat cache entry for data/model.bin.
+Cannot distinguish local edit from git pull.
+Use 'blobsy push' or 'blobsy pull' explicitly.
+```
+
+**Recovery Flow:**
+1. User runs `blobsy status` to see current state
+2. User decides: `blobsy push` (if local changes intended) or `blobsy pull` (if git pull
+   updated ref)
+3. After explicit push/pull, stat cache is updated with merge base
+4. Future `blobsy sync` will work without ambiguity
 
 ### State Transitions
 
