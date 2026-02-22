@@ -751,6 +751,63 @@ Fields:
 (e.g., `blobsy-yref/0.1`). Compatibility policy: reject if major version is unsupported;
 warn if minor version is newer than the running blobsy version supports.
 
+**Forward Compatibility Strategy:**
+
+The `.yref` format is designed for forward compatibility across versions:
+
+1. **Format version field** (`format: blobsy-yref/0.1`):
+   - Major version changes (0.x → 1.x) indicate breaking changes
+   - Minor version changes (0.1 → 0.2) indicate additive changes
+   - V1 parser **allows** newer minor versions, **rejects** newer major versions
+
+2. **Unknown field handling**:
+   - V1 parser reads all fields as key-value pairs (YAML parsing)
+   - Unknown fields are **ignored** during validation (defensive parsing)
+   - Known fields are validated, unknown fields pass through
+
+3. **Field ordering is stable**:
+   - Fields always written in same order to minimize git diff noise
+   - New fields in V2 will be appended after existing fields
+
+**Example: V1 Parser Reading V2 .yref**
+
+V2 `.yref` with `remote_checksum` field:
+```yaml
+# blobsy -- https://github.com/jlevy/blobsy
+
+format: blobsy-yref/0.2
+hash: sha256:7a3f0e...
+size: 15728640
+remote_key: sha256/7a3f0e...
+compressed: zstd
+compressed_size: 8421376
+remote_checksum: etag:d41d8cd98f00b204e9800998ecf8427e  # V2 field
+```
+
+V1 parser behavior:
+- Reads `format: blobsy-yref/0.2` → **Accepts** (minor version bump)
+- Validates required fields: `hash`, `size` → ✅ Present and valid
+- Reads `remote_checksum` field → **Ignores** (unknown field)
+- Result: Successfully reads `.yref`, ignores V2-specific field
+
+**Implementation:** `packages/blobsy/src/ref.ts:89-117` (validateFormatVersion function)
+
+**Reserved Field Ordering (V2 Proposal):**
+
+Future `.yref` fields will follow this order:
+```yaml
+format: ...
+hash: ...
+size: ...
+remote_key: ...
+compressed: ...
+compressed_size: ...
+remote_checksum: ...      # V2: Provider ETag/checksum (e.g., "etag:d41d8cd98f...")
+last_verified: ...        # V2: Timestamp of last integrity check
+```
+
+This ordering ensures V1 and V2 `.yref` files have minimal diff noise.
+
 **Why `remote_key` is in the ref:** Pull needs to know exactly where to find the blob.
 Storing the evaluated key in the ref means git versions it, and anyone who checks out
 the ref can pull without needing to re-evaluate the template or know what template was
@@ -3066,23 +3123,23 @@ These are candidates for future versions if demand warrants.
 | `--dry-run` | boolean | false | Show what would be deleted without actually deleting |
 | `--include-worktree` | boolean | false | If true, also consider `.yref` files in working tree (not just HEAD) |
 
-  **Example Usage:**
+**Example Usage:**
 
-  ```bash
-  # Dry run: see what would be deleted
-  blobsy gc --dry-run
+```bash
+# Dry run: see what would be deleted
+blobsy gc --dry-run
 
-  # Delete orphaned blobs older than 30 days
-  blobsy gc --older-than=30d
+# Delete orphaned blobs older than 30 days
+blobsy gc --older-than=30d
 
-  # Aggressive: delete all orphaned blobs
-  blobsy gc
+# Aggressive: delete all orphaned blobs
+blobsy gc
 
-  # Conservative: delete only from current branch, older than 90 days
-  blobsy gc --depth=branch --older-than=90d
-  ```
+# Conservative: delete only from current branch, older than 90 days
+blobsy gc --depth=branch --older-than=90d
+```
 
-  **Concurrent Operation Handling:**
+**Concurrent Operation Handling:**
 
 | Scenario | Behavior |
 | --- | --- |
@@ -3091,24 +3148,24 @@ These are candidates for future versions if demand warrants.
 | Multiple users run GC concurrently | **Safe:** Deletion is idempotent; last delete wins (both see same orphans) |
 | User pushes while GC is running | **Risk:** Blob could be deleted between push and commit. **Mitigation:** Always commit immediately after push (pre-commit hook enforces this) |
 
-  **Safety Guarantees:**
+**Safety Guarantees:**
 
-  1. **Never deletes blobs referenced in HEAD** (any branch, any tag)
-  2. **Dry-run by default recommended** for first GC run
-  3. **Age-based safety**: `--older-than` prevents deleting recent blobs
-  4. **Worktree protection**: Optional `--include-worktree` flag protects uncommitted
-     refs
+1. **Never deletes blobs referenced in HEAD** (any branch, any tag)
+2. **Dry-run by default recommended** for first GC run
+3. **Age-based safety**: `--older-than` prevents deleting recent blobs
+4. **Worktree protection**: Optional `--include-worktree` flag protects uncommitted refs
 
-  **Performance:**
+**Performance:**
 
-  - Scanning 10,000 commits with 1,000 `.yref` files each: ~30 seconds
-  - Listing 100,000 remote blobs: ~10 seconds (S3 `ListObjectsV2` pagination)
-  - Total GC time for large repo: ~1-2 minutes
+- Scanning 10,000 commits with 1,000 `.yref` files each: ~30 seconds
+- Listing 100,000 remote blobs: ~10 seconds (S3 `ListObjectsV2` pagination)
+- Total GC time for large repo: ~1-2 minutes
 
-  **Future Optimization (V3):**
+**Future Optimization (V3):**
 
-  - Incremental GC: Track last GC timestamp, only scan new commits
-  - Bloom filter: Use probabilistic data structure for faster reachability checks
+- Incremental GC: Track last GC timestamp, only scan new commits
+
+- Bloom filter: Use probabilistic data structure for faster reachability checks
 
 - **Multi-backend routing.** Routing different directories to different backends.
 

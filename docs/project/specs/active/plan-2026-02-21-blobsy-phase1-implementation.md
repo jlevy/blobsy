@@ -403,6 +403,51 @@ subdirectory. Bottom-up resolution.
   - `checksum.algorithm`: `"sha256"`
   - Full ignore and compress pattern lists as specified in the design doc.
 
+**Size Format Specification:**
+
+The size format for `min_size` settings follows the pattern: `<number><unit>`
+
+**Supported Units** (case-insensitive, 1024-based):
+- `b` or `B` → 1 byte
+- `kb` or `KB` → 1,024 bytes
+- `mb` or `MB` → 1,048,576 bytes (1024²)
+- `gb` or `GB` → 1,073,741,824 bytes (1024³)
+- `tb` or `TB` → 1,099,511,627,776 bytes (1024⁴)
+
+**Features:**
+- Case-insensitive: `"1MB"` = `"1mb"` = `"1Mb"`
+- Decimal values supported: `"1.5mb"` → 1,572,864 bytes
+- Whitespace allowed: `"100 kb"` (optional space between number and unit)
+
+**Examples:**
+```yaml
+externalize:
+  min_size: "1mb"      # 1,048,576 bytes
+  min_size: "100kb"    # 102,400 bytes
+  min_size: "1.5gb"    # 1,610,612,736 bytes
+  min_size: "500 MB"   # 524,288,000 bytes (with space)
+```
+
+**Error Handling:**
+
+Invalid formats produce clear error messages:
+
+```bash
+# Invalid unit
+$ blobsy init local://storage --min-size=1megabyte
+Error: Invalid size format: "1megabyte"
+Expected format: <number><unit> (e.g., "1mb", "100kb")
+Supported units: b, kb, mb, gb, tb
+
+# Invalid number
+$ blobsy track --min-size=abc
+Error: Invalid size format: "abc"
+Expected format: <number><unit> (e.g., "1mb", "100kb")
+```
+
+**Implementation Reference:** `packages/blobsy/src/config.ts:204-227` (parseSize
+function)
+
 #### `backend-url.ts` -- Backend URL Parsing
 
 **Responsibility:** Parse backend URLs into structured config.
