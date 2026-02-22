@@ -571,7 +571,38 @@ Uses the standard credential chain for the backend:
 - Instance profiles / IAM roles
 - rclone config (when rclone is selected from `sync.tools`)
 
-## Atomic Writes
+## Atomic Operations
+
+Blobsy ensures atomicity for all file operations (both reads and writes) to prevent
+corruption and inconsistent state.
+
+### Atomic .yref Updates (Push)
+
+When `blobsy push` updates a `.yref` file, it uses **temp-file-then-rename** pattern:
+
+1. Compute new `.yref` content (hash, size, remote_key, compressed fields)
+2. Write to temporary file `.yref.tmp-{random}`
+3. `fsync()` to ensure data reaches disk
+4. Atomically rename `.yref.tmp-{random}` → `.yref`
+
+**Atomicity guarantee:** The `.yref` file is never in a partially-written state.
+Either the old version exists, or the new version exists — no intermediate state.
+
+**Implementation:** `packages/blobsy/src/ref.ts:67-81` (uses `atomically` package)
+
+### Atomic Remote Blob Writes (Push)
+
+For S3 backends, blob uploads are atomic because S3 `PutObject` is atomic:
+- Object appears at key only after complete upload
+- Failed uploads leave no partial object
+- No temp file needed (S3 handles atomicity)
+
+For local backends, same temp-file-then-rename pattern as .yref files:
+1. Write to `.blobsy/store/{key}.tmp-{random}`
+2. `fsync()` to disk
+3. Rename to `.blobsy/store/{key}`
+
+### Atomic Downloads (Pull)
 
 **All backends:** Blobsy manages atomic downloads for ALL backends to ensure consistent,
 reliable behavior regardless of the underlying transport mechanism.
@@ -592,10 +623,8 @@ We do not rely on external tools to handle atomicity.
   to temp file location; user templates write there; blobsy verifies hash and renames on
   exit code 0
 
-**Other atomic operations:** Blobsy also uses temp-file-then-rename for:
-
-- `.yref` file updates
-- Stat cache writes (file-per-entry, via `atomically` package)
+**Stat cache atomicity:** Stat cache writes also use temp-file-then-rename
+(file-per-entry, via `atomically` package)
 
 **Temp file management:**
 
