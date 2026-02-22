@@ -3246,6 +3246,46 @@ From the original design, the following concepts are no longer needed:
 - **Bidirectional sync complexity** -- `sync` = push missing + pull missing; no delete
   cascades.
 
+## Appendix: Deferred Features and Roadmap
+
+This section consolidates all features designed but deferred to future versions.
+
+### V1.1 Planned Features
+
+| Feature | Rationale for Deferral | Estimated Scope |
+| --- | --- | --- |
+| **Transfer tool delegation** (aws-cli, rclone) | Built-in SDK sufficient for V1; external tools add complexity | ~2 weeks |
+| **GCS backend** (`gs://`) | URL parsing ready; backend impl deferred pending user demand | ~1 week |
+| **Azure Blob backend** (`az://`) | URL parsing ready; backend impl deferred pending user demand | ~1 week |
+| **Command backend health checks** (user-defined) | Optional; unclear if users need it | ~3 days |
+| **blobsy clean command** | Automatic temp file cleanup on startup sufficient for V1 | ~2 days |
+
+### V2 Features (No Timeline)
+
+| Feature | Rationale for Deferral | Design Status |
+| --- | --- | --- |
+| **Garbage collection** (`blobsy gc`) | Complex safety requirements; V1 doesn’t generate much orphaned data | Fully designed (see GC section) |
+| **Branch-isolated mode** (`{git_branch}` variable) | Unclear user demand; adds complexity | Fully designed (see template variables) |
+| **Remote checksum storage** (`.yref` `remote_checksum` field) | V1 content-hash sufficient for integrity; ETags are optimization | Format reserved (forward-compatible) |
+| **Export/import** (repo-to-repo blob transfer) | Complex; unclear use cases | Not designed |
+| **Dictionary compression** (shared compression dictionaries) | Minor storage savings; high complexity | Not designed |
+
+### Explicitly Won’t Do (Design Decisions)
+
+| Feature | Reason Not Implemented |
+| --- | --- |
+| **Nested .yref files** (ref-to-ref indirection) | Adds complexity; no clear use case |
+| **Blob versioning** (multiple versions of same blob) | Git already provides versioning; redundant |
+| **Partial blob download** (range requests) | Incompatible with hash verification; users should externalize smaller files |
+| **Automatic gitignore removal** (when untracking) | Too risky; users may have manual gitignore entries |
+| **In-repo blob encryption** | Cloud provider encryption sufficient; key management adds complexity |
+
+**Rationale Sources:**
+- See [issues-history.md](issues-history.md) for detailed rationale and review
+  discussions
+- V1.1 timeline based on implementation complexity estimates
+- V2 features dependent on user feedback and demand signals
+
 ## Review Issues Resolution
 
 See [issues-history.md](issues-history.md) for the full mapping of design review issues

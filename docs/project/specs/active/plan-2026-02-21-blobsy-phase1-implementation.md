@@ -454,6 +454,24 @@ function)
 Validate per-scheme rules.
 Reject unrecognized schemes with helpful errors listing supported options.
 
+**V1 Scope:** URL parsing validates `s3://`, `local://`, `gs://`, and `az://` schemes.
+However, only `s3://` and `local://` backends are implemented in V1.
+
+If user tries to initialize with `gs://` or `az://`, `blobsy init` will show:
+```
+Error: GCS backend (gs://) is not yet implemented.
+
+V1.0 supports:
+  - s3://bucket/prefix (AWS S3)
+  - local://path/to/storage (Local filesystem)
+
+Coming in V1.1:
+  - gs://bucket/prefix (Google Cloud Storage)
+  - az://container/prefix (Azure Blob Storage)
+
+See https://github.com/jlevy/blobsy/issues for roadmap.
+```
+
 **Key exports:**
 
 - `parseBackendUrl(url: string): ParsedBackendUrl` -- parse and validate.
