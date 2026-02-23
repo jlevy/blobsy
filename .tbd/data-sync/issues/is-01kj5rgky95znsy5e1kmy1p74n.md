@@ -3,9 +3,9 @@ type: is
 id: is-01kj5rgky95znsy5e1kmy1p74n
 title: "Phase 1: Consolidate blobsy skill command (remove prime)"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 3
+version: 5
 spec_path: docs/project/specs/active/plan-2026-02-23-blobsy-setup-and-agent-integration.md
 labels: []
 dependencies:
@@ -13,7 +13,9 @@ dependencies:
     target: is-01kj5rgn343yjsyp0zd5yhmmes
 parent_id: is-01kj5rgah22ev1qxxag8v077mp
 created_at: 2026-02-23T17:24:52.295Z
-updated_at: 2026-02-23T17:25:14.899Z
+updated_at: 2026-02-23T18:16:29.518Z
+closed_at: 2026-02-23T18:16:29.517Z
+close_reason: Consolidated skill command, removed prime command and PRIME_TEXT/SKILL_BRIEF/SKILL_FULL. New SKILL_TEXT is ~200-300 tokens, context-efficient, points to status/doctor --json for dynamic state.
 ---
 Consolidate blobsy skill command (remove prime)
 

@@ -3,9 +3,9 @@ type: is
 id: is-01kj5rgn343yjsyp0zd5yhmmes
 title: "Phase 1: Implement blobsy setup command core"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 3
+version: 5
 spec_path: docs/project/specs/active/plan-2026-02-23-blobsy-setup-and-agent-integration.md
 labels: []
 dependencies:
@@ -13,7 +13,9 @@ dependencies:
     target: is-01kj5rgnq6hnrtdqpah59ga9ap
 parent_id: is-01kj5rgah22ev1qxxag8v077mp
 created_at: 2026-02-23T17:24:53.475Z
-updated_at: 2026-02-23T17:25:19.332Z
+updated_at: 2026-02-23T18:19:55.071Z
+closed_at: 2026-02-23T18:19:55.070Z
+close_reason: Implemented blobsy setup --auto command that wraps init, validates --auto flag, shows next-steps guidance. Golden test and help output updated.
 ---
 Implement blobsy setup command core
 

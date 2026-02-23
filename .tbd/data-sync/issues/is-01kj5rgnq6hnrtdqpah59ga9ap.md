@@ -3,9 +3,9 @@ type: is
 id: is-01kj5rgnq6hnrtdqpah59ga9ap
 title: "Phase 2: Implement agent file installation (Claude + AGENTS.md)"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 4
+version: 6
 spec_path: docs/project/specs/active/plan-2026-02-23-blobsy-setup-and-agent-integration.md
 labels: []
 dependencies:
@@ -15,7 +15,9 @@ dependencies:
     target: is-01kj5rgq4v5b62w09bazv0spp9
 parent_id: is-01kj5rgah22ev1qxxag8v077mp
 created_at: 2026-02-23T17:24:54.116Z
-updated_at: 2026-02-23T17:25:26.082Z
+updated_at: 2026-02-23T18:26:20.643Z
+closed_at: 2026-02-23T18:26:20.641Z
+close_reason: "Implemented agent file installation: .claude/skills/blobsy/SKILL.md and AGENTS.md section with markers. Both idempotent. 7 integration tests, golden test with full setup flow."
 ---
 Implement agent file installation
 
