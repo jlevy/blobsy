@@ -348,18 +348,21 @@ Usage: blobsy config [options] [key] [value]
 Show, get, or set .blobsy.yml values
 
 Arguments:
-  key         Config key (dot-separated, e.g. compress.algorithm)
-  value       Value to set
+  key              Config key (dot-separated, e.g. compress.algorithm)
+  value            Value to set
 
 Options:
-  -h, --help  Display help for command
+  --global         Use global config (~/.blobsy.yml)
+  --show-origin    Show which config file each value comes from
+  --unset          Remove the specified config key
+  -h, --help       Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version        Show version number
+  --json           Structured JSON output
+  --quiet          Suppress all output except errors
+  --verbose        Detailed progress output
+  --dry-run        Show what would happen without doing it
 ? 0
 ```
 

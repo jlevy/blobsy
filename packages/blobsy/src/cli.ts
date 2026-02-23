@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,7 +18,15 @@ import { Command, Option } from 'commander';
 import colors from 'picocolors';
 
 import { parseBackendUrl, validateBackendUrl, resolveLocalPath } from './backend-url.js';
-import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
+import {
+  getConfigPath,
+  getExternalizeConfig,
+  getGlobalConfigPath,
+  resolveConfig,
+  resolveConfigWithOrigins,
+  unsetNestedValue,
+  writeConfigFile,
+} from './config.js';
 import { shouldExternalize } from './externalize.js';
 import {
   isInteractive,
@@ -197,6 +206,9 @@ function createProgram(): Command {
     .description('Show, get, or set .blobsy.yml values')
     .argument('[key]', 'Config key (dot-separated, e.g. compress.algorithm)')
     .argument('[value]', 'Value to set')
+    .option('--global', 'Use global config (~/.blobsy.yml)')
+    .option('--show-origin', 'Show which config file each value comes from')
+    .option('--unset', 'Remove the specified config key')
     .action(wrapAction(handleConfig));
 
   program
@@ -1407,24 +1419,186 @@ async function handleConfig(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const repoRoot = findRepoRoot();
-  const configPath = getConfigPath(repoRoot);
+  const useGlobal = opts.global === true;
+  const showOrigin = opts.showOrigin === true;
+  const unset = opts.unset === true;
 
+  // Determine config file path
+  let configPath: string;
+  let repoRoot: string | undefined;
+
+  if (useGlobal) {
+    // Global config works outside git repo
+    configPath = getGlobalConfigPath();
+  } else {
+    // Repo config requires git repo
+    repoRoot = findRepoRoot();
+    configPath = getConfigPath(repoRoot);
+  }
+
+  // Handle --show-origin
+  if (showOrigin) {
+    if (useGlobal) {
+      throw new ValidationError(
+        '--show-origin requires a git repository (incompatible with --global)',
+      );
+    }
+    if (!repoRoot) {
+      throw new ValidationError('--show-origin requires a git repository');
+    }
+
+    const origins = await resolveConfigWithOrigins(repoRoot, repoRoot);
+
+    if (!key) {
+      // List all config values with origins
+      if (globalOpts.json) {
+        const result = Array.from(origins.entries()).map(([k, v]) => ({
+          key: k,
+          value: v.value,
+          origin: v.origin,
+          file: v.file ? formatConfigPath(v.file, repoRoot) : undefined,
+        }));
+        console.log(formatJson({ config: result }));
+      } else {
+        // Tab-separated output: origin\t[file]\tkey=value
+        const sortedKeys = Array.from(origins.keys()).sort();
+        for (const k of sortedKeys) {
+          const { value: val, origin, file } = origins.get(k)!;
+          const fileDisplay = file ? `\t${formatConfigPath(file, repoRoot)}` : '';
+          const valueDisplay =
+            typeof val === 'object' && val !== null
+              ? JSON.stringify(val)
+              : `${val as string | number | boolean}`;
+          console.log(`${origin}${fileDisplay}\t${k}=${valueDisplay}`);
+        }
+      }
+    } else {
+      // Show origin for specific key
+      const originInfo = origins.get(key);
+      if (globalOpts.json) {
+        if (originInfo) {
+          console.log(
+            formatJson({
+              key,
+              value: originInfo.value,
+              origin: originInfo.origin,
+              file: originInfo.file ? formatConfigPath(originInfo.file, repoRoot) : undefined,
+            }),
+          );
+        } else {
+          console.log(formatJson({ key, value: undefined, origin: null }));
+        }
+      } else {
+        if (originInfo) {
+          const fileDisplay = originInfo.file ? formatConfigPath(originInfo.file, repoRoot) : '';
+          const valueDisplay =
+            typeof originInfo.value === 'object' && originInfo.value !== null
+              ? JSON.stringify(originInfo.value)
+              : `${originInfo.value as string | number | boolean}`;
+          console.log(`${originInfo.origin}\t${fileDisplay}\t${valueDisplay}`);
+        } else {
+          console.log('(not set)');
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle --unset
+  if (unset) {
+    if (!key) {
+      throw new ValidationError('--unset requires a config key');
+    }
+    if (value) {
+      throw new ValidationError('--unset cannot be used with a value argument');
+    }
+
+    if (!existsSync(configPath)) {
+      if (useGlobal) {
+        // Global config doesn't exist, nothing to unset
+        if (!globalOpts.quiet) {
+          if (globalOpts.json) {
+            console.log(formatJsonMessage(`Global config does not exist, nothing to unset`));
+          } else {
+            console.log('Global config does not exist, nothing to unset');
+          }
+        }
+        return;
+      } else {
+        throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+      }
+    }
+
+    if (globalOpts.dryRun) {
+      if (globalOpts.json) {
+        console.log(formatJsonDryRun([`unset ${key}`]));
+      } else {
+        console.log(formatDryRun(`unset ${key}`));
+      }
+      return;
+    }
+
+    const { parse: parseYaml } = await import('yaml');
+    const content = await readFile(configPath, 'utf-8');
+    const config = (parseYaml(content) as Record<string, unknown>) ?? {};
+
+    const removed = unsetNestedValue(config, key);
+
+    await writeConfigFile(configPath, config);
+
+    if (!globalOpts.quiet) {
+      if (globalOpts.json) {
+        const msg = removed ? `Unset ${key}` : `Key ${key} was not set`;
+        console.log(formatJsonMessage(msg));
+      } else {
+        if (removed) {
+          console.log(`Unset ${key}`);
+          // Show effective value after unset (may fall back to other scope)
+          if (!useGlobal && repoRoot) {
+            const resolvedConfig = await resolveConfig(repoRoot, repoRoot);
+            const effectiveValue = getNestedValue(resolvedConfig, key);
+            if (effectiveValue !== undefined) {
+              const displayValue =
+                typeof effectiveValue === 'object' && effectiveValue !== null
+                  ? JSON.stringify(effectiveValue)
+                  : `${effectiveValue as string | number | boolean}`;
+              console.log(`Effective value (from other scope): ${displayValue}`);
+            }
+          }
+        } else {
+          console.log(`Key ${key} was not set`);
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle normal get/set operations
   if (!key) {
     // Show all config
     if (!existsSync(configPath)) {
       if (globalOpts.json) {
         console.log(formatJson({ config: {} }));
       } else {
-        console.log('No .blobsy.yml found. Run blobsy init first.');
+        if (useGlobal) {
+          console.log('No global .blobsy.yml found.');
+        } else {
+          console.log('No .blobsy.yml found. Run blobsy init first.');
+        }
       }
       return;
     }
 
     const content = await readFile(configPath, 'utf-8');
     if (globalOpts.json) {
-      const config = await resolveConfig(repoRoot, repoRoot);
-      console.log(formatJson({ config: config as unknown as Record<string, unknown> }));
+      if (useGlobal) {
+        const { parse: parseYaml } = await import('yaml');
+        const config = parseYaml(content) as Record<string, unknown>;
+        console.log(formatJson({ config }));
+      } else if (repoRoot) {
+        const config = await resolveConfig(repoRoot, repoRoot);
+        console.log(formatJson({ config: config as unknown as Record<string, unknown> }));
+      }
     } else {
       console.log(content.trimEnd());
     }
@@ -1433,8 +1607,21 @@ async function handleConfig(
 
   if (!value) {
     // Get a specific key
-    const config = await resolveConfig(repoRoot, repoRoot);
-    const val = getNestedValue(config, key);
+    let val: unknown;
+    if (useGlobal) {
+      if (!existsSync(configPath)) {
+        val = undefined;
+      } else {
+        const { parse: parseYaml } = await import('yaml');
+        const content = await readFile(configPath, 'utf-8');
+        const config = parseYaml(content) as Record<string, unknown>;
+        val = getNestedValue(config, key);
+      }
+    } else if (repoRoot) {
+      const config = await resolveConfig(repoRoot, repoRoot);
+      val = getNestedValue(config, key);
+    }
+
     if (globalOpts.json) {
       console.log(formatJson({ key, value: val }));
     } else {
@@ -1450,9 +1637,14 @@ async function handleConfig(
     return;
   }
 
-  // Set a value -- simple key=value at the top level of the config
+  // Set a value
   if (!existsSync(configPath)) {
-    throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+    if (useGlobal) {
+      // Create global config if it doesn't exist
+      await writeConfigFile(configPath, {});
+    } else {
+      throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+    }
   }
 
   if (globalOpts.dryRun) {
@@ -1464,12 +1656,11 @@ async function handleConfig(
     return;
   }
 
-  const { parse: parseYaml, stringify: stringifyYaml } = await import('yaml');
+  const { parse: parseYaml } = await import('yaml');
   const content = await readFile(configPath, 'utf-8');
   const config = (parseYaml(content) as Record<string, unknown>) ?? {};
   setNestedValue(config, key, value);
-  const { writeFile: writeFs } = await import('node:fs/promises');
-  await writeFs(configPath, stringifyYaml(config, { lineWidth: 0 }));
+  await writeConfigFile(configPath, config);
 
   if (!globalOpts.quiet) {
     if (globalOpts.json) {
@@ -1478,6 +1669,20 @@ async function handleConfig(
       console.log(`Set ${key} = ${value}`);
     }
   }
+}
+
+/**
+ * Format a file path for display: use ~ for home directory and relative paths for repo files.
+ */
+function formatConfigPath(filePath: string, repoRoot?: string): string {
+  const home = homedir();
+  if (filePath.startsWith(home)) {
+    return filePath.replace(home, '~');
+  }
+  if (repoRoot && filePath.startsWith(repoRoot)) {
+    return relative(repoRoot, filePath) || '.';
+  }
+  return filePath;
 }
 
 function getNestedValue(obj: object, path: string): unknown {
