@@ -9,7 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { readFile, rename, unlink } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -438,6 +438,12 @@ async function handleSetup(
   // Delegate to init
   await handleInit(url, opts, cmd);
 
+  // Install agent integration files
+  const repoRoot = findRepoRoot();
+  if (!globalOpts.dryRun) {
+    await installAgentFiles(repoRoot, globalOpts);
+  }
+
   // Show next steps (unless quiet/json)
   if (!globalOpts.quiet && !globalOpts.json) {
     console.log('');
@@ -446,6 +452,97 @@ async function handleSetup(
     console.log('  blobsy push            Upload to backend');
     console.log('  blobsy status          Check sync state');
     console.log('  blobsy skill           Quick reference for AI agents');
+  }
+}
+
+// --- Agent Integration ---
+
+const BLOBSY_SKILL_REL = '.claude/skills/blobsy/SKILL.md';
+const AGENTS_MD_REL = 'AGENTS.md';
+const AGENTS_MD_BEGIN = '<!-- BEGIN BLOBSY INTEGRATION -->';
+const AGENTS_MD_END = '<!-- END BLOBSY INTEGRATION -->';
+
+/**
+ * Install agent integration files if agent tooling is detected.
+ * - .claude/skills/blobsy/SKILL.md (if Claude Code detected)
+ * - AGENTS.md section (if AGENTS.md exists)
+ */
+async function installAgentFiles(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  await installClaudeSkill(repoRoot, globalOpts);
+  await installAgentsMdSection(repoRoot, globalOpts);
+}
+
+/**
+ * Install .claude/skills/blobsy/SKILL.md if Claude Code is detected.
+ * Detection: ~/.claude/ exists, or .claude/ exists in project, or CLAUDE_* env vars.
+ */
+async function installClaudeSkill(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  const globalClaudeDir = join(homedir(), '.claude');
+  const projectClaudeDir = join(repoRoot, '.claude');
+  const hasClaudeGlobal = existsSync(globalClaudeDir);
+  const hasClaudeProject = existsSync(projectClaudeDir);
+  const hasClaudeEnv = Object.keys(process.env).some((k) => k.startsWith('CLAUDE_'));
+
+  if (!hasClaudeGlobal && !hasClaudeProject && !hasClaudeEnv) {
+    return;
+  }
+
+  const skillPath = join(repoRoot, BLOBSY_SKILL_REL);
+  const skillDir = dirname(skillPath);
+
+  // Always write (idempotent update to latest content)
+  await ensureDir(skillDir);
+  await writeFile(skillPath, SKILL_TEXT);
+
+  if (!globalOpts.quiet && !globalOpts.json) {
+    console.log(`Installed ${BLOBSY_SKILL_REL}`);
+  }
+}
+
+/**
+ * Add or update blobsy section in AGENTS.md if it exists.
+ * Uses markers to allow idempotent updates.
+ */
+async function installAgentsMdSection(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  const agentsPath = join(repoRoot, AGENTS_MD_REL);
+
+  if (!existsSync(agentsPath)) {
+    return;
+  }
+
+  const section = [
+    AGENTS_MD_BEGIN,
+    '## Blobsy',
+    '',
+    'Git-native large file storage CLI.',
+    '',
+    '**Installation:** `npm install -g blobsy@latest`',
+    '**Setup:** `blobsy setup --auto s3://bucket/prefix/`',
+    '**Orientation:** Run `blobsy skill` for quick reference',
+    AGENTS_MD_END,
+  ].join('\n');
+
+  let content = await readFile(agentsPath, 'utf-8');
+
+  if (content.includes(AGENTS_MD_BEGIN)) {
+    // Replace existing section
+    const beginIdx = content.indexOf(AGENTS_MD_BEGIN);
+    const endIdx = content.indexOf(AGENTS_MD_END);
+    if (endIdx > beginIdx) {
+      content = content.slice(0, beginIdx) + section + content.slice(endIdx + AGENTS_MD_END.length);
+      await writeFile(agentsPath, content);
+      if (!globalOpts.quiet && !globalOpts.json) {
+        console.log(`Updated blobsy section in ${AGENTS_MD_REL}`);
+      }
+    }
+  } else {
+    // Append section
+    const separator = content.endsWith('\n') ? '\n' : '\n\n';
+    content += separator + section + '\n';
+    await writeFile(agentsPath, content);
+    if (!globalOpts.quiet && !globalOpts.json) {
+      console.log(`Added blobsy section to ${AGENTS_MD_REL}`);
+    }
   }
 }
 

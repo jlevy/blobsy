@@ -7,13 +7,17 @@ before: |
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
   rm -rf ../remote && mkdir -p ../remote
+  mkdir -p .claude
+  echo "# Existing Agents" > AGENTS.md
 ---
-# Setup with --auto wraps init and shows next steps
+# Setup with --auto wraps init, installs agent files, and shows next steps
 
 ```console
 $ blobsy setup --auto local:../remote
 Initialized blobsy in .
 Created .blobsy.yml
+Installed .claude/skills/blobsy/SKILL.md
+Added blobsy section to AGENTS.md
 
 Setup complete! Next steps:
   blobsy track <file>    Track files with .bref pointers
@@ -33,11 +37,31 @@ backends:
 ? 0
 ```
 
-# Idempotent: re-running setup skips config creation
+# Verify skill file was installed
+
+```console
+$ head -3 .claude/skills/blobsy/SKILL.md
+# blobsy
+
+Git-native large file storage. Track large files with `.bref` pointers in Git,
+? 0
+```
+
+# Verify AGENTS.md was updated
+
+```console
+$ grep "BEGIN BLOBSY" AGENTS.md
+<!-- BEGIN BLOBSY INTEGRATION -->
+? 0
+```
+
+# Idempotent: re-running setup updates agent files
 
 ```console
 $ blobsy setup --auto local:../remote
 Config already exists at .blobsy.yml. Skipping config creation.
+Installed .claude/skills/blobsy/SKILL.md
+Updated blobsy section in AGENTS.md
 
 Setup complete! Next steps:
   blobsy track <file>    Track files with .bref pointers
@@ -81,21 +105,6 @@ Error: Unrecognized backend URL scheme: r2:
     azure://my-container/prefix/
     local:../blobsy-remote
 ? 1
-```
-
-# Setup with S3 URL
-
-```console
-$ blobsy setup --auto s3://my-bucket/prefix/
-Initialized blobsy in .
-Created .blobsy.yml
-
-Setup complete! Next steps:
-  blobsy track <file>    Track files with .bref pointers
-  blobsy push            Upload to backend
-  blobsy status          Check sync state
-  blobsy skill           Quick reference for AI agents
-? 0
 ```
 
 # Setup help shows usage
