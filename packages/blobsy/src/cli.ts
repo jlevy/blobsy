@@ -73,7 +73,7 @@ import {
   resolveTrackedFiles,
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
-import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
+import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, GlobalOptions, Bref } from './types.js';
 import {
   BlobsyError,
@@ -305,22 +305,10 @@ function createProgram(): Command {
   program
     .command('skill')
     .description('Output blobsy skill documentation (for AI agents)')
-    .option('--brief', 'Short summary only')
     .action(
       // eslint-disable-next-line @typescript-eslint/require-await
-      wrapAction(async (opts: Record<string, unknown>) => {
-        console.log(opts.brief ? SKILL_BRIEF : SKILL_FULL);
-      }),
-    );
-
-  program
-    .command('prime')
-    .description('Output context primer for AI agents working in this repo')
-    .option('--brief', 'Short summary only')
-    .action(
-      // eslint-disable-next-line @typescript-eslint/require-await
-      wrapAction(async (opts: Record<string, unknown>) => {
-        console.log(opts.brief ? SKILL_BRIEF : PRIME_TEXT);
+      wrapAction(async () => {
+        console.log(SKILL_TEXT);
       }),
     );
 

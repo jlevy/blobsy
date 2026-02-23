@@ -48,9 +48,7 @@ Commands:
                                blob
   readme                       Display the blobsy README
   docs [options] [topic]       Display blobsy user documentation
-  skill [options]              Output blobsy skill documentation (for AI agents)
-  prime [options]              Output context primer for AI agents working in
-                               this repo
+  skill                        Output blobsy skill documentation (for AI agents)
   help [command]               display help for command
 
 Get started:
@@ -503,28 +501,6 @@ Usage: blobsy skill [options]
 Output blobsy skill documentation (for AI agents)
 
 Options:
-  --brief     Short summary only
-  -h, --help  Display help for command
-
-Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
-? 0
-```
-
-# Per-command help: prime
-
-```console
-$ blobsy prime --help
-Usage: blobsy prime [options]
-
-Output context primer for AI agents working in this repo
-
-Options:
-  --brief     Short summary only
   -h, --help  Display help for command
 
 Global Options:
