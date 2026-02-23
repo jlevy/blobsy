@@ -4,8 +4,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
-import { readFile, unlink } from 'node:fs/promises';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { chmod, readFile, unlink } from 'node:fs/promises';
 import { basename, dirname, join, isAbsolute } from 'node:path';
 
 import type { Command } from 'commander';
@@ -576,6 +576,11 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   renderSection('CONFIGURATION', configIssues, verbose, useJson);
   issues.push(...configIssues);
 
+  // --- GIT HOOKS section ---
+  const hookIssues = checkHooks(repoRoot, fix, verbose);
+  renderSection('GIT HOOKS', hookIssues, verbose, useJson);
+  issues.push(...hookIssues);
+
   // --- INTEGRITY section ---
   const integrityIssues: DoctorIssue[] = [];
   try {
@@ -755,7 +760,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
     }
   }
 
-  if (issues.some((i) => !i.fixed && i.severity !== 'info')) {
+  if (issues.some((i) => !i.fixed && i.severity === 'error')) {
     process.exitCode = 1;
   }
 }
@@ -968,6 +973,86 @@ function checkConfig(
         fixed: false,
         fixable: false,
       });
+    }
+  }
+
+  return issues;
+}
+
+/** Run git hook checks for doctor. */
+function checkHooks(repoRoot: string, fix: boolean, verbose: boolean): DoctorIssue[] {
+  const issues: DoctorIssue[] = [];
+  const hookDir = join(repoRoot, '.git', 'hooks');
+
+  for (const hook of HOOK_TYPES) {
+    const hookPath = join(hookDir, hook.name);
+
+    if (!existsSync(hookPath)) {
+      if (fix) {
+        // Hook installation is handled by handleHooks; just report
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not installed`,
+          fixed: false,
+          fixable: true,
+        });
+      } else {
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not installed`,
+          fixed: false,
+          fixable: true,
+        });
+      }
+      continue;
+    }
+
+    // Hook exists — check content
+    const content = readFileSync(hookPath, 'utf-8');
+    if (!content.includes('blobsy hook')) {
+      issues.push({
+        type: 'hooks',
+        severity: 'warning',
+        message: `${hook.name} hook exists but is not a blobsy hook`,
+        fixed: false,
+        fixable: false,
+      });
+      continue;
+    }
+
+    // Blobsy-managed hook — check executable
+    try {
+      accessSync(hookPath, constants.X_OK);
+      if (verbose) {
+        issues.push({
+          type: 'hooks',
+          severity: 'info',
+          message: `${hook.name} hook installed`,
+          fixed: false,
+          fixable: false,
+        });
+      }
+    } catch {
+      if (fix) {
+        void chmod(hookPath, 0o755);
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook made executable`,
+          fixed: true,
+          fixable: true,
+        });
+      } else {
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not executable`,
+          fixed: false,
+          fixable: true,
+        });
+      }
     }
   }
 

@@ -33,14 +33,29 @@ $ blobsy doctor --json
       }
     ]
   },
-  "issues": [],
+  "issues": [
+    {
+      "type": "hooks",
+      "severity": "warning",
+      "message": "pre-commit hook not installed",
+      "fixed": false,
+      "fixable": true
+    },
+    {
+      "type": "hooks",
+      "severity": "warning",
+      "message": "pre-push hook not installed",
+      "fixed": false,
+      "fixable": true
+    }
+  ],
   "summary": {
-    "total": 0,
+    "total": 2,
     "errors": 0,
-    "warnings": 0,
+    "warnings": 2,
     "info": 0,
     "fixed": 0,
-    "unfixed": 0
+    "unfixed": 2
   }
 }
 ? 0
@@ -69,6 +84,20 @@ $ blobsy doctor --json
   },
   "issues": [
     {
+      "type": "hooks",
+      "severity": "warning",
+      "message": "pre-commit hook not installed",
+      "fixed": false,
+      "fixable": true
+    },
+    {
+      "type": "hooks",
+      "severity": "warning",
+      "message": "pre-push hook not installed",
+      "fixed": false,
+      "fixable": true
+    },
+    {
       "type": "gitignore",
       "severity": "error",
       "message": "data/model.bin: missing from .gitignore",
@@ -77,12 +106,12 @@ $ blobsy doctor --json
     }
   ],
   "summary": {
-    "total": 1,
+    "total": 3,
     "errors": 1,
-    "warnings": 0,
+    "warnings": 2,
     "info": 0,
     "fixed": 0,
-    "unfixed": 1
+    "unfixed": 3
   }
 }
 ? 1

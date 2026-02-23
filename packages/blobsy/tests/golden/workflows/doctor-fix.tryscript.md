@@ -25,7 +25,11 @@ $ blobsy doctor
 
 1 tracked file: 1 synced
 
-No issues found.
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+2 issues found. Run with --fix to attempt repairs.
 ? 0
 ```
 
@@ -44,10 +48,14 @@ $ blobsy doctor
 
 1 tracked file: 1 synced
 
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
 === INTEGRITY ===
   ✗  data/model.bin: missing from .gitignore
 
-1 issue found. Run with --fix to attempt repairs.
+3 issues found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -59,10 +67,14 @@ $ blobsy doctor --fix
 
 1 tracked file: 1 synced
 
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
 === INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
-All issues fixed.
+2 issues found.
 ? 0
 ```
 
@@ -82,6 +94,10 @@ $ blobsy doctor
 
 1 tracked file: 1 synced
 
-No issues found.
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+2 issues found. Run with --fix to attempt repairs.
 ? 0
 ```
