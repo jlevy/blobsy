@@ -98,8 +98,8 @@ $ blobsy status
 
 ```console
 $ blobsy push
-  data/dataset.csv (21 B) - pushed
-  data/model.bin (13 B) - pushed
+  ↑  data/dataset.csv (32 B)
+  ↑  data/model.bin (13 B)
 Done: 2 pushed.
 ? 0
 ```

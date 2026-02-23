@@ -53,7 +53,7 @@ hash: [HASH]
 
 ```console
 $ blobsy push
-  data/model.bin (24 B) - pushed
+  ↑  data/model.bin (24 B)
 Done: 1 pushed.
 ? 0
 ```

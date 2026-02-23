@@ -49,7 +49,7 @@ $ git add -A && git commit -q -m "track"
 
 ```console
 $ blobsy push data/readme.txt
-  data/readme.txt (22 B) - pushed
+  ↑  data/readme.txt (22 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -80,7 +80,7 @@ $ rm data/readme.txt
 
 ```console
 $ blobsy pull data/readme.txt
-  data/readme.txt (13 B) - pulled
+  ↓  data/readme.txt (13 B)
 Done: 1 pulled.
 ? 0
 ```

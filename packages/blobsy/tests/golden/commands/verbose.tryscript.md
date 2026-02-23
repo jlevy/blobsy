@@ -32,7 +32,7 @@ Updated data/model.bin.bref (hash changed)
 
 ```console
 $ blobsy push --verbose
-  data/model.bin (8 B) - pushed
+  ↑  data/model.bin (8 B)
 Done: 1 pushed.
 ? 0
 ```

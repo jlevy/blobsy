@@ -52,7 +52,7 @@ Added data/results.csv to .gitignore
 
 ```console
 $ blobsy push data/results.csv
-  data/results.csv (21 B) - pushed
+  ↑  data/results.csv (32 B)
 Done: 1 pushed.
 ? 0
 ```

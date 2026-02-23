@@ -52,12 +52,12 @@ $ git add -A && git commit -q -m "track files"
 
 ```console
 $ blobsy push
-  data/datasets/data-1.bin (10 B) - pushed
-  data/datasets/data-2.bin (10 B) - pushed
-  data/datasets/data-3.bin (10 B) - pushed
-  data/models/model-1.bin (8 B) - pushed
-  data/models/model-2.bin (8 B) - pushed
-  data/models/model-3.bin (8 B) - pushed
+  ↑  data/datasets/data-1.bin (10 B)
+  ↑  data/datasets/data-2.bin (10 B)
+  ↑  data/datasets/data-3.bin (10 B)
+  ↑  data/models/model-1.bin (8 B)
+  ↑  data/models/model-2.bin (8 B)
+  ↑  data/models/model-3.bin (8 B)
 Done: 6 pushed.
 ? 0
 ```

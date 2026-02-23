@@ -12,46 +12,48 @@ Usage: blobsy [options] [command]
 Store large files anywhere. Track them in Git.
 
 Options:
-  --version                    Show version number
-  --json                       Structured JSON output
-  --quiet                      Suppress all output except errors
-  --verbose                    Detailed progress output
-  --dry-run                    Show what would happen without doing it
-  -h, --help                   Display help for command
+  --version                       Show version number
+  --json                          Structured JSON output
+  --quiet                         Suppress all output except errors
+  --verbose                       Detailed progress output
+  --dry-run                       Show what would happen without doing it
+  -h, --help                      Display help for command
 
 Commands:
-  setup [options] <url>        Set up blobsy in a git repo (wraps init + agent
-                               integration)
-  init [options] <url>         Initialize blobsy config (low-level; prefer
-                               setup --auto)
-  add [options] <path...>      Track files and stage changes to git
-                               (recommended)
-  track [options] <path...>    Start tracking files or directories with .bref
-                               pointers
-  untrack [options] <path...>  Stop tracking files (keeps local files, moves
-                               .bref to trash)
-  rm [options] <path...>       Remove tracked files: delete local + move .bref
-                               to trash
-  mv <source> <dest>           Rename or move tracked files or directories
-                               (updates .bref + .gitignore)
-  push [options] [path...]     Upload local blobs to the configured backend
-  pull [options] [path...]     Download blobs from the configured backend
-  sync [options] [path...]     Bidirectional sync: push unpushed + pull missing
-  status [options] [path...]   Show sync state of tracked files
-  verify [options] [path...]   Verify local files match their .bref hashes
-  config [key] [value]         Show, get, or set .blobsy.yml values
-  health                       Test backend connectivity and permissions
-  doctor [options]             Run diagnostics and optionally auto-fix issues
-  hooks <action>               Install or uninstall blobsy git hooks
-                               (pre-commit, pre-push)
-  check-unpushed               List committed .bref files whose blobs are not
-                               yet pushed
-  pre-push-check               CI guard: fail if any .bref is missing its remote
-                               blob
-  readme                       Display the blobsy README
-  docs [options] [topic]       Display blobsy user documentation
-  skill                        Output blobsy skill documentation (for AI agents)
-  help [command]               display help for command
+  setup [options] <url>           Set up blobsy in a git repo (wraps init +
+                                  agent integration)
+  init [options] <url>            Initialize blobsy config (low-level; prefer
+                                  setup --auto)
+  add [options] <path...>         Track files and stage changes to git
+                                  (recommended)
+  track [options] <path...>       Start tracking files or directories with .bref
+                                  pointers
+  untrack [options] <path...>     Stop tracking files (keeps local files, moves
+                                  .bref to trash)
+  rm [options] <path...>          Remove tracked files: delete local + move
+                                  .bref to trash
+  mv <source> <dest>              Rename or move tracked files or directories
+                                  (updates .bref + .gitignore)
+  push [options] [path...]        Upload local blobs to the configured backend
+  pull [options] [path...]        Download blobs from the configured backend
+  sync [options] [path...]        Bidirectional sync: push unpushed + pull
+                                  missing
+  status [options] [path...]      Show sync state of tracked files
+  verify [options] [path...]      Verify local files match their .bref hashes
+  config [options] [key] [value]  Show, get, or set .blobsy.yml values
+  health                          Test backend connectivity and permissions
+  doctor [options]                Run diagnostics and optionally auto-fix issues
+  hooks <action>                  Install or uninstall blobsy git hooks
+                                  (pre-commit, pre-push)
+  check-unpushed                  List committed .bref files whose blobs are not
+                                  yet pushed
+  pre-push-check                  CI guard: fail if any .bref is missing its
+                                  remote blob
+  readme                          Display the blobsy README
+  docs [options] [topic]          Display blobsy user documentation
+  skill                           Output blobsy skill documentation (for AI
+                                  agents)
+  help [command]                  display help for command
 
 Get started:
   blobsy setup --auto s3://bucket/prefix/
@@ -349,21 +351,21 @@ Usage: blobsy config [options] [key] [value]
 Show, get, or set .blobsy.yml values
 
 Arguments:
-  key              Config key (dot-separated, e.g. compress.algorithm)
-  value            Value to set
+  key            Config key (dot-separated, e.g. compress.algorithm)
+  value          Value to set
 
 Options:
-  --global         Use global config (~/.blobsy.yml)
-  --show-origin    Show which config file each value comes from
-  --unset          Remove the specified config key
-  -h, --help       Display help for command
+  --global       Use global config (~/.blobsy.yml)
+  --show-origin  Show which config file each value comes from
+  --unset        Remove the specified config key
+  -h, --help     Display help for command
 
 Global Options:
-  --version        Show version number
-  --json           Structured JSON output
-  --quiet          Suppress all output except errors
-  --verbose        Detailed progress output
-  --dry-run        Show what would happen without doing it
+  --version      Show version number
+  --json         Structured JSON output
+  --quiet        Suppress all output except errors
+  --verbose      Detailed progress output
+  --dry-run      Show what would happen without doing it
 ? 0
 ```
 

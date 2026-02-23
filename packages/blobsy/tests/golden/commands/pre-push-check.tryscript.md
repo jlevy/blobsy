@@ -30,7 +30,7 @@ Run blobsy push first.
 
 ```console
 $ blobsy push
-  data/model.bin (13 B) - pushed
+  ↑  data/model.bin (13 B)
 Done: 1 pushed.
 ? 0
 ```

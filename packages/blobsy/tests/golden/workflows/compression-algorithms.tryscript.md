@@ -39,7 +39,7 @@ $ git add -A && git commit -q -m "track"
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin (13 B) - pushed
+  ↑  data/model.bin (13 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -51,7 +51,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin (13 B) - pulled
+  ↓  data/model.bin (13 B)
 Done: 1 pulled.
 ? 0
 ```
@@ -84,7 +84,7 @@ $ git add -A && git commit -q -m "track csv"
 
 ```console
 $ blobsy push data/dataset.csv
-  data/dataset.csv (16 B) - pushed
+  ↑  data/dataset.csv (16 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -96,7 +96,7 @@ $ rm data/dataset.csv
 
 ```console
 $ blobsy pull data/dataset.csv
-  data/dataset.csv (12 B) - pulled
+  ↓  data/dataset.csv (12 B)
 Done: 1 pulled.
 ? 0
 ```
@@ -134,7 +134,7 @@ $ git add -A && git commit -q -m "track tiny"
 
 ```console
 $ blobsy push data/tiny.bin
-  data/tiny.bin (5 B) - pushed
+  ↑  data/tiny.bin (5 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -146,7 +146,7 @@ $ rm data/tiny.bin
 
 ```console
 $ blobsy pull data/tiny.bin
-  data/tiny.bin (5 B) - pulled
+  ↓  data/tiny.bin (5 B)
 Done: 1 pulled.
 ? 0
 ```
@@ -184,7 +184,7 @@ $ git add -A && git commit -q -m "track txt"
 
 ```console
 $ blobsy push data/notes.txt
-  data/notes.txt (11 B) - pushed
+  ↑  data/notes.txt (11 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -196,7 +196,7 @@ $ rm data/notes.txt
 
 ```console
 $ blobsy pull data/notes.txt
-  data/notes.txt (11 B) - pulled
+  ↓  data/notes.txt (11 B)
 Done: 1 pulled.
 ? 0
 ```

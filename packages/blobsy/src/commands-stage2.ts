@@ -27,11 +27,18 @@ import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck } from './transfer.js';
 import {
+  formatCheckFail,
+  formatCheckFixed,
+  formatCount,
   formatDryRun,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
-  formatSize,
+  formatPullResult,
+  formatPushResult,
+  formatTransferFail,
+  formatWarning,
+  OUTPUT_SYMBOLS,
 } from './format.js';
 import type { GlobalOptions, TransferResult } from './types.js';
 import { ValidationError, BREF_EXTENSION } from './types.js';
@@ -113,9 +120,7 @@ export async function handlePush(
       for (const a of needsPush) {
         console.log(formatDryRun(a));
       }
-      console.log(
-        `${formatDryRun(`push ${needsPush.length} file${needsPush.length === 1 ? '' : 's'}`)}`,
-      );
+      console.log(formatDryRun(`push ${formatCount(needsPush.length, 'file')}`));
     }
     return;
   }
@@ -166,11 +171,10 @@ export async function handlePush(
     );
   } else if (!globalOpts.quiet) {
     for (const r of succeeded) {
-      const sizeStr = r.bytesTransferred != null ? ` (${formatSize(r.bytesTransferred)})` : '';
-      console.log(`  ${r.path}${sizeStr} - pushed`);
+      console.log(formatPushResult(r.path, r.bytesTransferred));
     }
     for (const r of failed) {
-      console.error(`  ${r.path} - FAILED: ${r.error}`);
+      console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
     console.log(
       `Done: ${succeeded.length} pushed${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
@@ -217,9 +221,7 @@ export async function handlePull(
       for (const a of needsPull) {
         console.log(formatDryRun(a));
       }
-      console.log(
-        formatDryRun(`pull ${needsPull.length} file${needsPull.length === 1 ? '' : 's'}`),
-      );
+      console.log(formatDryRun(`pull ${formatCount(needsPull.length, 'file')}`));
     }
     return;
   }
@@ -268,11 +270,10 @@ export async function handlePull(
     );
   } else if (!globalOpts.quiet) {
     for (const r of succeeded) {
-      const sizeStr = r.bytesTransferred != null ? ` (${formatSize(r.bytesTransferred)})` : '';
-      console.log(`  ${r.path}${sizeStr} - pulled`);
+      console.log(formatPullResult(r.path, r.bytesTransferred));
     }
     for (const r of failed) {
-      console.error(`  ${r.path} - FAILED: ${r.error}`);
+      console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
     console.log(
       `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
@@ -351,12 +352,12 @@ export async function handleSync(
         }
         pushed++;
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  \u2191 ${file.relPath} - pushed`);
+          console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
         }
       } else {
         errors++;
         if (!globalOpts.quiet) {
-          console.error(`  \u2717 ${file.relPath} - push failed: ${result.error}`);
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
         }
       }
     } else if (!existsSync(file.absPath)) {
@@ -366,12 +367,12 @@ export async function handleSync(
         await writeCacheEntry(cacheDir, entry);
         pulled++;
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  \u2193 ${file.relPath} - pulled`);
+          console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled`);
         }
       } else {
         errors++;
         if (!globalOpts.quiet) {
-          console.error(`  \u2717 ${file.relPath} - pull failed: ${result.error}`);
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`);
         }
       }
     } else {
@@ -391,13 +392,13 @@ export async function handleSync(
           await writeCacheEntry(cacheDir, entry);
           pushed++;
           if (!globalOpts.quiet && !globalOpts.json) {
-            console.log(`  \u2191 ${file.relPath} - pushed (modified)`);
+            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
           }
         } else {
           errors++;
         }
       } else if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  \u2713 ${file.relPath} - up to date`);
+        console.log(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`);
       }
     }
   }
@@ -539,14 +540,13 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
       console.log('No issues found.');
     } else {
       for (const issue of issues) {
-        const prefix = issue.fixed ? '\u2713 Fixed' : '\u2717';
-        console.log(`  ${prefix}  ${issue.message}`);
+        console.log(issue.fixed ? formatCheckFixed(issue.message) : formatCheckFail(issue.message));
       }
       console.log('');
       const unfixed = issues.filter((i) => !i.fixed).length;
       if (unfixed > 0) {
         console.log(
-          `${unfixed} issue${unfixed === 1 ? '' : 's'} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
+          `${formatCount(unfixed, 'issue')} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
         );
       } else {
         console.log('All issues fixed.');
@@ -608,9 +608,9 @@ export async function handleHooks(
 
         if (!globalOpts.quiet) {
           console.warn(
-            '⚠️  Warning: Could not detect absolute path to blobsy executable.\n' +
-              '   Hook will use "blobsy" from PATH.\n' +
-              '   To ensure hooks work, install blobsy globally: pnpm link --global',
+            formatWarning('Could not detect absolute path to blobsy executable.') +
+              '\n   Hook will use "blobsy" from PATH.' +
+              '\n   To ensure hooks work, install blobsy globally: pnpm link --global',
           );
         }
       }
@@ -685,7 +685,7 @@ export async function handleCheckUnpushed(
       for (const path of unpushed) {
         console.log(`  ${path}`);
       }
-      console.log(`\n${unpushed.length} file${unpushed.length === 1 ? '' : 's'} not pushed.`);
+      console.log(`\n${formatCount(unpushed.length, 'file')} not pushed.`);
     }
   }
 
@@ -729,9 +729,7 @@ export async function handlePrePushCheck(
       for (const path of missing) {
         console.log(`  ${path}  missing remote blob`);
       }
-      console.log(
-        `\n${missing.length} file${missing.length === 1 ? '' : 's'} missing remote blobs.`,
-      );
+      console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
       console.log('Run blobsy push first.');
     }
   }
@@ -797,9 +795,7 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
 
   if (unpushed.length === 0) return;
 
-  console.log(
-    `blobsy pre-push: uploading ${unpushed.length} blob${unpushed.length === 1 ? '' : 's'}...`,
-  );
+  console.log(`blobsy pre-push: uploading ${formatCount(unpushed.length, 'blob')}...`);
 
   // Push each unpushed blob
   const cacheDir = getStatCacheDir(repoRoot);

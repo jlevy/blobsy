@@ -33,7 +33,7 @@ $ blobsy check-unpushed
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin (13 B) - pushed
+  ↑  data/model.bin (13 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -51,7 +51,7 @@ $ blobsy check-unpushed
 ```console
 $ blobsy push
   data/model.bin  already pushed
-  data/dataset.csv (21 B) - pushed
+  ↑  data/dataset.csv (32 B)
 Done: 1 pushed.
 ? 0
 ```

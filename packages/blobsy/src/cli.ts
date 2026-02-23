@@ -36,13 +36,16 @@ import {
   findSection,
 } from './markdown-output.js';
 import {
+  formatCount,
   formatDryRun,
   formatError,
+  formatFileState,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
   formatJsonMessage,
   formatSize,
+  OUTPUT_SYMBOLS,
 } from './format.js';
 import { ensureDir } from './fs-utils.js';
 import { addGitignoreEntry, removeGitignoreEntry } from './gitignore.js';
@@ -74,7 +77,7 @@ import {
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { SKILL_TEXT } from './skill-text.js';
-import type { BlobsyConfig, GlobalOptions, Bref } from './types.js';
+import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
 import {
   BlobsyError,
   FILE_STATE_SYMBOLS,
@@ -925,11 +928,7 @@ async function trackDirectory(
     if (globalOpts.json) {
       console.log(formatJsonDryRun(trackable.map((f) => `track ${toRepoRelative(f, repoRoot)}`)));
     } else {
-      console.log(
-        formatDryRun(
-          `track ${trackable.length} file${trackable.length === 1 ? '' : 's'} in ${relDir}/`,
-        ),
-      );
+      console.log(formatDryRun(`track ${formatCount(trackable.length, 'file')} in ${relDir}/`));
     }
     return result;
   }
@@ -1001,7 +1000,7 @@ async function trackDirectory(
   if (!globalOpts.quiet && !globalOpts.json) {
     const parts: string[] = [];
     if (result.externalized > 0) {
-      parts.push(`${result.externalized} file${result.externalized === 1 ? '' : 's'} tracked`);
+      parts.push(`${formatCount(result.externalized, 'file')} tracked`);
     } else {
       parts.push('0 files tracked');
     }
@@ -1063,10 +1062,10 @@ async function handleStatus(
     );
   } else {
     for (const r of results) {
-      console.log(`  ${r.symbol}  ${r.path}  ${r.details}`);
+      console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details));
     }
     console.log('');
-    console.log(`${results.length} tracked file${results.length === 1 ? '' : 's'}`);
+    console.log(formatCount(results.length, 'tracked file'));
   }
 }
 
@@ -1149,7 +1148,9 @@ async function handleVerify(
   } else {
     for (const r of results) {
       const statusStr = r.status === 'ok' ? 'ok' : r.status;
-      console.log(`  ${r.status === 'ok' ? '\u2713' : '\u2717'}  ${r.path}  ${statusStr}`);
+      console.log(
+        `  ${r.status === 'ok' ? OUTPUT_SYMBOLS.pass : OUTPUT_SYMBOLS.fail}  ${r.path}  ${statusStr}`,
+      );
     }
     if (hasIssues) {
       console.log('');

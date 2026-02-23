@@ -80,7 +80,7 @@ $ rm .blobsy.yml
 
 ```console
 $ blobsy setup local:../remote 2>&1
-Error: --auto flag is required (interactive setup is not yet supported)
+✗ --auto flag is required (interactive setup is not yet supported)
 ? 1
 ```
 

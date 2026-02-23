@@ -63,7 +63,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin 2>&1
-  data/model.bin - FAILED: Remote blob not found: [REMOTE_KEY]
+  ✗  data/model.bin - FAILED: Remote blob not found: [REMOTE_KEY]
 Done: 0 pulled, 1 failed.
 ? 1
 ```

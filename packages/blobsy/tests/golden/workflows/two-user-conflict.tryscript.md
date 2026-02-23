@@ -44,7 +44,7 @@ Updated data/model.bin.bref (hash changed)
 
 ```console
 $ blobsy push --force data/model.bin
-  data/model.bin (15 B) - pushed
+  ↑  data/model.bin (15 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -75,7 +75,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin (15 B) - pulled
+  ↓  data/model.bin (15 B)
 Done: 1 pulled.
 ? 0
 ```

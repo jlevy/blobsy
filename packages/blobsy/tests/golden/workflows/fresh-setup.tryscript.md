@@ -63,8 +63,8 @@ $ git add -A && git commit -q -m "Track data files with blobsy"
 
 ```console
 $ blobsy push
-  data/dataset.csv (21 B) - pushed
-  data/model.bin (13 B) - pushed
+  ↑  data/dataset.csv (32 B)
+  ↑  data/model.bin (13 B)
 Done: 2 pushed.
 ? 0
 ```
@@ -105,8 +105,8 @@ $ rm data/model.bin data/dataset.csv
 
 ```console
 $ blobsy pull
-  data/dataset.csv (12 B) - pulled
-  data/model.bin (13 B) - pulled
+  ↓  data/dataset.csv (12 B)
+  ↓  data/model.bin (13 B)
 Done: 2 pulled.
 ? 0
 ```

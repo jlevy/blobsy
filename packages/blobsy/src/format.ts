@@ -79,12 +79,15 @@ export function formatTransferSummary(results: TransferResult[]): string {
   const lines: string[] = [];
 
   for (const r of succeeded) {
-    const size = r.bytesTransferred != null ? ` (${formatSize(r.bytesTransferred)})` : '';
-    lines.push(`  ${r.action === 'push' ? '\u2191' : '\u2193'}  ${r.path}${size}`);
+    lines.push(
+      r.action === 'push'
+        ? formatPushResult(r.path, r.bytesTransferred)
+        : formatPullResult(r.path, r.bytesTransferred),
+    );
   }
 
   for (const r of failed) {
-    lines.push(`  \u2717  ${r.path}: ${r.error ?? 'unknown error'}`);
+    lines.push(formatTransferFail(r.path, r.error ?? 'unknown error'));
   }
 
   if (succeeded.length > 0 || failed.length > 0) {
