@@ -23,9 +23,22 @@ before: |
 $ blobsy doctor --json
 {
   "schema_version": "0.1",
+  "status": {
+    "files": [
+      {
+        "path": "data/model.bin",
+        "state": "synced",
+        "details": "synced",
+        "size": 13
+      }
+    ]
+  },
   "issues": [],
   "summary": {
     "total": 0,
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
     "fixed": 0,
     "unfixed": 0
   }
@@ -44,15 +57,30 @@ $ echo "" > data/.gitignore
 $ blobsy doctor --json
 {
   "schema_version": "0.1",
+  "status": {
+    "files": [
+      {
+        "path": "data/model.bin",
+        "state": "synced",
+        "details": "synced",
+        "size": 13
+      }
+    ]
+  },
   "issues": [
     {
       "type": "gitignore",
+      "severity": "error",
       "message": "data/model.bin: missing from .gitignore",
-      "fixed": false
+      "fixed": false,
+      "fixable": true
     }
   ],
   "summary": {
     "total": 1,
+    "errors": 1,
+    "warnings": 0,
+    "info": 0,
     "fixed": 0,
     "unfixed": 1
   }

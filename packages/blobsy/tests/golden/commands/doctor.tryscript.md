@@ -20,6 +20,10 @@ before: |
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```
@@ -35,6 +39,11 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== INTEGRITY ===
   ✗  data/model.bin: missing from .gitignore
 
 1 issue found. Run with --fix to attempt repairs.
@@ -45,6 +54,11 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
 All issues fixed.
@@ -63,6 +77,10 @@ model.bin
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```
@@ -82,6 +100,12 @@ Added data/orphan.bin to .gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ?  data/orphan.bin  file missing (13 B)
+
+2 tracked files: 1 synced, 1 missing_file
+
+=== INTEGRITY ===
   ✗  data/orphan.bin: .bref exists but local file missing and no remote_key
 
 1 issue found. Run with --fix to attempt repairs.
@@ -104,6 +128,12 @@ $ rm -rf .blobsy
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
+=== INTEGRITY ===
   ✗  .blobsy/ directory missing
 
 1 issue found. Run with --fix to attempt repairs.
@@ -112,6 +142,12 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
+=== INTEGRITY ===
   ✓ Fixed  Created .blobsy/ directory
 
 All issues fixed.
@@ -120,6 +156,11 @@ All issues fixed.
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
 No issues found.
 ? 0
 ```

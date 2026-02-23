@@ -21,6 +21,10 @@ before: |
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```
@@ -36,6 +40,11 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== INTEGRITY ===
   ✗  data/model.bin: missing from .gitignore
 
 1 issue found. Run with --fix to attempt repairs.
@@ -46,6 +55,11 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
 All issues fixed.
@@ -64,6 +78,10 @@ model.bin
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```

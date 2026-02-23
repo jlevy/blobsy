@@ -12,7 +12,7 @@ import type { Command } from 'commander';
 
 import { getConfigPath, resolveConfig } from './config.js';
 import { ensureDir } from './fs-utils.js';
-import { addGitignoreEntry } from './gitignore.js';
+import { addGitignoreEntry, readBlobsyBlock } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
@@ -29,8 +29,12 @@ import { pushFile, pullFile, blobExists, runHealthCheck } from './transfer.js';
 import {
   formatCheckFail,
   formatCheckFixed,
+  formatCheckPass,
+  formatCheckWarn,
   formatCount,
   formatDryRun,
+  formatFileState,
+  formatHeading,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
@@ -40,7 +44,7 @@ import {
   formatWarning,
   OUTPUT_SYMBOLS,
 } from './format.js';
-import type { GlobalOptions, TransferResult } from './types.js';
+import type { DoctorIssue, FileStateSymbol, GlobalOptions, TransferResult } from './types.js';
 import { ValidationError, BREF_EXTENSION, FILE_STATE_SYMBOLS } from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
@@ -501,6 +505,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   const globalOpts = getGlobalOpts(cmd);
   const useJson = Boolean(opts.json) || globalOpts.json;
   const fix = Boolean(opts.fix);
+  const verbose = globalOpts.verbose;
   const repoRoot = findRepoRoot();
 
   if (globalOpts.dryRun && fix) {
@@ -511,113 +516,295 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
     }
     return;
   }
-  const config = await resolveConfig(repoRoot, repoRoot);
 
-  const issues: { type: string; message: string; fixed: boolean }[] = [];
+  const issues: DoctorIssue[] = [];
 
-  const configPath = getConfigPath(repoRoot);
-  if (!existsSync(configPath)) {
-    issues.push({ type: 'config', message: 'No .blobsy.yml found', fixed: false });
+  // --- Resolve config (may fail) ---
+  let config: Awaited<ReturnType<typeof resolveConfig>> | null = null;
+  try {
+    config = await resolveConfig(repoRoot, repoRoot);
+  } catch (err) {
+    issues.push({
+      type: 'config',
+      severity: 'error',
+      message: `Config error: ${err instanceof Error ? err.message : String(err)}`,
+      fixed: false,
+      fixable: false,
+    });
   }
 
-  const blobsyDir = join(repoRoot, '.blobsy');
-  if (!existsSync(blobsyDir)) {
-    if (fix) {
-      await ensureDir(blobsyDir);
-      issues.push({ type: 'directory', message: 'Created .blobsy/ directory', fixed: true });
+  // --- STATUS section ---
+  const files = resolveTrackedFiles([], repoRoot);
+  const fileStates = await computeFileStates(files);
+
+  if (!useJson) {
+    if (fileStates.length > 0) {
+      for (const r of fileStates) {
+        console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details, r.size));
+      }
+      console.log('');
+      const stateCounts: Record<string, number> = {};
+      for (const r of fileStates) {
+        stateCounts[r.state] = (stateCounts[r.state] ?? 0) + 1;
+      }
+      const stateParts = Object.entries(stateCounts)
+        .filter(([, v]) => v > 0)
+        .map(([state, count]) => `${count} ${state}`);
+      console.log(`${formatCount(fileStates.length, 'tracked file')}: ${stateParts.join(', ')}`);
+      console.log('');
     } else {
-      issues.push({ type: 'directory', message: '.blobsy/ directory missing', fixed: false });
+      console.log('No tracked files found.');
+      console.log('');
     }
   }
 
-  const allBrefs = findBrefFiles(repoRoot, repoRoot);
-  for (const relPath of allBrefs) {
-    const absPath = join(repoRoot, relPath);
-    const refPath = join(repoRoot, brefPath(relPath));
+  // --- CONFIGURATION section ---
+  const configIssues: DoctorIssue[] = [];
+  try {
+    const configPath = getConfigPath(repoRoot);
+    if (!existsSync(configPath)) {
+      configIssues.push({
+        type: 'config',
+        severity: 'error',
+        message: 'No .blobsy.yml found',
+        fixed: false,
+        fixable: false,
+      });
+    } else if (verbose) {
+      configIssues.push({
+        type: 'config',
+        severity: 'info',
+        message: '.blobsy.yml valid',
+        fixed: false,
+        fixable: false,
+      });
+    }
+  } catch (err) {
+    configIssues.push({
+      type: 'config',
+      severity: 'error',
+      message: `Config check error: ${err instanceof Error ? err.message : String(err)}`,
+      fixed: false,
+      fixable: false,
+    });
+  }
+  renderSection('CONFIGURATION', configIssues, verbose, useJson);
+  issues.push(...configIssues);
 
-    if (!existsSync(absPath) && existsSync(refPath)) {
-      const ref = await readBref(refPath);
-      if (!ref.remote_key) {
-        issues.push({
-          type: 'orphan',
-          message: `${relPath}: .bref exists but local file missing and no remote_key`,
+  // --- INTEGRITY section ---
+  const integrityIssues: DoctorIssue[] = [];
+  try {
+    const blobsyDir = join(repoRoot, '.blobsy');
+    if (!existsSync(blobsyDir)) {
+      if (fix) {
+        await ensureDir(blobsyDir);
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: 'Created .blobsy/ directory',
+          fixed: true,
+          fixable: true,
+        });
+      } else {
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: '.blobsy/ directory missing',
           fixed: false,
+          fixable: true,
         });
       }
     }
-  }
 
-  for (const relPath of allBrefs) {
-    const absPath = join(repoRoot, relPath);
-    const fileName = basename(absPath);
-    const fileDir = dirname(absPath);
-    const gitignorePath = join(fileDir, '.gitignore');
+    const allBrefs = findBrefFiles(repoRoot, repoRoot);
 
-    if (existsSync(join(repoRoot, brefPath(relPath)))) {
-      const { readBlobsyBlock } = await import('./gitignore.js');
-      const entries = await readBlobsyBlock(gitignorePath);
-      if (!entries.includes(fileName)) {
-        if (fix) {
-          await addGitignoreEntry(fileDir, fileName);
-          issues.push({
-            type: 'gitignore',
-            message: `${relPath}: added missing .gitignore entry`,
-            fixed: true,
-          });
-        } else {
-          issues.push({
-            type: 'gitignore',
-            message: `${relPath}: missing from .gitignore`,
+    // Check for orphaned .bref files
+    for (const relPath of allBrefs) {
+      const absPath = join(repoRoot, relPath);
+      const refPath = join(repoRoot, brefPath(relPath));
+
+      if (!existsSync(absPath) && existsSync(refPath)) {
+        try {
+          const ref = await readBref(refPath);
+          if (!ref.remote_key) {
+            integrityIssues.push({
+              type: 'orphan',
+              severity: 'error',
+              message: `${relPath}: .bref exists but local file missing and no remote_key`,
+              fixed: false,
+              fixable: false,
+            });
+          }
+        } catch (err) {
+          integrityIssues.push({
+            type: 'bref',
+            severity: 'error',
+            message: `${relPath}: invalid .bref file: ${err instanceof Error ? err.message : String(err)}`,
             fixed: false,
+            fixable: false,
           });
         }
       }
     }
-  }
 
-  try {
-    await runHealthCheck(config, repoRoot);
+    // Check for missing .gitignore entries
+    for (const relPath of allBrefs) {
+      const absPath = join(repoRoot, relPath);
+      const fileName = basename(absPath);
+      const fileDir = dirname(absPath);
+      const gitignorePath = join(fileDir, '.gitignore');
+
+      if (existsSync(join(repoRoot, brefPath(relPath)))) {
+        const entries = await readBlobsyBlock(gitignorePath);
+        if (!entries.includes(fileName)) {
+          if (fix) {
+            await addGitignoreEntry(fileDir, fileName);
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'error',
+              message: `${relPath}: added missing .gitignore entry`,
+              fixed: true,
+              fixable: true,
+            });
+          } else {
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'error',
+              message: `${relPath}: missing from .gitignore`,
+              fixed: false,
+              fixable: true,
+            });
+          }
+        }
+      }
+    }
   } catch (err) {
-    issues.push({
-      type: 'backend',
-      message: `Backend health check failed: ${err instanceof Error ? err.message : String(err)}`,
+    integrityIssues.push({
+      type: 'integrity',
+      severity: 'error',
+      message: `Integrity check error: ${err instanceof Error ? err.message : String(err)}`,
       fixed: false,
+      fixable: false,
     });
   }
+  renderSection('INTEGRITY', integrityIssues, verbose, useJson);
+  issues.push(...integrityIssues);
 
+  // --- BACKEND section ---
+  const backendIssues: DoctorIssue[] = [];
+  if (config) {
+    try {
+      await runHealthCheck(config, repoRoot);
+      if (verbose) {
+        backendIssues.push({
+          type: 'backend',
+          severity: 'info',
+          message: 'Backend reachable and writable',
+          fixed: false,
+          fixable: false,
+        });
+      }
+    } catch (err) {
+      backendIssues.push({
+        type: 'backend',
+        severity: 'error',
+        message: `Health check failed: ${err instanceof Error ? err.message : String(err)}`,
+        fixed: false,
+        fixable: false,
+      });
+    }
+  }
+  renderSection('BACKEND', backendIssues, verbose, useJson);
+  issues.push(...backendIssues);
+
+  // --- Output ---
   if (useJson) {
+    const severityCounts = { errors: 0, warnings: 0, info: 0 };
+    for (const i of issues) {
+      if (i.severity === 'error') {
+        severityCounts.errors++;
+      } else if (i.severity === 'warning') {
+        severityCounts.warnings++;
+      } else {
+        severityCounts.info++;
+      }
+    }
     console.log(
       formatJson({
-        issues,
+        status: {
+          files: fileStates.map((r) => ({
+            path: r.path,
+            state: r.state,
+            details: r.details,
+            ...(r.size != null ? { size: r.size } : {}),
+          })),
+        },
+        issues: issues.map((i) => ({
+          type: i.type,
+          severity: i.severity,
+          message: i.message,
+          fixed: i.fixed,
+          fixable: i.fixable,
+        })),
         summary: {
           total: issues.length,
+          ...severityCounts,
           fixed: issues.filter((i) => i.fixed).length,
           unfixed: issues.filter((i) => !i.fixed).length,
         },
       }),
     );
   } else {
-    if (issues.length === 0) {
+    const actionableIssues = issues.filter((i) => i.severity !== 'info' || i.fixed);
+    if (actionableIssues.length === 0) {
       console.log('No issues found.');
     } else {
-      for (const issue of issues) {
-        console.log(issue.fixed ? formatCheckFixed(issue.message) : formatCheckFail(issue.message));
-      }
-      console.log('');
-      const unfixed = issues.filter((i) => !i.fixed).length;
+      const unfixed = issues.filter((i) => !i.fixed && i.severity !== 'info').length;
       if (unfixed > 0) {
         console.log(
           `${formatCount(unfixed, 'issue')} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
         );
-      } else {
+      } else if (issues.some((i) => i.fixed)) {
         console.log('All issues fixed.');
       }
     }
   }
 
-  if (issues.some((i) => !i.fixed)) {
+  if (issues.some((i) => !i.fixed && i.severity !== 'info')) {
     process.exitCode = 1;
   }
+}
+
+/** Render a doctor section with heading (non-JSON only). */
+function renderSection(
+  name: string,
+  sectionIssues: DoctorIssue[],
+  verbose: boolean,
+  useJson: boolean,
+): void {
+  if (useJson) {
+    return;
+  }
+
+  // In non-verbose mode, skip sections with no failures/warnings
+  const hasProblems = sectionIssues.some((i) => i.severity !== 'info' || i.fixed);
+  if (!verbose && !hasProblems) {
+    return;
+  }
+
+  console.log(formatHeading(name));
+  for (const issue of sectionIssues) {
+    if (issue.fixed) {
+      console.log(formatCheckFixed(issue.message));
+    } else if (issue.severity === 'error') {
+      console.log(formatCheckFail(issue.message));
+    } else if (issue.severity === 'warning') {
+      console.log(formatCheckWarn(issue.message));
+    } else if (verbose) {
+      console.log(formatCheckPass(issue.message));
+    }
+  }
+  console.log('');
 }
 
 const HOOK_TYPES = [
