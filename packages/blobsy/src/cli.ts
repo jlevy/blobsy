@@ -111,6 +111,16 @@ function createProgram(): Command {
     .showHelpAfterError('(use --help for usage, or blobsy docs for full guide)');
 
   program
+    .command('setup')
+    .description('Set up blobsy in a git repo (wraps init + agent integration)')
+    .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
+    .option('--auto', 'Non-interactive setup (recommended)')
+    .option('--region <region>', 'AWS region (for S3 backends)')
+    .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
+    .option('--no-hooks', 'Skip git hook installation')
+    .action(wrapAction(handleSetup));
+
+  program
     .command('init')
     .description('Initialize blobsy in a git repo with a backend URL')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
@@ -413,6 +423,31 @@ function wrapAction(handler: ActionHandler): ActionHandler {
 }
 
 // --- Command Handlers ---
+
+async function handleSetup(
+  url: string,
+  opts: Record<string, unknown>,
+  cmd: Command,
+): Promise<void> {
+  const globalOpts = getGlobalOpts(cmd);
+
+  if (!opts.auto) {
+    throw new UserError('--auto flag is required (interactive setup is not yet supported)');
+  }
+
+  // Delegate to init
+  await handleInit(url, opts, cmd);
+
+  // Show next steps (unless quiet/json)
+  if (!globalOpts.quiet && !globalOpts.json) {
+    console.log('');
+    console.log('Setup complete! Next steps:');
+    console.log('  blobsy track <file>    Track files with .bref pointers');
+    console.log('  blobsy push            Upload to backend');
+    console.log('  blobsy status          Check sync state');
+    console.log('  blobsy skill           Quick reference for AI agents');
+  }
+}
 
 async function handleInit(url: string, opts: Record<string, unknown>, cmd: Command): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);

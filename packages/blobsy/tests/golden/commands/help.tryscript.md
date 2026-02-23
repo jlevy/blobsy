@@ -20,6 +20,8 @@ Options:
   -h, --help                   Display help for command
 
 Commands:
+  setup [options] <url>        Set up blobsy in a git repo (wraps init + agent
+                               integration)
   init [options] <url>         Initialize blobsy in a git repo with a backend
                                URL
   add [options] <path...>      Track files and stage changes to git

@@ -30,7 +30,7 @@ echo "Total golden test files: $FILE_COUNT"
 # List commands and check coverage (matches blobsy --help Commands section)
 echo ""
 echo "Command coverage check:"
-COMMANDS="init track untrack rm mv push pull sync status verify config health doctor hooks check-unpushed pre-push-check skill"
+COMMANDS="setup init track untrack rm mv push pull sync status verify config health doctor hooks check-unpushed pre-push-check skill"
 for cmd in $COMMANDS; do
   FILES=$(grep -rl "blobsy $cmd" "$TESTS_DIR" 2>/dev/null | wc -l | tr -d ' ')
   if [ "$FILES" -eq 0 ]; then
