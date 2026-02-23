@@ -40,7 +40,8 @@ Commands:
   config [key] [value]         Show, get, or set .blobsy.yml values
   health                       Test backend connectivity and permissions
   doctor [options]             Run diagnostics and optionally auto-fix issues
-  hooks <action>               Install or uninstall the blobsy pre-commit hook
+  hooks <action>               Install or uninstall blobsy git hooks
+                               (pre-commit, pre-push)
   check-unpushed               List committed .bref files whose blobs are not
                                yet pushed
   pre-push-check               CI guard: fail if any .bref is missing its remote
@@ -278,6 +279,7 @@ Arguments:
 Options:
   --region <region>      AWS region (for S3 backends)
   --endpoint <endpoint>  Custom S3-compatible endpoint URL
+  --no-hooks             Skip git hook installation
   -h, --help             Display help for command
 
 Global Options:
@@ -367,7 +369,7 @@ Global Options:
 $ blobsy hooks --help
 Usage: blobsy hooks [options] <action>
 
-Install or uninstall the blobsy pre-commit hook
+Install or uninstall blobsy git hooks (pre-commit, pre-push)
 
 Arguments:
   action      install or uninstall

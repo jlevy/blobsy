@@ -34,7 +34,7 @@ import {
   formatSize,
 } from './format.js';
 import type { GlobalOptions, TransferResult } from './types.js';
-import { ValidationError } from './types.js';
+import { ValidationError, BREF_EXTENSION } from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -559,6 +559,11 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   }
 }
 
+const HOOK_TYPES = [
+  { name: 'pre-commit', gitEvent: 'pre-commit', bypassCmd: 'git commit --no-verify' },
+  { name: 'pre-push', gitEvent: 'pre-push', bypassCmd: 'git push --no-verify' },
+] as const;
+
 export async function handleHooks(
   action: string,
   _opts: Record<string, unknown>,
@@ -566,13 +571,15 @@ export async function handleHooks(
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
-  const hookPath = join(repoRoot, '.git', 'hooks', 'pre-commit');
 
   if (globalOpts.dryRun) {
+    const actions = HOOK_TYPES.map((h) => `${action} ${h.name} hook`);
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([`${action} pre-commit hook`]));
+      console.log(formatJsonDryRun(actions));
     } else {
-      console.log(formatDryRun(`${action} pre-commit hook`));
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
     }
     return;
   }
@@ -609,33 +616,42 @@ export async function handleHooks(
       }
     }
 
-    const hookContent = `#!/bin/sh
+    for (const hook of HOOK_TYPES) {
+      const hookPath = join(hookDir, hook.name);
+      const hookContent = `#!/bin/sh
 # Installed by: blobsy hooks install
-# To bypass: git commit --no-verify
-exec "${blobsyPath}" hook pre-commit
+# To bypass: ${hook.bypassCmd}
+exec "${blobsyPath}" hook ${hook.gitEvent}
 `;
-    await writeFs(hookPath, hookContent);
-    await chmod(hookPath, 0o755);
+      await writeFs(hookPath, hookContent);
+      await chmod(hookPath, 0o755);
 
-    if (!globalOpts.quiet) {
-      console.log('Installed pre-commit hook.');
-      if (blobsyPath !== 'blobsy') {
-        console.log(`  Using executable: ${blobsyPath}`);
+      if (!globalOpts.quiet) {
+        console.log(`Installed ${hook.name} hook.`);
       }
     }
+
+    if (!globalOpts.quiet && blobsyPath !== 'blobsy') {
+      console.log(`  Using executable: ${blobsyPath}`);
+    }
   } else if (action === 'uninstall') {
-    if (existsSync(hookPath)) {
-      const content = await readFile(hookPath, 'utf-8');
-      if (content.includes('blobsy')) {
-        await unlink(hookPath);
-        if (!globalOpts.quiet) {
-          console.log('Uninstalled pre-commit hook.');
+    for (const hook of HOOK_TYPES) {
+      const hookPath = join(repoRoot, '.git', 'hooks', hook.name);
+      if (existsSync(hookPath)) {
+        const content = await readFile(hookPath, 'utf-8');
+        if (content.includes('blobsy')) {
+          await unlink(hookPath);
+          if (!globalOpts.quiet) {
+            console.log(`Uninstalled ${hook.name} hook.`);
+          }
+        } else if (!globalOpts.quiet) {
+          console.log(
+            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy.`,
+          );
         }
       } else if (!globalOpts.quiet) {
-        console.log('Pre-commit hook not managed by blobsy.');
+        console.log(`No ${hook.name} hook found.`);
       }
-    } else if (!globalOpts.quiet) {
-      console.log('No pre-commit hook found.');
     }
   } else {
     throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
@@ -725,14 +741,102 @@ export async function handlePrePushCheck(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
+async function handlePreCommitHook(repoRoot: string): Promise<void> {
+  // Find staged .bref files
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  })
+    .trim()
+    .split('\n')
+    .filter((f) => f.endsWith(BREF_EXTENSION));
+
+  if (staged.length === 0) return;
+
+  const failures: string[] = [];
+  for (const brefRelPath of staged) {
+    const brefAbsPath = join(repoRoot, brefRelPath);
+    const ref = await readBref(brefAbsPath);
+    const dataPath = stripBrefExtension(brefAbsPath);
+
+    if (!existsSync(dataPath)) {
+      // Data file missing is OK — it may have been gitignored and deleted
+      continue;
+    }
+
+    const actualHash = await computeHash(dataPath);
+    if (actualHash !== ref.hash) {
+      failures.push(stripBrefExtension(brefRelPath));
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error('blobsy pre-commit: hash mismatch detected.');
+    console.error('The following files were modified after tracking:\n');
+    for (const f of failures) {
+      console.error(`  ${f}`);
+    }
+    console.error('\nRe-run `blobsy track` (or `blobsy add`) to update the .bref files.');
+    console.error('To bypass: git commit --no-verify');
+    process.exitCode = 1;
+  }
+}
+
+async function handlePrePushHook(repoRoot: string): Promise<void> {
+  const config = await resolveConfig(repoRoot, repoRoot);
+  const allBrefs = findBrefFiles(repoRoot, repoRoot);
+  const unpushed: string[] = [];
+
+  for (const relPath of allBrefs) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
+    if (!ref.remote_key) {
+      unpushed.push(relPath);
+    }
+  }
+
+  if (unpushed.length === 0) return;
+
+  console.log(
+    `blobsy pre-push: uploading ${unpushed.length} blob${unpushed.length === 1 ? '' : 's'}...`,
+  );
+
+  // Push each unpushed blob
+  const cacheDir = getStatCacheDir(repoRoot);
+  for (const relPath of unpushed) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
+    const absPath = join(repoRoot, relPath);
+
+    const result = await pushFile(absPath, relPath, ref, config, repoRoot);
+
+    if (result.success && result.refUpdates) {
+      const updatedRef = { ...ref, ...result.refUpdates };
+      await writeBref(refPath, updatedRef);
+      if (existsSync(absPath)) {
+        const entry = await createCacheEntry(absPath, relPath, updatedRef.hash);
+        await writeCacheEntry(cacheDir, entry);
+      }
+    }
+  }
+
+  console.log('blobsy pre-push: all blobs uploaded.');
+}
+
 export async function handleHook(
   type: string,
   _opts: Record<string, unknown>,
   _cmd: Command,
 ): Promise<void> {
+  if (process.env.BLOBSY_NO_HOOKS) return;
+
+  const repoRoot = findRepoRoot();
+
   if (type === 'pre-commit') {
-    return;
+    await handlePreCommitHook(repoRoot);
+  } else if (type === 'pre-push') {
+    await handlePrePushHook(repoRoot);
+  } else {
+    throw new ValidationError(`Unknown hook type: ${type}`);
   }
-  throw new ValidationError(`Unknown hook type: ${type}`);
 }

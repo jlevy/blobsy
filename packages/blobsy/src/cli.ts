@@ -107,6 +107,7 @@ function createProgram(): Command {
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
     .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
+    .option('--no-hooks', 'Skip git hook installation')
     .action(wrapAction(handleInit));
 
   program
@@ -213,7 +214,7 @@ function createProgram(): Command {
 
   program
     .command('hooks')
-    .description('Install or uninstall the blobsy pre-commit hook')
+    .description('Install or uninstall blobsy git hooks (pre-commit, pre-push)')
     .argument('<action>', 'install or uninstall')
     .action(wrapAction(handleHooks));
 
@@ -230,7 +231,7 @@ function createProgram(): Command {
   program
     .command('hook', { hidden: true })
     .description('Internal hook commands')
-    .argument('<type>', 'Hook type (pre-commit)')
+    .argument('<type>', 'Hook type (pre-commit, pre-push)')
     .action(wrapAction(handleHook));
 
   program
@@ -509,49 +510,57 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     }
   }
 
-  // Install stub pre-commit hook
-  await installStubHook(repoRoot, globalOpts);
+  // Install git hooks (pre-commit and pre-push)
+  if (!opts.noHooks) {
+    await installHooks(repoRoot, globalOpts);
+  }
 }
 
-async function installStubHook(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
-  const hookDir = join(repoRoot, '.git', 'hooks');
-  const hookPath = join(hookDir, 'pre-commit');
+const HOOKS = [
+  { name: 'pre-commit', gitEvent: 'pre-commit' },
+  { name: 'pre-push', gitEvent: 'pre-push' },
+] as const;
 
-  // Skip if BLOBSY_NO_HOOKS is set (for testing)
-  if (process.env.BLOBSY_NO_HOOKS) {
-    return;
-  }
+async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  if (process.env.BLOBSY_NO_HOOKS) return;
+
+  const hookDir = join(repoRoot, '.git', 'hooks');
 
   // Check for hook managers
   if (existsSync(join(repoRoot, 'lefthook.yml')) || existsSync(join(repoRoot, '.husky'))) {
     if (!globalOpts.quiet && !globalOpts.json) {
-      console.log('Hook manager detected. Add blobsy to your hook configuration.');
+      console.log('Hook manager detected. Add blobsy hooks to your hook configuration:');
+      console.log('  pre-commit: blobsy hook pre-commit');
+      console.log('  pre-push:   blobsy hook pre-push');
     }
     return;
   }
 
-  if (existsSync(hookPath)) {
-    const content = await readFile(hookPath, 'utf-8');
-    if (!content.includes('blobsy')) {
-      if (!globalOpts.quiet && !globalOpts.json) {
-        console.log('Existing pre-commit hook found. Add blobsy manually.');
-      }
-      return;
-    }
-  }
-
   await ensureDir(hookDir);
   const { writeFile: writeFs, chmod } = await import('node:fs/promises');
-  const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
-# To bypass: git commit --no-verify
-exec blobsy hook pre-commit
-`;
-  await writeFs(hookPath, hookContent);
-  await chmod(hookPath, 0o755);
 
-  if (!globalOpts.quiet && !globalOpts.json) {
-    console.log('Installed pre-commit hook.');
+  for (const hook of HOOKS) {
+    const hookPath = join(hookDir, hook.name);
+
+    if (existsSync(hookPath)) {
+      const content = await readFile(hookPath, 'utf-8');
+      if (!content.includes('blobsy')) {
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(
+            `Existing ${hook.name} hook found. Add manually: blobsy hook ${hook.gitEvent}`,
+          );
+        }
+        continue;
+      }
+    }
+
+    const hookContent = `#!/bin/sh\n# Installed by: blobsy hooks install\n# To bypass: git ${hook.name === 'pre-commit' ? 'commit' : 'push'} --no-verify\nexec blobsy hook ${hook.gitEvent}\n`;
+    await writeFs(hookPath, hookContent);
+    await chmod(hookPath, 0o755);
+
+    if (!globalOpts.quiet && !globalOpts.json) {
+      console.log(`Installed ${hook.name} hook.`);
+    }
   }
 }
 
