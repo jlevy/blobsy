@@ -44,6 +44,7 @@ Error: Not tracked: nonexistent.bin (no .bref file found)
 ```console
 $ blobsy init 2>&1
 error: missing required argument 'url'
+(use --help for usage, or blobsy docs for full guide)
 ? 1
 ```
 

@@ -13,8 +13,8 @@ import { readFile, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Help } from 'commander';
 import { Command, Option } from 'commander';
+import colors from 'picocolors';
 
 import { parseBackendUrl, validateBackendUrl, resolveLocalPath } from './backend-url.js';
 import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
@@ -93,80 +93,13 @@ function createProgram(): Command {
         .preset(true),
     )
     .configureHelp({
-      helpWidth: 80,
-      showGlobalOptions: false,
-      formatHelp: (cmd: Command, helper: Help) => {
-        const termWidth = 25;
-        const lines: string[] = [];
-
-        // Usage
-        lines.push(`Usage: ${helper.commandUsage(cmd)}`);
-        lines.push('');
-
-        // Description
-        const desc = helper.commandDescription(cmd);
-        if (desc) {
-          lines.push(desc);
-          lines.push('');
-        }
-
-        // Arguments
-        const args = helper.visibleArguments(cmd);
-        if (args.length > 0) {
-          lines.push('Arguments:');
-          for (const arg of args) {
-            const term = `  ${arg.name()}`;
-            const desc = arg.description;
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Options
-        const opts = helper.visibleOptions(cmd);
-        if (opts.length > 0) {
-          lines.push('Options:');
-          for (const opt of opts) {
-            const flags = opt.flags;
-            const desc = opt.description;
-            const term = `  ${flags}`;
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Commands
-        const cmds = helper.visibleCommands(cmd);
-        if (cmds.length > 0) {
-          lines.push('Commands:');
-          for (const sub of cmds) {
-            const name = sub.name();
-            const argParts = sub.registeredArguments.map((a) => {
-              const suffix = a.variadic ? '...' : '';
-              return a.required ? `<${a.name()}${suffix}>` : `[${a.name()}${suffix}]`;
-            });
-            const argsStr = argParts.join(' ');
-            const term = `  ${name}${argsStr ? ' ' + argsStr : ''}`;
-            const desc = name === 'help' ? 'Display help for command' : sub.description();
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Epilog
-        if (cmd.name() === 'blobsy') {
-          lines.push('Get started:');
-          lines.push('  blobsy init s3://bucket/prefix/');
-          lines.push('  blobsy track <file>');
-          lines.push('  blobsy push');
-          lines.push('');
-          lines.push('Docs: https://github.com/jlevy/blobsy');
-          lines.push('');
-        }
-
-        return lines.join('\n');
-      },
-    });
+      helpWidth: Math.min(88, process.stdout.columns ?? 80),
+      showGlobalOptions: true,
+      styleTitle: (str: string) => colors.bold(colors.cyan(str)),
+      styleCommandText: (str: string) => colors.green(str),
+      styleOptionText: (str: string) => colors.yellow(str),
+    })
+    .showHelpAfterError('(use --help for usage, or blobsy docs for full guide)');
 
   program
     .command('init')
@@ -377,6 +310,24 @@ function createProgram(): Command {
         console.log(opts.brief ? SKILL_BRIEF : PRIME_TEXT);
       }),
     );
+
+  program.addHelpText('after', () => {
+    return [
+      '',
+      colors.bold('Get started:'),
+      `  ${colors.green('blobsy init')} s3://bucket/prefix/`,
+      `  ${colors.green('blobsy add')} <file-or-dir>`,
+      `  ${colors.green('blobsy push')}`,
+      '',
+      colors.bold('Learn more:'),
+      `  ${colors.green('blobsy readme')}              Overview and quick start`,
+      `  ${colors.green('blobsy docs')}                Full user guide`,
+      `  ${colors.green('blobsy docs')} ${colors.yellow('<topic>')}        Specific topic (try ${colors.yellow('"backends"')}, ${colors.yellow('"compression"')})`,
+      `  ${colors.green('blobsy docs --list')}          List all topics`,
+      '',
+      `${colors.dim('https://github.com/jlevy/blobsy')}`,
+    ].join('\n');
+  });
 
   return program;
 }
