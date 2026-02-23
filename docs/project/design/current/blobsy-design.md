@@ -1298,8 +1298,9 @@ See
 [Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
 for details.
 
-Also installs a pre-commit hook that auto-pushes blobs when committing `.bref` files.
-See [Conflict Detection](#conflict-detection) and `blobsy hooks` below.
+Also installs two git hooks: a pre-commit hook that validates `.bref` hashes, and a
+pre-push hook that auto-uploads blobs before git refs are pushed.
+See `blobsy hooks` below.
 
 ### `blobsy track`
 
@@ -1946,20 +1947,40 @@ $ blobsy config backend          # show current backend
 
 ### `blobsy hooks`
 
-Manage the pre-commit hook that auto-pushes blobs when committing `.bref` files.
+Manage the blobsy git hooks (pre-commit and pre-push).
+
+Blobsy installs two hooks:
+
+| Hook | When | What it does | Why it’s automatic |
+| --- | --- | --- | --- |
+| **pre-commit** | `git commit` | Verifies staged `.bref` files match their local files (catches modifications after tracking) | Fast local check; prevents committing stale refs |
+| **pre-push** | `git push` | Auto-runs `blobsy push` to upload unpushed blobs | **Prevents data loss**: without this, other users get `.bref` pointers with no blobs to download |
+
+**Why push is hooked but pull is not:** Pushing blobs is a safety requirement — if
+`.bref` files reach the remote without their corresponding blobs, other users experience
+data loss (they cannot download the files).
+The cost of auto-push is bounded by what you’re committing.
+Pulling, by contrast, has an unbounded cost (network time, disk space for potentially
+large files) and not every user needs all blobs immediately.
+Pull remains an explicit `blobsy pull` operation.
+See the deferred features appendix for discussion of a future post-merge auto-pull hook.
 
 ```bash
 $ blobsy hooks install
 ✓ Installed pre-commit hook (.git/hooks/pre-commit)
+✓ Installed pre-push hook (.git/hooks/pre-push)
 
 $ blobsy hooks uninstall
 ✓ Removed pre-commit hook
+✓ Removed pre-push hook
 ```
 
-Installed automatically by `blobsy init`. To bypass the hook for a specific commit:
+Installed automatically by `blobsy init` (skip with `--no-hooks`). To bypass:
 
 ```bash
-$ git commit --no-verify
+$ git commit --no-verify   # skip pre-commit
+$ git push --no-verify     # skip pre-push
+$ BLOBSY_NO_HOOKS=1 git commit  # disable via environment
 ```
 
 ### `blobsy check-unpushed`
@@ -2013,9 +2034,10 @@ SETUP
   blobsy health                        Check transport backend health (credentials, connectivity)
   blobsy doctor                        Comprehensive diagnostics and health check (Deferred: enhanced)
        [--fix]                       Auto-fix detected issues
-  blobsy hooks install|uninstall       Manage pre-commit hook (auto-push on commit)
+  blobsy hooks install|uninstall       Manage git hooks (pre-commit validation, pre-push upload)
 
 TRACKING
+  blobsy add <path>...                 Track files and stage changes to git (recommended)
   blobsy track <path>...               Start tracking a file or directory (creates/updates .bref)
   blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .bref to trash)
   blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
@@ -2034,6 +2056,10 @@ SYNC
 
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
+
+DOCUMENTATION
+  blobsy readme                        Display the README
+  blobsy docs [topic] [--list|--brief] Display user documentation
 
 AGENT INTEGRATION
   blobsy skill [--brief]               Output skill documentation for AI agents
@@ -2748,9 +2774,10 @@ but doesn’t run `blobsy push`. Other users pull from git, see the updated ref,
 Recovery: the original user runs `blobsy push` to upload the data that matches the
 committed ref.
 
-Prevention: the pre-commit hook (installed by `blobsy init`) auto-pushes blobs when
-committing `.bref` files, preventing this scenario.
-See [Conflict Detection](#conflict-detection).
+Prevention: the pre-push hook (installed by `blobsy init`) auto-uploads blobs before git
+refs are pushed, ensuring blobs and refs arrive at the remote together.
+The pre-commit hook separately validates that staged `.bref` hashes still match their
+local files, catching modifications after tracking.
 
 Detection: `blobsy pull` errors with “missing (no remote!)”. `blobsy check-unpushed`
 finds all such cases.
@@ -2767,8 +2794,8 @@ working tree. If lost, re-run `blobsy track` then `blobsy push`.
 **File modified after tracking, before commit.** User runs `blobsy track`, then modifies
 the file before committing.
 The `.bref` hash no longer matches the file.
-The pre-commit hook’s sanity check catches this: `blobsy push` fails with a hash
-mismatch error, blocking the commit.
+The pre-commit hook catches this: it verifies that staged `.bref` hashes match the local
+files, blocking the commit with a hash mismatch error.
 Resolution: re-run `blobsy track` to update the `.bref`.
 
 ### Interrupted Transfers
@@ -3264,11 +3291,20 @@ This section consolidates all features designed but deferred to future versions.
 
 | Feature | Rationale for Deferral | Design Status |
 | --- | --- | --- |
+| **Post-merge auto-pull hook** (`blobsy pull` after `git pull`) | Pull has unbounded cost (network, disk) and not every user needs all blobs immediately — unlike push, where skipping causes data loss for other users (see `blobsy hooks`). Git LFS uses smudge filters for transparent download, not hooks. A hook-based approach is unreliable (fails silently on network errors, no retry). Keep `blobsy pull` explicit for V1. | Investigated; see notes below |
 | **Garbage collection** (`blobsy gc`) | Complex safety requirements; V1 doesn’t generate much orphaned data | Fully designed (see GC section) |
 | **Branch-isolated mode** (`{git_branch}` variable) | Unclear user demand; adds complexity | Fully designed (see template variables) |
 | **Remote checksum storage** (`.bref` `remote_checksum` field) | V1 content-hash sufficient for integrity; ETags are optimization | Format reserved (forward-compatible) |
-| **Export/import** (repo-to-repo blob transfer) | Complex; unclear use cases | Not designed |
-| **Dictionary compression** (shared compression dictionaries) | Minor storage savings; high complexity | Not designed |
+
+**Post-merge auto-pull notes:** Git LFS installs a `post-merge` hook but only for file
+locking, not for blob download.
+LFS achieves transparent download via the git smudge filter mechanism (`.gitattributes`
+filter driver that converts pointer files to real content on checkout).
+Blobsy intentionally uses visible `.bref` files rather than transparent filter drivers,
+so the smudge approach doesn’t directly apply.
+If user demand warrants it, a `post-merge` hook could run `blobsy pull --quiet` as a
+best-effort convenience, but failures should be non-blocking (log a warning, don’t fail
+the merge).
 
 ### Explicitly Won’t Do (Design Decisions)
 
