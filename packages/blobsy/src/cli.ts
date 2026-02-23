@@ -172,6 +172,10 @@ function createProgram(): Command {
     .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option('--force', 'Skip confirmation for destructive operations')
+    .option(
+      '--min-size <size>',
+      'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
+    )
     .action(wrapAction(handleTrack));
 
   program
@@ -509,12 +513,13 @@ async function handleTrack(
   const repoRoot = findRepoRoot();
   const cacheDir = getStatCacheDir(repoRoot);
   const config = await resolveConfig(repoRoot, repoRoot);
+  const minSizeOverride = opts.minSize as string | undefined;
 
   for (const inputPath of paths) {
     const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
     if (isDirectory(absPath)) {
-      await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts);
+      await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts, minSizeOverride);
     } else {
       await trackSingleFile(absPath, repoRoot, cacheDir, globalOpts);
     }
@@ -622,10 +627,14 @@ async function trackDirectory(
   cacheDir: string,
   config: BlobsyConfig,
   globalOpts: GlobalOptions,
+  minSizeOverride?: string,
 ): Promise<void> {
   const relDir = toRepoRelative(absDir, repoRoot);
   const files = findTrackableFiles(absDir, config.ignore);
-  const extConfig = getExternalizeConfig(config);
+  const baseExtConfig = getExternalizeConfig(config);
+  const extConfig = minSizeOverride
+    ? { ...baseExtConfig, min_size: minSizeOverride }
+    : baseExtConfig;
 
   if (globalOpts.dryRun) {
     const trackable = files.filter((f) => {
