@@ -41,7 +41,7 @@ import {
   OUTPUT_SYMBOLS,
 } from './format.js';
 import type { GlobalOptions, TransferResult } from './types.js';
-import { ValidationError, BREF_EXTENSION } from './types.js';
+import { ValidationError, BREF_EXTENSION, FILE_STATE_SYMBOLS } from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -83,6 +83,67 @@ export function resolveTrackedFiles(
   }
 
   return files;
+}
+
+export interface FileStateResult {
+  path: string;
+  symbol: string;
+  state: string;
+  details: string;
+  size?: number | undefined;
+}
+
+async function getFileState(
+  absPath: string,
+  refPath: string,
+): Promise<{ symbol: string; state: string; details: string; size?: number | undefined }> {
+  if (!existsSync(refPath)) {
+    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
+  }
+
+  const ref = await readBref(refPath);
+
+  if (!existsSync(absPath)) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.missing,
+      state: 'missing_file',
+      details: 'file missing',
+      size: ref.size,
+    };
+  }
+
+  const currentHash = await computeHash(absPath);
+
+  if (currentHash !== ref.hash) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.modified,
+      state: 'modified',
+      details: 'modified',
+      size: ref.size,
+    };
+  }
+
+  if (ref.remote_key) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.synced,
+      state: 'synced',
+      details: 'synced',
+      size: ref.size,
+    };
+  }
+
+  return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed', size: ref.size };
+}
+
+export async function computeFileStates(
+  files: { absPath: string; refPath: string; relPath: string }[],
+): Promise<FileStateResult[]> {
+  const results: FileStateResult[] = [];
+  for (const file of files) {
+    const { symbol, state, details, size } = await getFileState(file.absPath, file.refPath);
+    results.push({ path: file.relPath, symbol, state, details, size });
+  }
+  return results;
 }
 
 export async function handlePush(

@@ -74,17 +74,12 @@ import {
   handlePrePushCheck,
   handleHook,
   resolveTrackedFiles,
+  computeFileStates,
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
-import {
-  BlobsyError,
-  FILE_STATE_SYMBOLS,
-  BREF_FORMAT,
-  ValidationError,
-  UserError,
-} from './types.js';
+import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -1035,17 +1030,7 @@ async function handleStatus(
     return;
   }
 
-  const results: {
-    path: string;
-    symbol: string;
-    state: string;
-    details: string;
-  }[] = [];
-
-  for (const file of files) {
-    const { symbol, state, details } = await getFileState(file.absPath, file.refPath, file.relPath);
-    results.push({ path: file.relPath, symbol, state, details });
-  }
+  const results = await computeFileStates(files);
 
   if (useJson) {
     console.log(
@@ -1067,37 +1052,6 @@ async function handleStatus(
     console.log('');
     console.log(formatCount(results.length, 'tracked file'));
   }
-}
-
-async function getFileState(
-  absPath: string,
-  refPath: string,
-  _relPath: string,
-): Promise<{ symbol: string; state: string; details: string }> {
-  if (!existsSync(refPath)) {
-    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
-  }
-
-  const ref = await readBref(refPath);
-
-  if (!existsSync(absPath)) {
-    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_file', details: 'file missing' };
-  }
-
-  const currentHash = await computeHash(absPath);
-
-  if (currentHash !== ref.hash) {
-    return { symbol: FILE_STATE_SYMBOLS.modified, state: 'modified', details: 'modified' };
-  }
-
-  if (ref.remote_key) {
-    // Check if .bref is committed (simplified: check if in git)
-    return { symbol: FILE_STATE_SYMBOLS.synced, state: 'synced', details: 'synced' };
-  }
-
-  // No remote_key: not pushed yet
-  // Simplified check: if .bref is committed
-  return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed' };
 }
 
 async function handleVerify(

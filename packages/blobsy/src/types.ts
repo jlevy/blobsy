@@ -51,6 +51,16 @@ export interface StatCacheEntry {
   cachedAt: number;
 }
 
+export type IssueSeverity = 'error' | 'warning' | 'info';
+
+export interface DoctorIssue {
+  type: string;
+  severity: IssueSeverity;
+  message: string;
+  fixed: boolean;
+  fixable: boolean;
+}
+
 export type BackendType = 's3' | 'gcs' | 'azure' | 'local' | 'command';
 
 /** Configuration for a single backend. */
