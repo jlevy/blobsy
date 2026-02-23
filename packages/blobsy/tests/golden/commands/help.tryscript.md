@@ -19,6 +19,7 @@ Options:
 
 Commands:
   init <url>             Initialize blobsy in a git repo with a backend URL
+  add <path...>          Track files and stage changes to git (recommended)
   track <path...>        Start tracking files or directories with .bref pointers
   untrack <path...>      Stop tracking files (keeps local files, moves .bref to trash)
   rm <path...>           Remove tracked files: delete local + move .bref to trash
@@ -61,6 +62,7 @@ Arguments:
 
 Options:
   --force                Skip confirmation for destructive operations
+  --min-size <size>      Override minimum file size for directory tracking (e.g. "100kb", "5mb")
   -h, --help             Display help for command
 ? 0
 ```
@@ -164,6 +166,8 @@ Arguments:
 
 Options:
   --local                Delete local file only, keep .bref and remote
+  --remote               Also delete blob from backend (requires confirmation)
+  --force                Skip confirmation prompts
   --recursive            Required for directory removal
   -h, --help             Display help for command
 ? 0

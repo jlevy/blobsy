@@ -7,6 +7,7 @@
  * dual-mode output (human-readable + JSON).
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
@@ -166,6 +167,17 @@ function createProgram(): Command {
     .option('--region <region>', 'AWS region (for S3 backends)')
     .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
     .action(wrapAction(handleInit));
+
+  program
+    .command('add')
+    .description('Track files and stage changes to git (recommended)')
+    .argument('<path...>', 'Files or directories to add')
+    .option('--force', 'Skip confirmation for destructive operations')
+    .option(
+      '--min-size <size>',
+      'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
+    )
+    .action(wrapAction(handleAdd));
 
   program
     .command('track')
@@ -526,12 +538,91 @@ async function handleTrack(
   }
 }
 
+async function handleAdd(
+  paths: string[],
+  opts: Record<string, unknown>,
+  cmd: Command,
+): Promise<void> {
+  const globalOpts = getGlobalOpts(cmd);
+  const repoRoot = findRepoRoot();
+  const cacheDir = getStatCacheDir(repoRoot);
+  const config = await resolveConfig(repoRoot, repoRoot);
+  const minSizeOverride = opts.minSize as string | undefined;
+
+  const allFilesToStage: string[] = [];
+
+  for (const inputPath of paths) {
+    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    let result: TrackResult;
+    if (isDirectory(absPath)) {
+      result = await trackDirectory(
+        absPath,
+        repoRoot,
+        cacheDir,
+        config,
+        globalOpts,
+        minSizeOverride,
+      );
+    } else {
+      result = await trackSingleFile(absPath, repoRoot, cacheDir, globalOpts);
+    }
+    allFilesToStage.push(...result.filesToStage);
+  }
+
+  // Deduplicate
+  const uniqueFiles = [...new Set(allFilesToStage)];
+
+  // Stage to git
+  if (!globalOpts.dryRun && uniqueFiles.length > 0) {
+    execFileSync('git', ['add', '--', ...uniqueFiles], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+
+    if (!globalOpts.quiet && !globalOpts.json) {
+      const brefCount = uniqueFiles.filter((f) => f.endsWith('.bref')).length;
+      const gitignoreCount = uniqueFiles.filter((f) => basename(f) === '.gitignore').length;
+      const keptCount = uniqueFiles.length - brefCount - gitignoreCount;
+      const parts = [];
+      if (brefCount > 0) {
+        parts.push(`${brefCount} .bref`);
+      }
+      if (gitignoreCount > 0) {
+        parts.push(`${gitignoreCount} .gitignore`);
+      }
+      if (keptCount > 0) {
+        parts.push(`${keptCount} kept in git`);
+      }
+      console.log(`Staged ${uniqueFiles.length} files (${parts.join(', ')}).`);
+      console.log(
+        'Changes have been staged to git: run `git status` to review and `git commit` to commit.',
+      );
+    }
+  }
+}
+
+interface TrackResult {
+  /** Absolute paths of files to git-add */
+  filesToStage: string[];
+  /** Count of files externalized (got .bref) */
+  externalized: number;
+  /** Count of files unchanged (already tracked, same hash) */
+  unchanged: number;
+  /** Count of non-externalized files found during directory walk */
+  keptInGit: number;
+}
+
+function emptyTrackResult(): TrackResult {
+  return { filesToStage: [], externalized: 0, unchanged: 0, keptInGit: 0 };
+}
+
 async function trackSingleFile(
   absPath: string,
   repoRoot: string,
   cacheDir: string,
   globalOpts: GlobalOptions,
-): Promise<void> {
+): Promise<TrackResult> {
+  const result = emptyTrackResult();
   const relPath = toRepoRelative(absPath, repoRoot);
   const refPath = brefPath(absPath);
   const refRelPath = toRepoRelative(refPath, repoRoot);
@@ -549,7 +640,7 @@ async function trackSingleFile(
     } else {
       console.log(formatDryRun(action));
     }
-    return;
+    return result;
   }
 
   const hash = await computeHash(absPath);
@@ -567,7 +658,8 @@ async function trackSingleFile(
           console.log(`${relPath} already tracked (unchanged)`);
         }
       }
-      return;
+      result.unchanged++;
+      return result;
     }
 
     // Hash changed, update. Clear remote_key since old key points to old content.
@@ -592,7 +684,10 @@ async function trackSingleFile(
         console.log(`Updated ${refRelPath} (hash changed)`);
       }
     }
-    return;
+    result.externalized++;
+    const gitignorePath = join(fileDir, '.gitignore');
+    result.filesToStage.push(refPath, gitignorePath);
+    return result;
   }
 
   // New tracking
@@ -619,6 +714,11 @@ async function trackSingleFile(
       console.log(`Added ${relPath} to .gitignore`);
     }
   }
+
+  result.externalized++;
+  const gitignorePath = join(fileDir, '.gitignore');
+  result.filesToStage.push(refPath, gitignorePath);
+  return result;
 }
 
 async function trackDirectory(
@@ -628,7 +728,8 @@ async function trackDirectory(
   config: BlobsyConfig,
   globalOpts: GlobalOptions,
   minSizeOverride?: string,
-): Promise<void> {
+): Promise<TrackResult> {
+  const result = emptyTrackResult();
   const relDir = toRepoRelative(absDir, repoRoot);
   const files = findTrackableFiles(absDir, config.ignore);
   const baseExtConfig = getExternalizeConfig(config);
@@ -651,15 +752,12 @@ async function trackDirectory(
         ),
       );
     }
-    return;
+    return result;
   }
 
   if (!globalOpts.quiet && !globalOpts.json) {
     console.log(`Scanning ${relDir}/...`);
   }
-
-  let tracked = 0;
-  let unchanged = 0;
 
   for (const absFilePath of files) {
     const relFilePath = toRepoRelative(absFilePath, repoRoot);
@@ -667,6 +765,8 @@ async function trackDirectory(
     const fileSize = fileStat.size;
 
     if (!shouldExternalize(relFilePath, fileSize, extConfig)) {
+      result.keptInGit++;
+      result.filesToStage.push(absFilePath);
       continue;
     }
 
@@ -684,49 +784,57 @@ async function trackDirectory(
             `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> already tracked (unchanged)`,
           );
         }
-        unchanged++;
+        result.unchanged++;
         continue;
       }
 
       const newRef: Bref = { ...existingRef, hash, size: fileSize };
       await writeBref(refPath, newRef);
-      const entry = await createCacheEntry(absFilePath, relFilePath, hash);
-      await writeCacheEntry(cacheDir, entry);
+      const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
+      await writeCacheEntry(cacheDir, cacheEntry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
         console.log(
           `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> updated (hash changed)`,
         );
       }
-      tracked++;
+      result.externalized++;
+      const gitignorePath = join(fileDir, '.gitignore');
+      result.filesToStage.push(refPath, gitignorePath);
     } else {
       const ref: Bref = { format: BREF_FORMAT, hash, size: fileSize };
       await writeBref(refPath, ref);
       await addGitignoreEntry(fileDir, fileName);
-      const entry = await createCacheEntry(absFilePath, relFilePath, hash);
-      await writeCacheEntry(cacheDir, entry);
+      const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
+      await writeCacheEntry(cacheDir, cacheEntry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
         console.log(
           `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> tracked`,
         );
       }
-      tracked++;
+      result.externalized++;
+      const gitignorePath = join(fileDir, '.gitignore');
+      result.filesToStage.push(refPath, gitignorePath);
     }
   }
 
   if (!globalOpts.quiet && !globalOpts.json) {
     const parts: string[] = [];
-    if (tracked > 0) {
-      parts.push(`${tracked} file${tracked === 1 ? '' : 's'} tracked`);
+    if (result.externalized > 0) {
+      parts.push(`${result.externalized} file${result.externalized === 1 ? '' : 's'} tracked`);
     } else {
       parts.push('0 files tracked');
     }
-    if (unchanged > 0) {
-      parts.push(`${unchanged} unchanged`);
+    if (result.unchanged > 0) {
+      parts.push(`${result.unchanged} unchanged`);
     }
     console.log(`${parts.join(', ')}.`);
   }
+
+  // Deduplicate filesToStage (multiple files in same dir -> same .gitignore)
+  result.filesToStage = [...new Set(result.filesToStage)];
+  return result;
 }
 
 async function handleStatus(

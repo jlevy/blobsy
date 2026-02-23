@@ -16,6 +16,7 @@ before: |
 ```console
 $ blobsy hooks install
 Installed pre-commit hook.
+  Using executable: [LOCAL_PATH]
 ? 0
 ```
 
@@ -86,6 +87,7 @@ $ mkdir -p data
 ```console
 $ blobsy hooks install
 Installed pre-commit hook.
+  Using executable: [LOCAL_PATH]
 ? 0
 ```
 

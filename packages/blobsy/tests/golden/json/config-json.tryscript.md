@@ -19,19 +19,7 @@ $ blobsy config --json
   "config": {
     "externalize": {
       "min_size": "1mb",
-      "always": [
-        "*.parquet",
-        "*.bin",
-        "*.weights",
-        "*.onnx",
-        "*.safetensors",
-        "*.pkl",
-        "*.pt",
-        "*.h5",
-        "*.arrow",
-        "*.sqlite",
-        "*.db"
-      ],
+      "always": [],
       "never": []
     },
     "compress": {
@@ -77,7 +65,12 @@ $ blobsy config --json
       "node_modules/**",
       ".git/**",
       ".blobsy/**",
-      "*.tmp"
+      "*.tmp",
+      "dist/**",
+      "build/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".DS_Store"
     ],
     "backends": {
       "default": {

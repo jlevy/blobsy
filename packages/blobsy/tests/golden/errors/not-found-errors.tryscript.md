@@ -36,7 +36,8 @@ $ echo "content" > data/untracked.bin
 
 ```console
 $ blobsy push data/untracked.bin 2>&1
-Error: Cannot read .bref file: [LOCAL_PATH]/data/untracked.bin.bref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.bref'
+✗ File not tracked: untracked.bin
+  Run: blobsy track untracked.bin
 ? 1
 ```
 

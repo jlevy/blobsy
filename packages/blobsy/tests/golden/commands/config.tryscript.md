@@ -32,18 +32,7 @@ $ blobsy config backend
 ```console
 $ blobsy config externalize
 min_size: 1mb
-always:
-  - "*.parquet"
-  - "*.bin"
-  - "*.weights"
-  - "*.onnx"
-  - "*.safetensors"
-  - "*.pkl"
-  - "*.pt"
-  - "*.h5"
-  - "*.arrow"
-  - "*.sqlite"
-  - "*.db"
+always: []
 never: []
 ? 0
 ```
