@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Help } from 'commander';
 import { Command, Option } from 'commander';
@@ -18,6 +19,13 @@ import { Command, Option } from 'commander';
 import { parseBackendUrl, validateBackendUrl, resolveLocalPath } from './backend-url.js';
 import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
 import { shouldExternalize } from './externalize.js';
+import {
+  isInteractive,
+  renderMarkdown,
+  paginateOutput,
+  extractSections,
+  findSection,
+} from './markdown-output.js';
 import {
   formatDryRun,
   formatError,
@@ -293,6 +301,62 @@ function createProgram(): Command {
     .action(wrapAction(handleHook));
 
   program
+    .command('readme')
+    .description('Display the blobsy README')
+    .action(
+      wrapAction(async (opts: Record<string, unknown>) => {
+        const content = await loadBundledDoc('README.md');
+        const interactive = isInteractive(opts);
+        const rendered = renderMarkdown(content, interactive);
+        await paginateOutput(rendered, interactive);
+      }),
+    );
+
+  program
+    .command('docs')
+    .description('Display blobsy user documentation')
+    .argument('[topic]', 'Section to display (e.g. "compression", "backends")')
+    .option('--list', 'List available sections')
+    .option('--brief', 'Condensed version')
+    .action(
+      wrapAction(async (topic: string | undefined, opts: Record<string, unknown>) => {
+        const interactive = isInteractive(opts);
+
+        if (opts.brief) {
+          const brief = await loadBundledDoc('blobsy-docs-brief.md');
+          const rendered = renderMarkdown(brief, interactive);
+          await paginateOutput(rendered, interactive);
+          return;
+        }
+
+        let content = await loadBundledDoc('blobsy-docs.md');
+        const sections = extractSections(content);
+
+        if (opts.list) {
+          console.log('Available documentation sections:\n');
+          for (const s of sections) {
+            console.log(`  ${s.slug.padEnd(28)} ${s.title}`);
+          }
+          console.log(`\nUse: blobsy docs <topic>`);
+          return;
+        }
+
+        if (topic) {
+          const section = findSection(content, sections, topic);
+          if (!section) {
+            console.error(`Section "${topic}" not found. Use --list to see available sections.`);
+            process.exitCode = 1;
+            return;
+          }
+          content = section;
+        }
+
+        const rendered = renderMarkdown(content, interactive);
+        await paginateOutput(rendered, interactive);
+      }),
+    );
+
+  program
     .command('skill')
     .description('Output blobsy skill documentation (for AI agents)')
     .option('--brief', 'Short summary only')
@@ -319,6 +383,30 @@ function createProgram(): Command {
 
 function getVersion(): string {
   return '0.1.0';
+}
+
+/**
+ * Load a bundled documentation file from dist/docs/ with dev fallback.
+ */
+async function loadBundledDoc(filename: string): Promise<string> {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+
+  // Production: dist/docs/<filename>
+  try {
+    return await readFile(join(__dirname, 'docs', filename), 'utf-8');
+  } catch {
+    // Dev fallback: packages/blobsy/docs/<filename>
+    try {
+      return await readFile(join(__dirname, '..', 'docs', filename), 'utf-8');
+    } catch {
+      // Last fallback for README: repo root
+      if (filename === 'README.md') {
+        return await readFile(join(__dirname, '..', '..', '..', 'README.md'), 'utf-8');
+      }
+      throw new Error(`Documentation file not found: ${filename}`);
+    }
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

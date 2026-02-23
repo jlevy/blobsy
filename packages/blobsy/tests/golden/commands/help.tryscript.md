@@ -35,6 +35,8 @@ Commands:
   hooks <action>         Install or uninstall the blobsy pre-commit hook
   check-unpushed         List committed .bref files whose blobs are not yet pushed
   pre-push-check         CI guard: fail if any .bref is missing its remote blob
+  readme                 Display the blobsy README
+  docs [topic]           Display blobsy user documentation
   skill                  Output blobsy skill documentation (for AI agents)
   prime                  Output context primer for AI agents working in this repo
   help [command]         Display help for command
@@ -309,6 +311,37 @@ Usage: blobsy pre-push-check [options]
 CI guard: fail if any .bref is missing its remote blob
 
 Options:
+  -h, --help             Display help for command
+? 0
+```
+
+# Per-command help: readme
+
+```console
+$ blobsy readme --help
+Usage: blobsy readme [options]
+
+Display the blobsy README
+
+Options:
+  -h, --help             Display help for command
+? 0
+```
+
+# Per-command help: docs
+
+```console
+$ blobsy docs --help
+Usage: blobsy docs [options] [topic]
+
+Display blobsy user documentation
+
+Arguments:
+  topic                  Section to display (e.g. "compression", "backends")
+
+Options:
+  --list                 List available sections
+  --brief                Condensed version
   -h, --help             Display help for command
 ? 0
 ```
