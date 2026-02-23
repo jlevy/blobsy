@@ -1758,18 +1758,21 @@ Show the state of all tracked files.
 
 ```bash
 $ blobsy status
-  data/bigfile.zip              ok (500 MB)
-  data/research/report.md       modified (local != ref) (12 KB)
-  data/research/raw/resp.json   missing locally (1.2 MB)
-  data/research/raw/data.parq   ok (not pushed) (45 MB)
+  ✓  data/bigfile.zip  synced (500 MB)
+  ~  data/research/report.md  modified (12 KB)
+  ?  data/research/raw/resp.json  file missing (1.2 MB)
+  ○  data/research/raw/data.parq  not pushed (45 MB)
+
+4 tracked files: 1 synced, 1 modified, 1 missing_file, 1 new
 ```
 
 What it does:
 
 1. Find all `.bref` files in the repo.
 2. For each, compare local file hash against the ref’s `hash`.
-3. Report: ok, modified, missing, not pushed (no `remote_key`).
-4. Show human-readable file sizes from `.bref` metadata.
+3. Display file sizes from `.bref` metadata and a per-state summary footer.
+4. Report: ok, modified, missing, not pushed (no `remote_key`).
+5. Show human-readable file sizes from `.bref` metadata.
 
 No network access. The ref file has everything needed.
 
@@ -1846,108 +1849,56 @@ For definitive integrity verification.
 ### `blobsy doctor`
 
 Comprehensive diagnostic and health check command.
-**Deferred enhancement:** Expanded to include common error detection, troubleshooting
-advice, and integration validation.
+Runs categorized checks across configuration, hooks, integrity, and backend
+connectivity.
 
 ```bash
 $ blobsy doctor
+  ✓  data/bigfile.zip  synced (500 MB)
+  ~  data/research/report.md  modified (12 KB)
 
-=== CONFIGURATION ===
-Backend: s3://my-datasets/project-v1/ (region: us-east-1)
-Key template: {iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}
-Remote layout: Timestamp+Hash (default, recommended)
-
-Sync tools:
-  ✓ aws-cli v2.13.5 (detected at /usr/local/bin/aws)
-  ✗ rclone (not found)
-  → Using: aws-cli
-
-Compression: zstd (via Node.js built-in)
-Externalization threshold: 1 MB (files below this stay in git)
-
-=== REPOSITORY STATE ===
-Git repository: /Users/alice/projects/ml-research
-Branch: main (clean working tree)
-
-Tracked files: 18 total (5.1 GB)
-  ✓ 8 fully synced (2.1 GB)
-  ◐ 3 committed, not synced (1.2 GB)
-  ~ 2 modified locally (850 MB)
-  ? 1 missing locally (120 MB)
-
-Stat cache: 18 entries, 0 stale, 245 KB
-Trash: 3 expired refs (last GC: never)
+2 tracked files: 1 synced, 1 modified
 
 === GIT HOOKS ===
-✓ pre-commit hook installed (.git/hooks/pre-commit)
-  Purpose: Auto-push blobs when committing .bref files
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
 
-=== CONNECTIVITY ===
-✓ Backend reachable (s3://my-datasets/project-v1/)
-✓ Credentials valid (AWS profile: default)
-✓ Test upload: ok (wrote + deleted 1 KB test object)
-
-=== INTEGRITY CHECKS ===
-✓ All .bref files valid YAML
-✓ All .bref format versions supported (blobsy-bref/0.1)
-✓ No orphaned .gitignore entries
-✓ No .bref files missing corresponding .gitignore entries
-⚠ 2 files modified locally (hash mismatch with .bref)
-  → Run 'blobsy track <path>' to update refs
-
-=== COMMON ISSUES ===
-No issues detected.
-
-=== TROUBLESHOOTING TIPS ===
-• Modified files: Run 'blobsy track <path>' to update .bref after changes
-• Missing files: Run 'blobsy pull <path>' to restore from remote
-• Uncommitted refs: Run 'git add -A && git commit' after track/push
-• Sync failures: Check 'blobsy doctor' for credential/connectivity issues
-• Large gitignore: Normal (1 line per tracked file in blobsy-managed block)
-
-For detailed help: https://github.com/jlevy/blobsy/docs
+3 issues found. Run with --fix to attempt repairs.
 ```
 
-**Current behavior:** Basic configuration and connectivity checks.
+**Current checks:**
 
-**Deferred enhancements:**
-1. **Comprehensive state overview** - Includes stats rollup (superset of `blobsy stats`)
-2. **Common error detection** - Detects and reports common configuration mistakes:
-   - Missing `.gitignore` entries for tracked files
-   - Orphaned `.gitignore` entries (file no longer tracked)
-   - Invalid `.bref` files (malformed YAML, unsupported format version)
-   - Uncommitted refs after push (common mistake)
-   - Modified files not re-tracked
-   - Stale stat cache entries
-   - Missing pre-commit hook (recommends `blobsy hooks install`)
-   - Credential expiration warnings
-3. **Troubleshooting advice** - Context-aware suggestions based on detected issues:
-   - How to fix each detected problem
-   - Links to relevant documentation sections
-   - Common workflows that might have caused the issue
-4. **Integration validation** - Verifies all components work together:
-   - Test upload/download to backend
-   - Compression library availability
-   - Transfer tool version compatibility
-   - Git repository health (no corruption)
-   - `.blobsy/` directory structure valid
-5. **Extensible diagnostics** - New checks added as common errors are discovered in the
-   field
+1. **Status overview** — Shows tracked file states (superset of `blobsy status`) with
+   sizes and per-state counts.
+2. **Configuration validation** — Config file exists, YAML valid, backend resolves,
+   size/algorithm settings valid, unknown keys detected.
+3. **Git hook checks** — Pre-commit and pre-push hooks: existence, blobsy-managed
+   content, executable permissions.
+4. **Integrity checks:**
+   - `.blobsy/` directory exists and is writable
+   - `.blobsy/` listed in root `.gitignore`
+   - `.bref` files valid YAML with expected format version
+   - No orphaned `.bref` files (local file missing, no remote key)
+   - No missing `.gitignore` entries for tracked files
+   - No dangling `.gitignore` entries (no corresponding `.bref`)
+   - Stat cache files valid, no stale entries
+5. **Backend checks** — Tool availability (AWS CLI for S3, command binaries for command
+   backends), health check (connectivity and permissions).
 
 **Flags:**
 - `--fix` - Attempt to automatically fix detected issues (safe repairs only):
   - Add missing `.gitignore` entries
-  - Remove orphaned `.gitignore` entries
-  - Clean up stale stat cache entries
-  - Install missing pre-commit hook
-  - Remove orphaned temp files (`.blobsy-tmp-*`)
-- `--verbose` - Show detailed diagnostic logs (useful for bug reports)
+  - Remove dangling `.gitignore` entries
+  - Create missing `.blobsy/` directory
+  - Add `.blobsy/` to root `.gitignore`
+  - Clean up stale/corrupt stat cache entries
+  - Fix hook executable permissions
+- `--verbose` - Show all checks including passing ones
 - `--json` - Machine-readable output for scripting
 
 **Exit codes:**
-- `0` - All checks passed
-- `1` - Warnings detected (repo functional but suboptimal)
-- `2` - Errors detected (action required before sync operations)
+- `0` - No errors (warnings may be present)
+- `1` - Errors detected (action required)
 
 ### `blobsy config`
 
