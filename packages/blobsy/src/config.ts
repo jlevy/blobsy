@@ -67,7 +67,17 @@ export function getBuiltinDefaults(): BlobsyConfig {
     checksum: {
       algorithm: 'sha256',
     },
-    ignore: ['node_modules/**', '.git/**', '.blobsy/**', '*.tmp'],
+    ignore: [
+      'node_modules/**',
+      '.git/**',
+      '.blobsy/**',
+      '*.tmp',
+      'dist/**',
+      'build/**',
+      '__pycache__/**',
+      '*.pyc',
+      '.DS_Store',
+    ],
   };
 }
 

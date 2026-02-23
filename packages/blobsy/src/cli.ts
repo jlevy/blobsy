@@ -624,7 +624,7 @@ async function trackDirectory(
   globalOpts: GlobalOptions,
 ): Promise<void> {
   const relDir = toRepoRelative(absDir, repoRoot);
-  const files = findTrackableFiles(absDir);
+  const files = findTrackableFiles(absDir, config.ignore);
   const extConfig = getExternalizeConfig(config);
 
   if (globalOpts.dryRun) {
