@@ -1032,6 +1032,12 @@ async function handleStatus(
 
   const results = await computeFileStates(files);
 
+  // Compute per-state counts
+  const stateCounts: Record<string, number> = {};
+  for (const r of results) {
+    stateCounts[r.state] = (stateCounts[r.state] ?? 0) + 1;
+  }
+
   if (useJson) {
     console.log(
       formatJson({
@@ -1039,18 +1045,23 @@ async function handleStatus(
           path: r.path,
           state: r.state,
           details: r.details,
+          ...(r.size != null ? { size: r.size } : {}),
         })),
         summary: {
           total: results.length,
+          ...Object.fromEntries(Object.entries(stateCounts).filter(([, v]) => v > 0)),
         },
       }),
     );
   } else {
     for (const r of results) {
-      console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details));
+      console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details, r.size));
     }
     console.log('');
-    console.log(formatCount(results.length, 'tracked file'));
+    const stateParts = Object.entries(stateCounts)
+      .filter(([, v]) => v > 0)
+      .map(([state, count]) => `${count} ${state}`);
+    console.log(`${formatCount(results.length, 'tracked file')}: ${stateParts.join(', ')}`);
   }
 }
 

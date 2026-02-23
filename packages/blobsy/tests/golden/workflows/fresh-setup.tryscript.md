@@ -89,10 +89,10 @@ $ git add -A && git commit -q -m "Update remote keys after push"
 
 ```console
 $ blobsy status
-  ✓  data/dataset.csv  synced
-  ✓  data/model.bin  synced
+  ✓  data/dataset.csv  synced (12 B)
+  ✓  data/model.bin  synced (13 B)
 
-2 tracked files
+2 tracked files: 2 synced
 ? 0
 ```
 

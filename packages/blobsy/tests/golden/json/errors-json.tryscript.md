@@ -81,11 +81,13 @@ $ blobsy status --json
     {
       "path": "data/model.bin",
       "state": "modified",
-      "details": "modified"
+      "details": "modified",
+      "size": 13
     }
   ],
   "summary": {
-    "total": 1
+    "total": 1,
+    "modified": 1
   }
 }
 ? 0

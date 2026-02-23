@@ -41,8 +41,8 @@ Done: 1 pushed.
 
 ```console
 $ blobsy status --verbose
-  ✓  data/model.bin  synced
+  ✓  data/model.bin  synced (8 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```

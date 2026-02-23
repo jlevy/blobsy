@@ -20,8 +20,14 @@ const BYTES_PER_GB = BYTES_PER_MB * 1024;
 const SIZE_DECIMAL_THRESHOLD = 10;
 
 /** Format a file state line for status output. */
-export function formatFileState(symbol: FileStateSymbol, path: string, details: string): string {
-  return `  ${symbol}  ${path}  ${details}`;
+export function formatFileState(
+  symbol: FileStateSymbol,
+  path: string,
+  details: string,
+  size?: number,
+): string {
+  const sizeStr = size != null ? ` (${formatSize(size)})` : '';
+  return `  ${symbol}  ${path}  ${details}${sizeStr}`;
 }
 
 /** Format bytes as human-readable size (B, KB, MB, GB). */

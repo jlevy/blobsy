@@ -30,16 +30,19 @@ $ blobsy status --json
     {
       "path": "data/dataset.csv",
       "state": "synced",
-      "details": "synced"
+      "details": "synced",
+      "size": 12
     },
     {
       "path": "data/model.bin",
       "state": "synced",
-      "details": "synced"
+      "details": "synced",
+      "size": 13
     }
   ],
   "summary": {
-    "total": 2
+    "total": 2,
+    "synced": 2
   }
 }
 ? 0
@@ -60,16 +63,20 @@ $ blobsy status --json
     {
       "path": "data/dataset.csv",
       "state": "synced",
-      "details": "synced"
+      "details": "synced",
+      "size": 12
     },
     {
       "path": "data/model.bin",
       "state": "modified",
-      "details": "modified"
+      "details": "modified",
+      "size": 13
     }
   ],
   "summary": {
-    "total": 2
+    "total": 2,
+    "synced": 1,
+    "modified": 1
   }
 }
 ? 0
