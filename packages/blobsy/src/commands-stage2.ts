@@ -32,6 +32,7 @@ import {
 import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
+import { isAwsCliAvailable } from './backend-aws-cli.js';
 import { parseBackendUrl } from './backend-url.js';
 import {
   formatCheckFail,
@@ -683,6 +684,62 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   // --- BACKEND section ---
   const backendIssues: DoctorIssue[] = [];
   if (config) {
+    // Tool availability checks
+    try {
+      const resolved = resolveBackend(config);
+      if (resolved.type === 's3') {
+        if (!isAwsCliAvailable()) {
+          backendIssues.push({
+            type: 'backend',
+            severity: 'info',
+            message: 'AWS CLI not found; using built-in S3 SDK',
+            fixed: false,
+            fixable: false,
+          });
+        } else if (verbose) {
+          backendIssues.push({
+            type: 'backend',
+            severity: 'info',
+            message: 'AWS CLI available',
+            fixed: false,
+            fixable: false,
+          });
+        }
+      } else if (resolved.type === 'command') {
+        for (const field of ['push_command', 'pull_command', 'exists_command'] as const) {
+          const cmd = resolved[field];
+          if (cmd) {
+            const binary = cmd.split(/\s+/)[0];
+            if (binary) {
+              try {
+                execFileSync('which', [binary], { stdio: 'pipe' });
+                if (verbose) {
+                  backendIssues.push({
+                    type: 'backend',
+                    severity: 'info',
+                    message: `${field} binary found: ${binary}`,
+                    fixed: false,
+                    fixable: false,
+                  });
+                }
+              } catch {
+                backendIssues.push({
+                  type: 'backend',
+                  severity: 'error',
+                  message: `${field} binary not found: ${binary}`,
+                  fixed: false,
+                  fixable: false,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // resolveBackend may fail -- already reported in config section
+    }
+
+    // Health check
     try {
       await runHealthCheck(config, repoRoot);
       if (verbose) {
