@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { readFile, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Command, Option } from 'commander';
@@ -1675,13 +1675,27 @@ async function handleConfig(
  * Format a file path for display: use ~ for home directory and relative paths for repo files.
  */
 function formatConfigPath(filePath: string, repoRoot?: string): string {
+  // Check BLOBSY_HOME first (for testing)
+  const blobsyHome = process.env.BLOBSY_HOME;
+  if (blobsyHome) {
+    const resolvedBlobsyHome = resolve(blobsyHome);
+    const resolvedFilePath = resolve(filePath);
+    if (resolvedFilePath.startsWith(resolvedBlobsyHome)) {
+      return resolvedFilePath.replace(resolvedBlobsyHome, '~');
+    }
+  }
+
+  // Check actual home directory
   const home = homedir();
   if (filePath.startsWith(home)) {
     return filePath.replace(home, '~');
   }
+
+  // Check repo root for relative paths
   if (repoRoot && filePath.startsWith(repoRoot)) {
     return relative(repoRoot, filePath) || '.';
   }
+
   return filePath;
 }
 

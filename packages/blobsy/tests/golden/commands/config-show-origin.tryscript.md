@@ -3,9 +3,12 @@ sandbox: true
 fixtures:
   - source: ../fixtures/local-backend.blobsy.yml
     dest: .blobsy.yml
+env:
+  BLOBSY_HOME: .test-home
 before: |
-  # Clean up any existing global config from previous test runs
-  rm -f ~/.blobsy.yml
+  # Use temp directory for global config to avoid touching user's home
+  rm -rf .test-home
+  mkdir -p .test-home
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"

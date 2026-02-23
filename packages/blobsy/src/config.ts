@@ -327,9 +327,13 @@ export function getConfigPath(repoRoot: string): string {
   return join(repoRoot, CONFIG_FILENAME);
 }
 
-/** Get the global config file path (~/.blobsy.yml). */
+/**
+ * Get the global config file path (~/.blobsy.yml).
+ * Respects BLOBSY_HOME environment variable for testing.
+ */
 export function getGlobalConfigPath(): string {
-  return join(homedir(), CONFIG_FILENAME);
+  const home = process.env.BLOBSY_HOME ?? homedir();
+  return join(home, CONFIG_FILENAME);
 }
 
 /** Bytes per kilobyte (base-2) */

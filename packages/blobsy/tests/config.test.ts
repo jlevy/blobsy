@@ -1,8 +1,8 @@
-import { writeFileSync, mkdtempSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
 import {
   getBuiltinDefaults,
@@ -18,11 +18,19 @@ function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'blobsy-config-test-'));
 }
 
-// Clean up global config before each test
+let originalBlobsyHome: string | undefined;
+
+// Set BLOBSY_HOME to a temp directory for all tests
 beforeEach(() => {
-  const globalConfig = getGlobalConfigPath();
-  if (existsSync(globalConfig)) {
-    unlinkSync(globalConfig);
+  originalBlobsyHome = process.env.BLOBSY_HOME;
+  process.env.BLOBSY_HOME = tmpDir();
+});
+
+afterEach(() => {
+  if (originalBlobsyHome === undefined) {
+    delete process.env.BLOBSY_HOME;
+  } else {
+    process.env.BLOBSY_HOME = originalBlobsyHome;
   }
 });
 
@@ -112,7 +120,14 @@ describe('parseSize', () => {
 });
 
 describe('getGlobalConfigPath', () => {
-  it('returns ~/.blobsy.yml', () => {
+  it('respects BLOBSY_HOME when set', () => {
+    const path = getGlobalConfigPath();
+    // BLOBSY_HOME is set in beforeEach to a temp directory
+    expect(path).toBe(join(process.env.BLOBSY_HOME!, '.blobsy.yml'));
+  });
+
+  it('falls back to homedir when BLOBSY_HOME is not set', () => {
+    delete process.env.BLOBSY_HOME;
     const path = getGlobalConfigPath();
     expect(path).toBe(join(homedir(), '.blobsy.yml'));
   });
