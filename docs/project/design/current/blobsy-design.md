@@ -1938,11 +1938,66 @@ For detailed help: https://github.com/jlevy/blobsy/docs
 
 ### `blobsy config`
 
-Get or set configuration values:
+Get or set configuration values with multi-level precedence support.
+
+**Basic usage:**
 
 ```bash
-$ blobsy config [key] [value]    # get/set
-$ blobsy config backend          # show current backend
+$ blobsy config                     # show all config (merged from all levels)
+$ blobsy config compress            # show a top-level section
+$ blobsy config compress.algorithm  # show a specific key
+$ blobsy config compress.algorithm zstd  # set a value in repo config
+```
+
+**Multi-level config flags:**
+
+```bash
+$ blobsy config --global compress.algorithm gzip
+  # Set value in user-global config (~/.blobsy.yml)
+  # Works outside git repositories
+
+$ blobsy config --show-origin compress.algorithm
+  # Show which config file a value comes from
+  # Output: repo    .blobsy.yml    zstd
+  # Possible origins: builtin, global (~/.blobsy.yml), repo (.blobsy.yml), subdir (<path>/.blobsy.yml)
+
+$ blobsy config --unset compress.algorithm
+  # Remove a key from repo config
+  # Falls back to global or builtin default
+  # Output shows effective value after removal
+
+$ blobsy config --global --unset compress.algorithm
+  # Remove a key from global config
+```
+
+**Config precedence** (highest to lowest):
+1. Subdirectory `.blobsy.yml` (most specific, applies to subdirectory and descendants)
+2. Repo root `.blobsy.yml` (applies to entire repository)
+3. Global `~/.blobsy.yml` (user-wide defaults)
+4. Built-in defaults (hardcoded)
+
+**Scope rules:**
+- Without `--global`: Operates on repository config (requires git repository)
+- With `--global`: Operates on `~/.blobsy.yml` (works anywhere, even outside git repos)
+
+**Environment variable override:**
+- `BLOBSY_HOME`: Override the global config directory (default: `~`)
+- Useful for testing or custom config isolation
+- Example: `BLOBSY_HOME=/tmp/test blobsy config --global compress.algorithm gzip`
+
+**JSON output:**
+
+All config operations support `--json` for machine-readable output:
+
+```bash
+$ blobsy config --json compress.algorithm
+{"schema_version":"0.1","key":"compress.algorithm","value":"zstd"}
+
+$ blobsy config --json --show-origin compress.algorithm
+{"schema_version":"0.1","key":"compress.algorithm","value":"zstd","origin":"repo","file":".blobsy.yml"}
+
+$ blobsy config --json --global compress.algorithm gzip
+{"schema_version":"0.1","message":"Set compress.algorithm = gzip","level":"info"}
 ```
 
 ### `blobsy hooks`
@@ -2031,6 +2086,9 @@ entering the main branch.
 SETUP
   blobsy init                          Initialize blobsy in a git repo
   blobsy config [key] [value]          Get/set configuration
+       [--global]                    Use global config (~/.blobsy.yml)
+       [--show-origin]               Show which config file each value comes from
+       [--unset]                     Remove a config key (falls back to parent scope)
   blobsy health                        Check transport backend health (credentials, connectivity)
   blobsy doctor                        Comprehensive diagnostics and health check (Deferred: enhanced)
        [--fix]                       Auto-fix detected issues

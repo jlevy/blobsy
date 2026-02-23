@@ -127,7 +127,7 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   let config = getBuiltinDefaults();
 
   // User-global config
-  const globalConfig = join(homedir(), CONFIG_FILENAME);
+  const globalConfig = getGlobalConfigPath();
   if (existsSync(globalConfig)) {
     const globalOverride = await loadConfigFile(globalConfig);
     config = mergeConfigs(config, globalOverride);

@@ -101,7 +101,7 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy verify [path...]` | Verify local files match ref hashes |
 | `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .bref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
-| `blobsy config [key] [val]` | Get or set configuration |
+| `blobsy config [key] [val]` | Get or set configuration (supports `--global`, `--show-origin`, `--unset`) |
 | `blobsy health` | Check backend connectivity |
 | `blobsy doctor [--fix]` | Diagnostics and self-repair |
 | `blobsy hooks <action>` | Install or uninstall git hooks (pre-commit, pre-push) |
@@ -169,6 +169,50 @@ Command backends execute user-configured shell commands for push/pull/exists ope
 will continue to reference their existing remote keys.
 To migrate files to a new backend, you must manually re-push them with
 `blobsy push --force`.
+
+## Configuration Management
+
+Blobsy supports multi-level configuration with git-style flags for managing settings
+across builtin defaults, user-global config (~/.blobsy.yml), and repo-level config
+(.blobsy.yml):
+
+```bash
+# View all config values (merged from all levels)
+blobsy config
+
+# Get a specific value
+blobsy config compress.algorithm
+
+# Set a value in repo config (.blobsy.yml)
+blobsy config compress.algorithm zstd
+
+# Set a value in global config (~/.blobsy.yml)
+blobsy config --global sync.parallel 16
+
+# See where a value comes from
+blobsy config --show-origin compress.algorithm
+# Output: repo    .blobsy.yml    zstd
+
+# Remove a config value
+blobsy config --unset compress.algorithm
+# Falls back to global or builtin default
+```
+
+**Config Precedence** (highest to lowest):
+1. Subdirectory `.blobsy.yml` (most specific)
+2. Repo root `.blobsy.yml`
+3. Global `~/.blobsy.yml`
+4. Built-in defaults
+
+**Global vs Repo Config:**
+- `--global`: Operates on `~/.blobsy.yml` (works outside git repos)
+- Without `--global`: Operates on repo config (requires git repo)
+
+**Use `BLOBSY_HOME` to override the global config directory** (useful for testing):
+```bash
+export BLOBSY_HOME=/tmp/test-config
+blobsy config --global compress.algorithm gzip
+```
 
 ## Externalization Rules
 

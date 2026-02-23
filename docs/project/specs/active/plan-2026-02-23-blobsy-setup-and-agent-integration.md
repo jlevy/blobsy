@@ -26,8 +26,8 @@ ensuring clear documentation and skill file installation.
   update `AGENTS.md`
 - **Self-documenting**: Clear installation instructions in skill files (agents can
   install via npm)
-- **Progressive disclosure**: Leverage existing `blobsy skill` and `blobsy prime`
-  commands
+- **Progressive disclosure**: Use `blobsy skill` for brief agent orientation, delegate
+  to `status`/`doctor` for dynamic state
 - **Documentation updates**: Update all design docs and developer docs to reflect new
   patterns
 
@@ -36,8 +36,9 @@ ensuring clear documentation and skill file installation.
 - **Auto-installation hooks**: No bash scripts to auto-install blobsy (simpler than tbd
   approach)
 - **Interactive mode**: No `--interactive` prompts (can be added later if needed)
-- **Session hooks**: No SessionStart/PreCompact hooks (agents just reference
-  `blobsy prime` manually)
+- **Session hooks**: No SessionStart/PreCompact hooks (agents use `blobsy skill` for
+  orientation)
+- **Prime command**: Drop `blobsy prime` (redundant with `skill`)
 
 ## Background
 
@@ -61,7 +62,8 @@ Skill files just document: “If blobsy is not installed, run
 
 1. **Add `blobsy setup` command** that wraps `blobsy init` and installs agent
    integration files
-2. **Leverage existing commands**: `blobsy skill` and `blobsy prime` already exist
+2. **Simplify agent commands**: Keep `blobsy skill` (drop `prime`), delegate to
+   `status`/`doctor` for state
 3. **Install skill files** to standard locations (`.claude/skills/blobsy/`, `AGENTS.md`)
 4. **Update all documentation** to reflect new setup pattern
 
@@ -74,11 +76,15 @@ Skill files just document: “If blobsy is not installed, run
 
 **Modified files:**
 - `packages/blobsy/src/cli/cli.ts` - Add setup command, update help text
-- `packages/blobsy/SKILL.md` - Add installation instructions
+- `packages/blobsy/src/skill-text.ts` - Consolidate into `skill` (remove `prime`)
+- `packages/blobsy/SKILL.md` - Update with installation + brief orientation
 - `AGENTS.md` - Add blobsy integration section
 - `README.md` - Update quick start to use `blobsy setup`
 - `docs/project/design/current/blobsy-design.md` - Document setup command
 - `CLAUDE.md` (AGENTS.md) - Update development guide
+
+**Removed:**
+- `blobsy prime` command (consolidated into `skill`)
 
 ### API Changes
 
@@ -101,52 +107,50 @@ Examples:
 - `blobsy` (no args) - Show help with prominent “Getting Started” section
 - `blobsy init` - Remains low-level (just creates `.blobsy.yml`)
 
-### SKILL.md Format
+### `blobsy skill` Output (Context-Efficient)
 
-````yaml
----
-name: blobsy
-description: Git-native large file storage CLI. Track large files with .bref pointers while storing blobs in S3, local, or custom backends.
----
+**Purpose:** Brief agent orientation with pointers to dynamic commands
 
-# Blobsy Agent Skill
+````markdown
+# blobsy
+
+Git-native large file storage. Track large files with `.bref` pointers in Git,
+store blobs in S3/local/custom backends.
 
 ## Installation
 
-If blobsy is not installed, run:
 ```bash
 npm install -g blobsy@latest
-````
-
-Then initialize in your project:
-```bash
 blobsy setup --auto s3://bucket/prefix/
 ```
 
 ## When to Use
 
-Use blobsy when:
-- Repository contains large binary files (models, datasets, media)
-- Files need to be shared across machines without committing to Git
-- You need content-addressable, deduplicated blob storage
-- User mentions: blobsy, large files, .bref, Git LFS alternative
+- Large binary files (models, datasets, media, archives)
+- Share files across machines without committing to Git
+- Content-addressable, deduplicated storage
+- Keywords: blobsy, .bref, large files, Git LFS alternative
 
 ## Quick Reference
 
 ```bash
-blobsy track <path...>     # Track files (creates .bref pointers)
-blobsy push [path...]      # Upload blobs to backend
-blobsy pull [path...]      # Download blobs from backend
-blobsy status [path...]    # Show tracked file states
-blobsy prime              # Show context and dashboard
+blobsy track <path...>     # Track files (creates .bref)
+blobsy push [path...]      # Upload to backend
+blobsy pull [path...]      # Download from backend
+blobsy status --json       # Current state (JSON)
+blobsy doctor --json       # Health check (JSON)
 ```
 
-## Global Options
+## Current State
 
-All commands accept: `--json`, `--quiet`, `--verbose`, `--dry-run`
+For dynamic info, use:
+- `blobsy status --json` - Tracked files, sync state
+- `blobsy doctor --json` - Configuration, health, issues
 
-…
+All commands: `--json`, `--quiet`, `--verbose`, `--dry-run`
 ````
+
+**Token budget:** ~200-300 tokens (context-efficient)
 
 ### AGENTS.md Integration
 
@@ -156,17 +160,24 @@ All commands accept: `--json`, `--quiet`, `--verbose`, `--dry-run`
 
 Git-native large file storage CLI.
 
-Installation: `npm install -g blobsy@latest`
-Setup: `blobsy setup --auto s3://bucket/prefix/`
-Context: Run `blobsy prime` to see current state
+**Installation:** `npm install -g blobsy@latest`
+**Setup:** `blobsy setup --auto s3://bucket/prefix/`
+**Orientation:** Run `blobsy skill` for quick reference
 
-[Full content from blobsy skill]
+[Full content from blobsy skill command output]
 <!-- END BLOBSY INTEGRATION -->
-````
+```
 
 ## Implementation Plan
 
-### Phase 1: Setup Command Core
+### Phase 1: Setup Command + Skill Consolidation
+
+- [ ] Consolidate `blobsy skill` (remove `prime`)
+  - [ ] Update `packages/blobsy/src/skill-text.ts`
+  - [ ] Make `skill` output context-efficient (~200-300 tokens)
+  - [ ] Include installation, when to use, quick reference
+  - [ ] Point to `status --json` and `doctor --json` for state
+  - [ ] Remove `PRIME_TEXT` constant and `prime` command handler
 
 - [ ] Create `packages/blobsy/src/cli/commands/setup.ts`
   - [ ] Implement `SetupAutoHandler` class
@@ -175,12 +186,15 @@ Context: Run `blobsy prime` to see current state
   - [ ] Call `blobsy init` internally
   - [ ] Return success message with next steps
 
-- [ ] Add setup command to CLI
-  - [ ] Register in `packages/blobsy/src/cli/cli.ts`
-  - [ ] Add to command list in help
+- [ ] Update CLI
+  - [ ] Register setup command in `packages/blobsy/src/cli/cli.ts`
+  - [ ] Remove `prime` command registration
+  - [ ] Update help text to reference `skill` (not `prime`)
 
 - [ ] Test basic setup flow
   - [ ] Golden test: `tests/golden/commands/setup.tryscript.md`
+  - [ ] Update `skill.tryscript.md` with new consolidated output
+  - [ ] Remove `prime` tests if they exist
   - [ ] Test error cases (not in git repo, invalid URL)
 
 ### Phase 2: Agent Integration Files
@@ -232,7 +246,7 @@ Context: Run `blobsy prime` to see current state
 
 - [ ] Update `blobsy` (no args) behavior
   - [ ] Show help with prominent setup instructions
-  - [ ] Reference `blobsy prime` for context
+  - [ ] Reference `blobsy skill` for agent orientation
 
 - [ ] Update error messages
   - [ ] When not initialized, suggest `blobsy setup --auto`
