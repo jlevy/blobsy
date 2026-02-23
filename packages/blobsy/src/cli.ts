@@ -122,7 +122,7 @@ function createProgram(): Command {
 
   program
     .command('init')
-    .description('Initialize blobsy in a git repo with a backend URL')
+    .description('Initialize blobsy config (low-level; prefer setup --auto)')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
     .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
@@ -326,7 +326,7 @@ function createProgram(): Command {
     return [
       '',
       colors.bold('Get started:'),
-      `  ${colors.green('blobsy init')} s3://bucket/prefix/`,
+      `  ${colors.green('blobsy setup --auto')} s3://bucket/prefix/`,
       `  ${colors.green('blobsy add')} <file-or-dir>`,
       `  ${colors.green('blobsy push')}`,
       '',
@@ -335,6 +335,7 @@ function createProgram(): Command {
       `  ${colors.green('blobsy docs')}                Full user guide`,
       `  ${colors.green('blobsy docs')} ${colors.yellow('<topic>')}        Specific topic (try ${colors.yellow('"backends"')}, ${colors.yellow('"compression"')})`,
       `  ${colors.green('blobsy docs --list')}          List all topics`,
+      `  ${colors.green('blobsy skill')}               Quick reference for AI agents`,
       '',
       `${colors.dim('https://github.com/jlevy/blobsy')}`,
     ].join('\n');
@@ -1645,7 +1646,7 @@ async function handleConfig(
         }
         return;
       } else {
-        throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+        throw new ValidationError('No .blobsy.yml found. Run: blobsy setup --auto <url>');
       }
     }
 
@@ -1703,7 +1704,7 @@ async function handleConfig(
         if (useGlobal) {
           console.log('No global .blobsy.yml found.');
         } else {
-          console.log('No .blobsy.yml found. Run blobsy init first.');
+          console.log('No .blobsy.yml found. Run: blobsy setup --auto <url>');
         }
       }
       return;
@@ -1763,7 +1764,7 @@ async function handleConfig(
       // Create global config if it doesn't exist
       await writeConfigFile(configPath, {});
     } else {
-      throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+      throw new ValidationError('No .blobsy.yml found. Run: blobsy setup --auto <url>');
     }
   }
 

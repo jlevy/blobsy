@@ -22,8 +22,8 @@ Options:
 Commands:
   setup [options] <url>        Set up blobsy in a git repo (wraps init + agent
                                integration)
-  init [options] <url>         Initialize blobsy in a git repo with a backend
-                               URL
+  init [options] <url>         Initialize blobsy config (low-level; prefer
+                               setup --auto)
   add [options] <path...>      Track files and stage changes to git
                                (recommended)
   track [options] <path...>    Start tracking files or directories with .bref
@@ -54,7 +54,7 @@ Commands:
   help [command]               display help for command
 
 Get started:
-  blobsy init s3://bucket/prefix/
+  blobsy setup --auto s3://bucket/prefix/
   blobsy add <file-or-dir>
   blobsy push
 
@@ -63,6 +63,7 @@ Learn more:
   blobsy docs                Full user guide
   blobsy docs <topic>        Specific topic (try "backends", "compression")
   blobsy docs --list          List all topics
+  blobsy skill               Quick reference for AI agents
 
 https://github.com/jlevy/blobsy
 ? 0
@@ -271,7 +272,7 @@ Global Options:
 $ blobsy init --help
 Usage: blobsy init [options] <url>
 
-Initialize blobsy in a git repo with a backend URL
+Initialize blobsy config (low-level; prefer setup --auto)
 
 Arguments:
   url                    Backend URL (e.g. s3://bucket/prefix/, local:../path)
