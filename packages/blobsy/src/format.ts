@@ -126,4 +126,88 @@ export function formatJsonDryRun(actions: string[]): string {
   return formatJson({ dry_run: true, actions });
 }
 
+// --- Semantic output symbols ---
+
+/** Centralized symbols for diagnostic and transfer output. */
+export const OUTPUT_SYMBOLS = {
+  pass: '\u2713', // ✓
+  fail: '\u2717', // ✗
+  warn: '\u26A0', // ⚠
+  info: '\u2139', // ℹ
+  push: '\u2191', // ↑
+  pull: '\u2193', // ↓
+} as const;
+
+// --- Section headings ---
+
+/** Format a section heading: "=== NAME ===" */
+export function formatHeading(name: string): string {
+  return `=== ${name.toUpperCase()} ===`;
+}
+
+// --- Diagnostic check results (for doctor) ---
+
+/** Format a passing check: "  ✓  message" */
+export function formatCheckPass(message: string): string {
+  return `  ${OUTPUT_SYMBOLS.pass}  ${message}`;
+}
+
+/** Format a failing check: "  ✗  message" */
+export function formatCheckFail(message: string): string {
+  return `  ${OUTPUT_SYMBOLS.fail}  ${message}`;
+}
+
+/** Format a warning check: "  ⚠  message" */
+export function formatCheckWarn(message: string): string {
+  return `  ${OUTPUT_SYMBOLS.warn}  ${message}`;
+}
+
+/** Format an info check: "  ℹ  message" */
+export function formatCheckInfo(message: string): string {
+  return `  ${OUTPUT_SYMBOLS.info}  ${message}`;
+}
+
+/** Format a fixed issue: "  ✓ Fixed  message" */
+export function formatCheckFixed(message: string): string {
+  return `  ${OUTPUT_SYMBOLS.pass} Fixed  ${message}`;
+}
+
+// --- Transfer results (for push/pull/sync) ---
+
+/** Format a single push result: "  ↑  path (size)" */
+export function formatPushResult(path: string, size?: number): string {
+  const sizeStr = size != null ? ` (${formatSize(size)})` : '';
+  return `  ${OUTPUT_SYMBOLS.push}  ${path}${sizeStr}`;
+}
+
+/** Format a single pull result: "  ↓  path (size)" */
+export function formatPullResult(path: string, size?: number): string {
+  const sizeStr = size != null ? ` (${formatSize(size)})` : '';
+  return `  ${OUTPUT_SYMBOLS.pull}  ${path}${sizeStr}`;
+}
+
+/** Format a transfer failure: "  ✗  path - FAILED: error" */
+export function formatTransferFail(path: string, error: string): string {
+  return `  ${OUTPUT_SYMBOLS.fail}  ${path} - FAILED: ${error}`;
+}
+
+// --- Summaries ---
+
+/** Pluralize: "1 file" / "3 files". Custom plural form optional. */
+export function formatCount(n: number, singular: string, plural?: string): string {
+  return `${n} ${n === 1 ? singular : (plural ?? `${singular}s`)}`;
+}
+
+// --- Informational messages ---
+
+/** Format a warning message: "⚠  message" */
+export function formatWarning(message: string): string {
+  return `${OUTPUT_SYMBOLS.warn}  ${message}`;
+}
+
+/** Format a note/hint: "  hint text" */
+export function formatHint(hint: string): string {
+  return `  ${hint}`;
+}
+
 export { FILE_STATE_SYMBOLS, SCHEMA_VERSION };
