@@ -79,8 +79,10 @@ Error: Invalid .bref file (not an object): [LOCAL_PATH]/data/model.bin.bref
 
 ```console
 $ blobsy status 2>&1
-Error: Invalid .bref file (not an object): [LOCAL_PATH]/data/model.bin.bref
-? 1
+  ?  data/model.bin  invalid .bref
+
+1 tracked file: 1 corrupt_bref
+? 0
 ```
 
 # Restore valid .bref

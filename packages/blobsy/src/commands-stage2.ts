@@ -127,7 +127,12 @@ async function getFileState(
     return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
   }
 
-  const ref = await readBref(refPath);
+  let ref;
+  try {
+    ref = await readBref(refPath);
+  } catch {
+    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'corrupt_bref', details: 'invalid .bref' };
+  }
 
   if (!existsSync(absPath)) {
     return {
