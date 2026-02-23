@@ -139,6 +139,71 @@ describe('setup command', () => {
     }
   });
 
+  it('should fail in non-git directory', async () => {
+    const nonGitDir = await mkdtemp(join(tmpdir(), 'blobsy-setup-nogit-'));
+    try {
+      await expect(
+        execa('blobsy', ['setup', '--auto', 'local:../backend'], {
+          cwd: nonGitDir,
+          env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
+        }),
+      ).rejects.toThrow(/Not inside a git repository/);
+    } finally {
+      await rm(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should create config with S3 URL', async () => {
+    const { stdout } = await execa('blobsy', ['setup', '--auto', 's3://my-test-bucket/prefix/'], {
+      cwd: testDir,
+      env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
+    });
+
+    expect(existsSync(join(testDir, '.blobsy.yml'))).toBe(true);
+    expect(stdout).toContain('Initialized blobsy');
+
+    const config = await readFile(join(testDir, '.blobsy.yml'), 'utf-8');
+    expect(config).toContain('s3://my-test-bucket/prefix/');
+  });
+
+  it('should suppress output with --quiet', async () => {
+    const backendDir = join(testDir, '..', 'setup-quiet-backend');
+    try {
+      const { stdout } = await execa(
+        'blobsy',
+        ['setup', '--auto', '--quiet', 'local:../setup-quiet-backend'],
+        {
+          cwd: testDir,
+          env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
+        },
+      );
+
+      expect(stdout).toBe('');
+      expect(existsSync(join(testDir, '.blobsy.yml'))).toBe(true);
+    } finally {
+      await rm(backendDir, { recursive: true, force: true }).catch(() => {
+        /* ignore cleanup errors */
+      });
+    }
+  });
+
+  it('should show dry-run output without creating files', async () => {
+    const { stdout } = await execa(
+      'blobsy',
+      ['setup', '--auto', '--dry-run', 'local:../setup-dryrun-backend'],
+      {
+        cwd: testDir,
+        env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
+      },
+    );
+
+    expect(stdout).toContain('Would create');
+    // Should not actually create config
+    expect(existsSync(join(testDir, '.blobsy.yml'))).toBe(false);
+    // Should not show "Setup complete!" in dry-run
+    expect(stdout).not.toContain('Setup complete!');
+  });
+
   it('should update .claude/skills/blobsy/SKILL.md idempotently', async () => {
     // Create .claude/ directory to simulate Claude Code presence
     const skillDir = join(testDir, '.claude', 'skills', 'blobsy');

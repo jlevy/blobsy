@@ -107,6 +107,71 @@ Error: Unrecognized backend URL scheme: r2:
 ? 1
 ```
 
+# Setup with --dry-run shows planned actions without creating files
+
+```console
+$ rm -f .blobsy.yml
+? 0
+```
+
+```console
+$ blobsy setup --auto --dry-run local:../remote
+Would create .blobsy.yml
+Would install pre-commit hook
+? 0
+```
+
+```console
+$ test -f .blobsy.yml && echo "exists" || echo "not created"
+not created
+? 0
+```
+
+# Setup with --quiet suppresses output
+
+```console
+$ blobsy setup --auto --quiet local:../remote
+? 0
+```
+
+```console
+$ cat .blobsy.yml
+backends:
+  default:
+    url: local:../remote
+? 0
+```
+
+# Setup with S3 URL creates correct config
+
+```console
+$ rm .blobsy.yml
+? 0
+```
+
+```console
+$ blobsy setup --auto s3://my-bucket/prefix/
+Initialized blobsy in .
+Created .blobsy.yml
+Installed .claude/skills/blobsy/SKILL.md
+Updated blobsy section in AGENTS.md
+
+Setup complete! Next steps:
+  blobsy track <file>    Track files with .bref pointers
+  blobsy push            Upload to backend
+  blobsy status          Check sync state
+  blobsy skill           Quick reference for AI agents
+? 0
+```
+
+```console
+$ cat .blobsy.yml
+backends:
+  default:
+    url: s3://my-bucket/prefix/
+? 0
+```
+
 # Setup help shows usage
 
 ```console

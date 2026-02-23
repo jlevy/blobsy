@@ -445,8 +445,8 @@ async function handleSetup(
     await installAgentFiles(repoRoot, globalOpts);
   }
 
-  // Show next steps (unless quiet/json)
-  if (!globalOpts.quiet && !globalOpts.json) {
+  // Show next steps (unless quiet/json/dry-run)
+  if (!globalOpts.quiet && !globalOpts.json && !globalOpts.dryRun) {
     console.log('');
     console.log('Setup complete! Next steps:');
     console.log('  blobsy track <file>    Track files with .bref pointers');
@@ -555,13 +555,28 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
   const parsed = parseBackendUrl(url);
   validateBackendUrl(parsed, repoRoot);
 
+  if (globalOpts.dryRun) {
+    const actions = [];
+    if (!existsSync(configPath)) {
+      actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
+    }
+    actions.push('install pre-commit hook');
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(actions));
+    } else {
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
+    }
+    return;
+  }
+
   // Auto-create local backend directory if it doesn't exist
   if (parsed.type === 'local' && parsed.path) {
     const absPath = resolveLocalPath(parsed.path, repoRoot);
 
     if (!existsSync(absPath)) {
       try {
-        // Create backend directory (with all parent directories if needed)
         await ensureDir(absPath);
 
         if (!globalOpts.quiet && !globalOpts.json) {
@@ -574,7 +589,6 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
         const parentDir = dirname(absPath);
 
         if (error.code === 'ENOENT') {
-          // This shouldn't happen with recursive: true, but just in case
           throw new ValidationError(
             `Cannot create backend directory: ${absPath}\n` +
               `  Parent directory does not exist: ${parentDir}\n` +
@@ -592,22 +606,6 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
         throw error; // Re-throw unexpected errors
       }
     }
-  }
-
-  if (globalOpts.dryRun) {
-    const actions = [];
-    if (!existsSync(configPath)) {
-      actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
-    }
-    actions.push('install pre-commit hook');
-    if (globalOpts.json) {
-      console.log(formatJsonDryRun(actions));
-    } else {
-      for (const a of actions) {
-        console.log(formatDryRun(a));
-      }
-    }
-    return;
   }
 
   if (existsSync(configPath)) {
