@@ -4,8 +4,16 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
-import { chmod, readFile, unlink } from 'node:fs/promises';
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { appendFile, chmod, readdir, readFile, unlink } from 'node:fs/promises';
 import { basename, dirname, join, isAbsolute } from 'node:path';
 
 import type { Command } from 'commander';
@@ -18,7 +26,7 @@ import {
   resolveConfig,
 } from './config.js';
 import { ensureDir } from './fs-utils.js';
-import { addGitignoreEntry, readBlobsyBlock } from './gitignore.js';
+import { addGitignoreEntry, readBlobsyBlock, removeGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
@@ -59,7 +67,7 @@ import type {
   GlobalOptions,
   TransferResult,
 } from './types.js';
-import { ValidationError, BREF_EXTENSION, FILE_STATE_SYMBOLS } from './types.js';
+import { ValidationError, BREF_EXTENSION, BREF_FORMAT, FILE_STATE_SYMBOLS } from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -605,19 +613,94 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
           fixable: true,
         });
       }
+    } else {
+      // Writability check
+      const testFile = join(blobsyDir, '.doctor-write-test');
+      try {
+        writeFileSync(testFile, '');
+        unlinkSync(testFile);
+      } catch {
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: '.blobsy/ is not writable',
+          fixed: false,
+          fixable: false,
+        });
+      }
+    }
+
+    // .blobsy/ gitignore check
+    const rootGitignore = join(repoRoot, '.gitignore');
+    if (existsSync(rootGitignore)) {
+      const content = readFileSync(rootGitignore, 'utf-8');
+      const hasBlobsyEntry = content.split('\n').some((line) => {
+        const trimmed = line.trim();
+        return trimmed === '.blobsy' || trimmed === '.blobsy/';
+      });
+      if (!hasBlobsyEntry) {
+        if (fix) {
+          await appendFile(rootGitignore, '\n.blobsy/\n');
+          integrityIssues.push({
+            type: 'gitignore',
+            severity: 'error',
+            message: 'Added .blobsy/ to root .gitignore',
+            fixed: true,
+            fixable: true,
+          });
+        } else {
+          integrityIssues.push({
+            type: 'gitignore',
+            severity: 'error',
+            message: '.blobsy/ not in root .gitignore',
+            fixed: false,
+            fixable: true,
+          });
+        }
+      }
+    } else if (fix) {
+      await appendFile(rootGitignore, '.blobsy/\n');
+      integrityIssues.push({
+        type: 'gitignore',
+        severity: 'error',
+        message: 'Created root .gitignore with .blobsy/ entry',
+        fixed: true,
+        fixable: true,
+      });
+    } else {
+      integrityIssues.push({
+        type: 'gitignore',
+        severity: 'error',
+        message: '.blobsy/ not in root .gitignore (no .gitignore found)',
+        fixed: false,
+        fixable: true,
+      });
     }
 
     const allBrefs = findBrefFiles(repoRoot, repoRoot);
 
-    // Check for orphaned .bref files
+    // .bref validation and orphan checks
     for (const relPath of allBrefs) {
       const absPath = join(repoRoot, relPath);
       const refPath = join(repoRoot, brefPath(relPath));
 
-      if (!existsSync(absPath) && existsSync(refPath)) {
+      if (existsSync(refPath)) {
         try {
           const ref = await readBref(refPath);
-          if (!ref.remote_key) {
+
+          // Format version check
+          if (ref.format !== BREF_FORMAT) {
+            integrityIssues.push({
+              type: 'bref',
+              severity: 'warning',
+              message: `${relPath}: unexpected .bref format "${ref.format}" (expected "${BREF_FORMAT}")`,
+              fixed: false,
+              fixable: false,
+            });
+          }
+
+          // Orphan check
+          if (!existsSync(absPath) && !ref.remote_key) {
             integrityIssues.push({
               type: 'orphan',
               severity: 'error',
@@ -667,6 +750,103 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
             });
           }
         }
+      }
+    }
+
+    // Dangling .gitignore entry check
+    const checkedDirs = new Set<string>();
+    for (const relPath of allBrefs) {
+      const fileDir = dirname(join(repoRoot, relPath));
+      if (checkedDirs.has(fileDir)) {
+        continue;
+      }
+      checkedDirs.add(fileDir);
+
+      const entries = await readBlobsyBlock(join(fileDir, '.gitignore'));
+      for (const entry of entries) {
+        const entryBref = join(fileDir, entry + BREF_EXTENSION);
+        if (!existsSync(entryBref)) {
+          if (fix) {
+            await removeGitignoreEntry(fileDir, entry);
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'warning',
+              message: `${entry}: removed dangling .gitignore entry`,
+              fixed: true,
+              fixable: true,
+            });
+          } else {
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'warning',
+              message: `${entry}: dangling .gitignore entry (no .bref found)`,
+              fixed: false,
+              fixable: true,
+            });
+          }
+        }
+      }
+    }
+
+    // Stat cache checks
+    const cacheDir = getStatCacheDir(repoRoot);
+    if (existsSync(cacheDir)) {
+      try {
+        const cacheFiles = await readdir(cacheDir);
+        for (const file of cacheFiles) {
+          if (!file.endsWith('.json')) {
+            continue;
+          }
+          const cachePath = join(cacheDir, file);
+          try {
+            const raw = readFileSync(cachePath, 'utf-8');
+            const entry = JSON.parse(raw) as { path?: string };
+            if (entry.path) {
+              const entryBref = join(repoRoot, brefPath(entry.path));
+              if (!existsSync(entryBref)) {
+                if (fix) {
+                  await unlink(cachePath);
+                  integrityIssues.push({
+                    type: 'cache',
+                    severity: 'info',
+                    message: `Removed stale cache entry for ${entry.path}`,
+                    fixed: true,
+                    fixable: true,
+                  });
+                } else if (verbose) {
+                  integrityIssues.push({
+                    type: 'cache',
+                    severity: 'info',
+                    message: `Stale cache entry for ${entry.path}`,
+                    fixed: false,
+                    fixable: true,
+                  });
+                }
+              }
+            }
+          } catch {
+            if (fix) {
+              await unlink(cachePath);
+              integrityIssues.push({
+                type: 'cache',
+                severity: 'warning',
+                message: `Removed corrupt cache file: ${file}`,
+                fixed: true,
+                fixable: true,
+              });
+            } else {
+              integrityIssues.push({
+                type: 'cache',
+                severity: 'warning',
+                message: `Corrupt cache file: ${file}`,
+                fixed: false,
+                fixable: true,
+              });
+            }
+          }
+        }
+      } catch {
+        // readdir failure -- skip cache checks
       }
     }
   } catch (err) {

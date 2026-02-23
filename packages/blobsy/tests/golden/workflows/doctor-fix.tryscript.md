@@ -8,6 +8,7 @@ before: |
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
+  echo ".blobsy/" >> .gitignore
   git add -A && git commit -q -m "init"
   mkdir -p remote
   mkdir -p data
