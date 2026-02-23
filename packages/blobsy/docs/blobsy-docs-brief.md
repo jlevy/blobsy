@@ -13,7 +13,7 @@ backends.
 ## Essential Commands
 
 ```
-blobsy init <url>           Set up backend (s3://..., local:...)
+blobsy setup --auto <url>   Set up blobsy (s3://..., local:...)
 blobsy add <path>           Track + stage to git (recommended)
 blobsy track <path>         Track without staging
 blobsy push                 Upload blobs to remote
@@ -47,7 +47,7 @@ compress:
 ## Quick Workflow
 
 ```bash
-blobsy init s3://bucket/prefix/
+blobsy setup --auto s3://bucket/prefix/
 blobsy add data/
 git commit -m "Track large files"
 git push

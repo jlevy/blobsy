@@ -1236,10 +1236,23 @@ blobsy track data/*.bin
 find data -name "*.bin" -exec blobsy track {} +
 ```
 
+### `blobsy setup` (recommended)
+
+Set up blobsy in a git repo.
+Wraps `init` with agent integration: creates `.blobsy.yml`, installs git hooks, and
+installs agent integration files (`.claude/skills/blobsy/SKILL.md` if Claude Code is
+detected, `AGENTS.md` section if the file exists).
+Idempotent -- safe to re-run.
+
+```bash
+blobsy setup --auto s3://my-datasets/project-v1/ --region us-east-1
+blobsy setup --auto local:../blobsy-remote
+```
+
 ### `blobsy init`
 
-Initialize blobsy in a git repo.
-Idempotent — every developer runs this after cloning.
+Low-level initialization (prefer `blobsy setup --auto`). Initialize blobsy in a git
+repo. Idempotent — every developer runs this after cloning.
 
 Fully non-interactive.
 Backend is specified as a URL (positional argument).
@@ -2084,7 +2097,8 @@ entering the main branch.
 
 ```
 SETUP
-  blobsy init                          Initialize blobsy in a git repo
+  blobsy setup --auto <url>            Set up blobsy (wraps init + agent integration)
+  blobsy init <url>                    Initialize blobsy config (low-level)
   blobsy config [key] [value]          Get/set configuration
        [--global]                    Use global config (~/.blobsy.yml)
        [--show-origin]               Show which config file each value comes from
@@ -2120,8 +2134,7 @@ DOCUMENTATION
   blobsy docs [topic] [--list|--brief] Display user documentation
 
 AGENT INTEGRATION
-  blobsy skill [--brief]               Output skill documentation for AI agents
-  blobsy prime [--brief]               Output context primer for AI agents
+  blobsy skill                         Output skill documentation for AI agents
 ```
 
 ### Flags (Global)

@@ -15,9 +15,9 @@ No hosting requirements.
 # Install
 npm install -g blobsy
 
-# Initialize in a git repo
+# Set up in a git repo (creates config, installs hooks, sets up agent integration)
 cd my-project
-blobsy init s3://my-bucket/my-project/blobs/
+blobsy setup --auto s3://my-bucket/my-project/blobs/
 
 # Add files: externalizes large (by default >1MB) files, stages everything to git
 blobsy add data/
@@ -90,7 +90,8 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 
 | Command | Description |
 | --- | --- |
-| `blobsy init <url>` | Initialize blobsy with a backend URL |
+| `blobsy setup --auto <url>` | Set up blobsy in a git repo (recommended) |
+| `blobsy init <url>` | Initialize blobsy config (low-level) |
 | `blobsy add <path...>` | Track files and stage changes to git (recommended) |
 | `blobsy track <path...>` | Track files without git staging (low-level) |
 | `blobsy untrack <path...>` | Stop tracking (keep local files) |
@@ -108,7 +109,6 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy check-unpushed` | List committed .bref files missing remote blobs |
 | `blobsy pre-push-check` | CI guard: fail if any .bref lacks remote blob |
 | `blobsy skill` | Output skill documentation for AI agents |
-| `blobsy prime` | Output context primer for AI agents |
 
 ### Global Options
 
@@ -243,7 +243,7 @@ externalizes it, bypassing these rules.
 
 ## Git Hooks
 
-Blobsy installs two git hooks by default (via `blobsy init`):
+Blobsy installs two git hooks by default (via `blobsy setup --auto` or `blobsy init`):
 
 | Hook | When | What it does |
 | --- | --- | --- |
@@ -252,7 +252,7 @@ Blobsy installs two git hooks by default (via `blobsy init`):
 
 **Opting out:**
 
-- Skip during init: `blobsy init --no-hooks s3://...`
+- Skip during setup: `blobsy setup --auto --no-hooks s3://...`
 - Bypass once: `git commit --no-verify` or `git push --no-verify`
 - Disable via environment: `BLOBSY_NO_HOOKS=1`
 - Remove entirely: `blobsy hooks uninstall`
@@ -325,6 +325,19 @@ blobsy push
 | Content-addressable | Yes (SHA-256) | Yes (OID) | Yes (MD5) |
 | JSON output | Yes (`--json`) | No | Yes |
 | Agent-friendly | Yes (non-interactive) | Partial | Partial |
+
+## Agent Integration
+
+`blobsy setup --auto` automatically installs integration files for AI coding agents:
+
+- **`.claude/skills/blobsy/SKILL.md`** -- Installed when Claude Code is detected
+  (`~/.claude/` exists, project `.claude/` directory, or `CLAUDE_*` env vars).
+  Provides context-efficient orientation (~200-300 tokens) for the agent.
+- **`AGENTS.md` section** -- If `AGENTS.md` exists in the repo, appends a blobsy
+  integration section with markers (`<!-- BEGIN BLOBSY INTEGRATION -->`) for idempotent
+  updates on re-run.
+
+For manual agent orientation, run `blobsy skill` to output the skill documentation.
 
 ## Development
 
