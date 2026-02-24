@@ -13,7 +13,7 @@ describe('rm command with --remote flag', () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'blobsy-rm-test-'));
-    backendDir = join(testDir, '..', 'backend');
+    backendDir = await mkdtemp(join(tmpdir(), 'blobsy-rm-backend-'));
 
     // Initialize git repo
     await execa('git', ['init'], { cwd: testDir });
@@ -21,7 +21,7 @@ describe('rm command with --remote flag', () => {
     await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
 
     // Initialize blobsy
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
   });
 
   afterEach(async () => {
