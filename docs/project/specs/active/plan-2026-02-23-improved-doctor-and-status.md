@@ -4,7 +4,7 @@
 
 **Author:** Joshua Levy with LLM assistance
 
-**Status:** Draft (reviewed 2026-02-23)
+**Status:** Implemented (2026-02-24)
 
 **Reviewer:** Senior engineering review (automated)
 
@@ -109,9 +109,9 @@ interface DoctorIssue {
 }
 ```
 
-Exit codes follow the design doc:
-- `0` — No errors or warnings (info-only is OK)
-- `1` — Warnings or errors detected
+Exit codes:
+- `0` — No errors (warnings and info-only are OK)
+- `1` — Errors detected (only `severity === 'error'` causes exit 1)
 
 ### Status Output Changes
 
@@ -162,7 +162,6 @@ Changes:
 ```
 $ blobsy doctor
 
-=== STATUS ===
   ✓  data/model.bin   synced    (1.2 MB)
   ○  data/new.bin     not pushed (500 KB)
 
@@ -194,7 +193,6 @@ No issues found.
 ```
 $ blobsy doctor
 
-=== STATUS ===
   ✓  data/model.bin   synced    (1.2 MB)
   ?  data/orphan.bin  file missing
 
@@ -297,7 +295,7 @@ This makes doctor a superset of status.
 
 | Check | Severity | Fixable | Notes |
 | --- | --- | --- | --- |
-| Backend tool available | error | no | `isAwsCliAvailable()` for S3; binary exists for command backends |
+| Backend tool available | warning | no | `isAwsCliAvailable()` for S3 (falls back to SDK); error for command backends |
 | Backend reachable and writable | error | no | Existing `runHealthCheck()` |
 | Command backend: fix no-op | — | — | `CommandBackend.healthCheck()` should check binary exists |
 
@@ -307,7 +305,7 @@ This makes doctor a superset of status.
 | --- | --- | --- | --- |
 | `.blobsy/` directory exists | error | yes | Create with `--fix` (existing) |
 | `.blobsy/` is writable | error | no | Test write to `.blobsy/` |
-| `.blobsy/` in `.gitignore` | warning | yes | Add entry with `--fix` |
+| `.blobsy/` in `.gitignore` | error | yes | Add entry with `--fix` |
 | All `.bref` files valid YAML | error | no | Catch per-file, report each |
 | All `.bref` format versions supported | warning | no | Check `format: blobsy-bref/0.1` |
 | Missing `.gitignore` entries | error | yes | Existing check |
@@ -651,7 +649,7 @@ All output must use Phase 0 helpers (`formatHeading()`, `formatCheckPass()`,
     // 2. Wrap resolveConfig() in try/catch — if config loading fails,
     //    record as config error but continue with checks that don't need config
     //    (directory, hooks, bref integrity). Set config = null when failed.
-    // 3. STATUS section: call computeFileStates(), display with formatHeading('STATUS')
+    // 3. STATUS section: call computeFileStates(), display directly (no heading)
     // 4. CONFIGURATION section: try/catch, call checkConfig(config, repoRoot, verbose)
     // 5. GIT HOOKS section: try/catch, call checkHooks(repoRoot, fix, verbose)
     // 6. BACKEND section: try/catch, call checkBackend(config, repoRoot, verbose)
@@ -680,8 +678,8 @@ All output must use Phase 0 helpers (`formatHeading()`, `formatCheckPass()`,
   When not verbose, only emit failing/warning/info checks.
   For sections with zero issues and non-verbose mode, skip the entire section header.
 
-  **Exit code:** Change from current logic (line 557: `issues.some(i => !i.fixed)`) to:
-  `process.exitCode = issues.some(i => !i.fixed && i.severity !== 'info') ? 1 : 0`.
+  **Exit code:** Only errors cause exit 1 (warnings are non-fatal):
+  `process.exitCode = issues.some(i => !i.fixed && i.severity === 'error') ? 1 : 0`.
 
 - [ ] **`packages/blobsy/src/commands-stage2.ts`** — Fix `readBref` crash in
   orphan-detection loop (line 477). Currently:
@@ -792,8 +790,8 @@ All output must use Phase 0 helpers (`formatHeading()`, `formatCheckPass()`,
   known:
 
   - **S3 backends:** Import `isAwsCliAvailable` from `backend-aws-cli.ts` (line 166).
-    Call it and report as error if false.
-    The function uses `execFileSync('aws', ['--version'])` internally.
+    Call it and report as warning if false (blobsy falls back to built-in S3 SDK). The
+    function uses `execFileSync('aws', ['--version'])` internally.
 
   - **Command backends:** The resolved backend config has `push_command`,
     `pull_command`, `exists_command` fields (types.ts:67-71). For each configured
@@ -952,7 +950,7 @@ Each test file documents the exact CLI behavior as a runnable markdown script.
 - [ ] Add test: doctor detects missing git hooks (warning severity).
 - [ ] Add test: doctor --fix installs missing hooks.
 - [ ] Add test: doctor detects corrupt `.bref` file (error severity, doesn’t crash).
-- [ ] Add test: doctor detects `.blobsy/` not in root `.gitignore` (warning).
+- [ ] Add test: doctor detects `.blobsy/` not in root `.gitignore` (error).
 
 #### `tests/golden/json/doctor-json.tryscript.md` — New JSON shape
 
@@ -988,8 +986,7 @@ before: |
 # Doctor with no config file
 
   $ blobsy doctor 2>&1
-  === STATUS ===
-  No tracked files found.
+    No tracked files found.
 
   === CONFIGURATION ===
     ✗  No .blobsy.yml found
@@ -1157,13 +1154,13 @@ before: |
     ✓ Fixed  data/deleted-file.bin: removed dangling .gitignore entry
   ...
 
-# .blobsy/ not in root .gitignore (warning)
+# .blobsy/ not in root .gitignore (error)
 
   $ grep -c '.blobsy' .gitignore || echo "not found"
   not found
   $ blobsy doctor 2>&1
   ...
-    ⚠  .blobsy/ not in root .gitignore
+    ✗  .blobsy/ not in root .gitignore
   ...
 
 # Doctor --fix adds .blobsy/ to root .gitignore
@@ -1202,8 +1199,7 @@ before: |
 # Doctor --verbose shows all passing checks
 
   $ blobsy doctor --verbose 2>&1
-  === STATUS ===
-    ✓  data/model.bin   synced ...
+      ✓  data/model.bin   synced ...
   ...
   === CONFIGURATION ===
     ✓  .blobsy.yml valid
@@ -1347,10 +1343,10 @@ The human-readable output changes format:
    With doctor including status output, a separate `stats` command may be redundant.
    Decision: defer `stats` — doctor provides the aggregate view.
 
-3. **Exit code 2 for errors?** The design doc suggests exit 1 for warnings and exit 2
-   for errors. The current implementation uses only exit 0 and 1. Introducing exit 2
-   could break scripts that check for `!= 0`. Decision: keep exit 0 and 1 for now.
-   Revisit when there’s a concrete need.
+3. **Exit code semantics.** Only `severity === 'error'` causes exit code 1. Warnings are
+   non-fatal (exit 0) since they indicate suboptimal but functional state.
+   This matches user expectations: missing hooks are annoying but don’t prevent
+   operation.
 
 ## Review Notes (2026-02-23)
 
