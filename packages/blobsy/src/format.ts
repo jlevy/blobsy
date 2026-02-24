@@ -11,11 +11,6 @@ import { FILE_STATE_SYMBOLS } from './types.js';
 /** JSON schema version for blobsy output */
 const SCHEMA_VERSION = '0.1';
 
-/** Bytes per kilobyte (base-2) */
-const BYTES_PER_KB = 1024;
-const BYTES_PER_MB = BYTES_PER_KB * 1024;
-const BYTES_PER_GB = BYTES_PER_MB * 1024;
-
 /** Threshold for showing one decimal place in size formatting */
 const SIZE_DECIMAL_THRESHOLD = 10;
 
@@ -32,18 +27,18 @@ export function formatFileState(
 
 /** Format bytes as human-readable size (B, KB, MB, GB). */
 export function formatSize(bytes: number): string {
-  if (bytes < BYTES_PER_KB) {
+  if (bytes < 1024) {
     return `${bytes} B`;
   }
-  if (bytes < BYTES_PER_MB) {
-    const kb = bytes / BYTES_PER_KB;
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
     return kb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(kb)} KB` : `${kb.toFixed(1)} KB`;
   }
-  if (bytes < BYTES_PER_GB) {
-    const mb = bytes / BYTES_PER_MB;
+  if (bytes < 1024 * 1024 * 1024) {
+    const mb = bytes / (1024 * 1024);
     return mb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
   }
-  const gb = bytes / BYTES_PER_GB;
+  const gb = bytes / (1024 * 1024 * 1024);
   return gb >= SIZE_DECIMAL_THRESHOLD ? `${Math.round(gb)} GB` : `${gb.toFixed(1)} GB`;
 }
 
@@ -139,12 +134,12 @@ export function formatJsonDryRun(actions: string[]): string {
 
 /** Centralized symbols for diagnostic and transfer output. */
 export const OUTPUT_SYMBOLS = {
-  pass: '\u2713', // ✓
-  fail: '\u2717', // ✗
-  warn: '\u26A0', // ⚠
-  info: '\u2139', // ℹ
-  push: '\u2191', // ↑
-  pull: '\u2193', // ↓
+  pass: '✓',
+  fail: '✗',
+  warn: '⚠',
+  info: 'ℹ',
+  push: '↑',
+  pull: '↓',
 } as const;
 
 // --- Section headings ---
