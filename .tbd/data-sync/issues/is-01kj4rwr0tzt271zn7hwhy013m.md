@@ -3,9 +3,9 @@ type: is
 id: is-01kj4rwr0tzt271zn7hwhy013m
 title: "Phase 4: Add blobsy readme and blobsy docs commands"
 kind: feature
-status: open
+status: closed
 priority: 2
-version: 6
+version: 7
 spec_path: docs/project/specs/active/plan-2026-02-22-polish-and-docs.md
 labels:
   - docs
@@ -18,6 +18,8 @@ child_order_hints:
   - is-01kj4sg1k5eys3bseaqx5pwrap
   - is-01kj4sg1r11p3ncvxfzmxxh9ag
 created_at: 2026-02-23T08:12:15.256Z
-updated_at: 2026-02-23T08:22:47.808Z
+updated_at: 2026-02-24T17:31:27.336Z
+closed_at: 2026-02-24T17:31:27.333Z
+close_reason: "Phase 4 complete: readme and docs commands fully implemented"
 ---
 Add marked + marked-terminal deps. Create markdown-output.ts (renderMarkdown, paginateOutput, extractSections, findSection). Create docs/ directory with blobsy-docs.md and blobsy-docs-brief.md. Add copy-docs.mjs build script. Register readme command (loadBundledDoc + render + paginate). Register docs command with [topic], --list, --brief. Add unit tests (markdown-output.test.ts) and golden tests (readme.tryscript.md, docs.tryscript.md). Update help, README, SKILL.md, CHANGELOG, design doc.

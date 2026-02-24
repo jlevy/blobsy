@@ -3,9 +3,9 @@ type: is
 id: is-01kj4rvgkx2mx9n5xmx41yf17j
 title: "Spec: Polish and Docs — pre-release CLI improvements"
 kind: epic
-status: open
+status: closed
 priority: 1
-version: 10
+version: 11
 spec_path: docs/project/specs/active/plan-2026-02-22-polish-and-docs.md
 labels: []
 dependencies: []
@@ -20,5 +20,7 @@ child_order_hints:
   - is-01kj4rxcpa005gf4t6ekvxjvfv
   - is-01kj4rxngnmgzcahnmr8rd57r6
 created_at: 2026-02-23T08:11:34.908Z
-updated_at: 2026-02-23T08:12:45.460Z
+updated_at: 2026-02-24T17:33:09.533Z
+closed_at: 2026-02-24T17:33:09.532Z
+close_reason: All 8 phases implemented and documented
 ---

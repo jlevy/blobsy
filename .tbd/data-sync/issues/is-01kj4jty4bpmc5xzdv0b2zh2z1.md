@@ -3,9 +3,9 @@ type: is
 id: is-01kj4jty4bpmc5xzdv0b2zh2z1
 title: "Phase 3: New blobsy add command (track + git stage)"
 kind: feature
-status: open
+status: closed
 priority: 1
-version: 7
+version: 8
 spec_path: docs/project/specs/active/plan-2026-02-22-polish-and-docs.md
 labels:
   - polish
@@ -18,5 +18,7 @@ child_order_hints:
   - is-01kj4sf9pr1wwfts059eqjx3aw
   - is-01kj4sf9vamybyq29nbzvfg8zg
 created_at: 2026-02-23T06:26:24.521Z
-updated_at: 2026-02-23T08:22:23.337Z
+updated_at: 2026-02-24T17:31:26.776Z
+closed_at: 2026-02-24T17:31:26.775Z
+close_reason: "Phase 3 complete: blobsy add command fully implemented"
 ---
