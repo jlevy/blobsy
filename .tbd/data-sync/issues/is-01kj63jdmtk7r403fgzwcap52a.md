@@ -3,9 +3,9 @@ type: is
 id: is-01kj63jdmtk7r403fgzwcap52a
 title: "Spec: Improved doctor and status commands"
 kind: epic
-status: open
+status: closed
 priority: 1
-version: 13
+version: 14
 spec_path: docs/project/specs/active/plan-2026-02-23-improved-doctor-and-status.md
 labels: []
 dependencies: []
@@ -23,5 +23,7 @@ child_order_hints:
   - is-01kj63nb8x6abmqvdx1rgqtm7x
   - is-01kj63nfvm2tzq4ebq3f6bca4k
 created_at: 2026-02-23T20:38:05.719Z
-updated_at: 2026-02-23T20:39:46.290Z
+updated_at: 2026-02-23T23:46:03.270Z
+closed_at: 2026-02-23T23:46:03.268Z
+close_reason: null
 ---
