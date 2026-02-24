@@ -1052,6 +1052,45 @@ const KNOWN_CONFIG_KEYS = new Set([
 
 const VALID_COMPRESS_ALGORITHMS = new Set(['zstd', 'gzip', 'brotli', 'none']);
 
+/** Compute Levenshtein edit distance between two strings. */
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array.from<number>({ length: n + 1 }).fill(0),
+  );
+  for (let i = 0; i <= m; i++) {
+    dp[i]![0] = i;
+  }
+  for (let j = 0; j <= n; j++) {
+    dp[0]![j] = j;
+  }
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[m]![n]!;
+}
+
+/** Find the closest match from a set of candidates within edit distance 2. */
+function findClosestMatch(input: string, candidates: Set<string>): string | undefined {
+  let best: string | undefined;
+  let bestDist = 3; // max distance threshold
+  for (const candidate of candidates) {
+    const dist = levenshtein(input, candidate);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 /** Run configuration validation checks for doctor. */
 function checkConfig(
   config: BlobsyConfig | null,
@@ -1202,16 +1241,19 @@ function checkConfig(
     });
   }
 
-  // 9. Unknown top-level config keys
-  // We need the raw config object with unknown keys. Since resolveConfig merges and validates,
-  // check by reading the raw YAML. For now, check the parsed config keys.
+  // 9. Unknown top-level config keys with did-you-mean suggestions
   const rawKeys = Object.keys(config);
   for (const key of rawKeys) {
     if (!KNOWN_CONFIG_KEYS.has(key)) {
+      let message = `Unknown config key: ${key}`;
+      const suggestion = findClosestMatch(key, KNOWN_CONFIG_KEYS);
+      if (suggestion) {
+        message += ` (did you mean "${suggestion}"?)`;
+      }
       issues.push({
         type: 'config',
         severity: 'info',
-        message: `Unknown config key: ${key}`,
+        message,
         fixed: false,
         fixable: false,
       });
