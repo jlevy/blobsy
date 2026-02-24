@@ -4,7 +4,7 @@
 
 **Author:** AI Design Review
 
-**Status:** Draft
+**Status:** Implemented (2026-02-24)
 
 ## Overview
 
@@ -187,6 +187,7 @@ The `{compress_suffix}` variable is **automatically evaluated** based on the com
 
 2. **Suffix Mapping** (see `template.ts:82-94`):
 ```
+
 zstd → ‘.zst’ gzip → ‘.gz’ brotli → ‘.br’ no compression → ‘’
 ````
 
@@ -269,12 +270,14 @@ When `blobsy sync` encounters uncommitted `.bref` files, the behavior follows th
 1. **Check working tree state** → Compare working tree `.bref` to `HEAD:.bref`
 2. **Issue warning** if uncommitted refs detected:
 ````
+
 Warning: 2 .bref files have uncommitted changes.
 Run ‘git add -A && git commit’ to commit them.
 ```
 3. **Proceed to stat cache merge** → Use three-way merge algorithm (see [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md#three-way-merge-algorithm))
 4. **Error if ambiguous** → No merge base exists (see line 356-368 of stat-cache-design.md):
 ```
+
 Error: No stat cache entry for data/model.bin.
 Cannot distinguish local edit from git pull.
 Use ‘blobsy push’ or ‘blobsy pull’ explicitly.
@@ -299,6 +302,7 @@ Use 'blobsy push' or 'blobsy pull' explicitly.
    updated ref)
 3. After explicit push/pull, stat cache is updated with merge base
 4. Future `blobsy sync` will work without ambiguity
+
 ````
 
 **File: `docs/project/design/current/blobsy-stat-cache-design.md`**
@@ -398,6 +402,7 @@ This limitation is **rare in practice** because:
 - Most workflows involve either local edits OR git operations, not interleaved
 - Hash recomputation is fast for most files (< 100ms per file on modern hardware)
 - Users can explicitly push/pull to resolve ambiguity
+
 ````
 
 ---
@@ -1059,9 +1064,11 @@ New contributors may think tool delegation is implemented.
 **Recommended fix:** Add a "V1 Implementation Scope" box early in
 backend-and-transport-design.md:
 ```
+
 > **V1 Implementation Scope**: Tool delegation (aws-cli, rclone) is fully designed but
 > deferred to V1.1. V1.0 ships with built-in S3 SDK and local filesystem backends only.
 > See [issues-history.md](issues-history.md) for rationale.
+
 ````
 
 Add similar notes in other sections describing V1.1+ features.
@@ -1110,6 +1117,7 @@ At line 502 (end of tool delegation section), add:
 
 In V1, all S3 transfers use the built-in SDK (`@aws-sdk/client-s3`). The `sync.tools` config option is accepted but ignored. Setting it to `["aws-cli"]` or `["rclone"]` will log a warning:
 ```
+
 Warning: sync.tools is set to ["aws-cli"] but tool delegation is not implemented in
 V1.0. Using built-in S3 SDK. Tool delegation will be available in V1.1.
 ```
@@ -1321,6 +1329,7 @@ blobsy gc --depth=branch --older-than=90d
 
 - Incremental GC: Track last GC timestamp, only scan new commits
 - Bloom filter: Use probabilistic data structure for faster reachability checks
+
 ````
 
 ---
@@ -1442,6 +1451,7 @@ jobs:
           blobsy pre-push-check
       # Exit code 1 fails the workflow automatically
 ```
+
 ````
 
 ---
@@ -1772,6 +1782,7 @@ Where:
 
 **Example:**
 ```
+
 Repo-relative path: data/research/model.bin SHA-256(path):
 7a3f0e9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f … Prefix: 7a Hash: 3f0e9b2c1d4e5f6a Cache file:
 .blobsy/stat-cache/7a/3f0e9b2c1d4e5f6a.json
@@ -1810,6 +1821,7 @@ Add after line 296 in blobsy-design.md:
 
 The default template (`{iso_date_secs}-{content_sha256_short}/{repo_path}...`) creates **new remote keys** each time the same file is pushed, even if content is identical:
 ```
+
 # First push (Feb 20, 10:30)
 
 20260220T103000-7a3f0e9b2c1d/data/model.bin.zst
@@ -1839,6 +1851,7 @@ With this template:
 - Same content always produces same key (deduplication across time)
 - Storage efficient
 - But: no timestamp ordering, harder to browse by date
+
 ```
 
 ---
