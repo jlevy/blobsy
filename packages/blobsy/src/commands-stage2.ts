@@ -591,7 +591,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   issues.push(...configIssues);
 
   // --- GIT HOOKS section ---
-  const hookIssues = checkHooks(repoRoot, fix, verbose);
+  const hookIssues = await checkHooks(repoRoot, fix, verbose);
   renderSection('GIT HOOKS', hookIssues, verbose, useJson);
   issues.push(...hookIssues);
 
@@ -1222,7 +1222,40 @@ function checkConfig(
 }
 
 /** Run git hook checks for doctor. */
-function checkHooks(repoRoot: string, fix: boolean, verbose: boolean): DoctorIssue[] {
+/** Detect path to the blobsy executable. */
+function detectBlobsyPath(): string {
+  const execPath = process.argv[1];
+  if (execPath && isAbsolute(execPath)) {
+    return execPath;
+  }
+  try {
+    return execFileSync('which', ['blobsy'], { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'blobsy';
+  }
+}
+
+/** Install a single git hook. */
+async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<void> {
+  const hookDir = join(repoRoot, '.git', 'hooks');
+  await ensureDir(hookDir);
+  const blobsyPath = detectBlobsyPath();
+  const hookPath = join(hookDir, hook.name);
+  const hookContent = `#!/bin/sh
+# Installed by: blobsy hooks install
+# To bypass: ${hook.bypassCmd}
+exec "${blobsyPath}" hook ${hook.gitEvent}
+`;
+  const { writeFile: writeFs } = await import('node:fs/promises');
+  await writeFs(hookPath, hookContent);
+  await chmod(hookPath, 0o755);
+}
+
+async function checkHooks(
+  repoRoot: string,
+  fix: boolean,
+  verbose: boolean,
+): Promise<DoctorIssue[]> {
   const issues: DoctorIssue[] = [];
   const hookDir = join(repoRoot, '.git', 'hooks');
 
@@ -1231,12 +1264,12 @@ function checkHooks(repoRoot: string, fix: boolean, verbose: boolean): DoctorIss
 
     if (!existsSync(hookPath)) {
       if (fix) {
-        // Hook installation is handled by handleHooks; just report
+        await installHook(repoRoot, hook);
         issues.push({
           type: 'hooks',
           severity: 'warning',
-          message: `${hook.name} hook not installed`,
-          fixed: false,
+          message: `Installed ${hook.name} hook`,
+          fixed: true,
           fixable: true,
         });
       } else {
@@ -1327,47 +1360,18 @@ export async function handleHooks(
   }
 
   if (action === 'install') {
-    const hookDir = join(repoRoot, '.git', 'hooks');
-    await ensureDir(hookDir);
-    const { writeFile: writeFs, chmod } = await import('node:fs/promises');
+    const blobsyPath = detectBlobsyPath();
 
-    // Detect absolute path to blobsy executable
-    let blobsyPath: string;
-
-    // Option 1: Use process.argv[1] (current executable)
-    const execPath = process.argv[1];
-
-    if (execPath && isAbsolute(execPath)) {
-      blobsyPath = execPath;
-    } else {
-      // Option 2: Try to find blobsy in PATH
-      try {
-        const result = execFileSync('which', ['blobsy'], { encoding: 'utf-8' });
-        blobsyPath = result.trim();
-      } catch {
-        // Fallback: use 'blobsy' and warn user
-        blobsyPath = 'blobsy';
-
-        if (!globalOpts.quiet) {
-          console.warn(
-            formatWarning('Could not detect absolute path to blobsy executable.') +
-              '\n   Hook will use "blobsy" from PATH.' +
-              '\n   To ensure hooks work, install blobsy globally: pnpm link --global',
-          );
-        }
-      }
+    if (blobsyPath === 'blobsy' && !globalOpts.quiet) {
+      console.warn(
+        formatWarning('Could not detect absolute path to blobsy executable.') +
+          '\n   Hook will use "blobsy" from PATH.' +
+          '\n   To ensure hooks work, install blobsy globally: pnpm link --global',
+      );
     }
 
     for (const hook of HOOK_TYPES) {
-      const hookPath = join(hookDir, hook.name);
-      const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
-# To bypass: ${hook.bypassCmd}
-exec "${blobsyPath}" hook ${hook.gitEvent}
-`;
-      await writeFs(hookPath, hookContent);
-      await chmod(hookPath, 0o755);
-
+      await installHook(repoRoot, hook);
       if (!globalOpts.quiet) {
         console.log(`Installed ${hook.name} hook.`);
       }

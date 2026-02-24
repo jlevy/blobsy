@@ -96,13 +96,13 @@ $ blobsy doctor --fix
 1 tracked file: 1 synced
 
 === GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
+  ✓ Fixed  Installed pre-commit hook
+  ✓ Fixed  Installed pre-push hook
 
 === INTEGRITY ===
   ✓ Fixed  Added .blobsy/ to root .gitignore
 
-2 issues found.
+All issues fixed.
 ? 0
 ```
 

@@ -68,13 +68,13 @@ $ blobsy doctor --fix
 1 tracked file: 1 synced
 
 === GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
+  ✓ Fixed  Installed pre-commit hook
+  ✓ Fixed  Installed pre-push hook
 
 === INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
-2 issues found.
+All issues fixed.
 ? 0
 ```
 
@@ -94,11 +94,7 @@ $ blobsy doctor
 
 1 tracked file: 1 synced
 
-=== GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
-
-2 issues found. Run with --fix to attempt repairs.
+No issues found.
 ? 0
 ```
 
@@ -122,14 +118,10 @@ $ blobsy doctor
 
 2 tracked files: 1 synced, 1 missing_file
 
-=== GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
-
 === INTEGRITY ===
   ✗  data/orphan.bin: .bref exists but local file missing and no remote_key
 
-3 issues found. Run with --fix to attempt repairs.
+1 issue found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -154,14 +146,10 @@ $ blobsy doctor
 
 2 tracked files: 1 synced, 1 new
 
-=== GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
-
 === INTEGRITY ===
   ✗  .blobsy/ directory missing
 
-3 issues found. Run with --fix to attempt repairs.
+1 issue found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -172,14 +160,10 @@ $ blobsy doctor --fix
 
 2 tracked files: 1 synced, 1 new
 
-=== GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
-
 === INTEGRITY ===
   ✓ Fixed  Created .blobsy/ directory
 
-2 issues found.
+All issues fixed.
 ? 0
 ```
 
@@ -190,10 +174,6 @@ $ blobsy doctor
 
 2 tracked files: 1 synced, 1 new
 
-=== GIT HOOKS ===
-  ⚠  pre-commit hook not installed
-  ⚠  pre-push hook not installed
-
-2 issues found. Run with --fix to attempt repairs.
+No issues found.
 ? 0
 ```
