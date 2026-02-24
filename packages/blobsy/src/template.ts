@@ -7,7 +7,7 @@
 
 import { basename, dirname } from 'node:path';
 
-import { OUTPUT_SYMBOLS } from './format.js';
+import { formatWarning } from './format.js';
 import { parseHash } from './hash.js';
 import { normalizePath } from './paths.js';
 
@@ -72,7 +72,7 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     if (key in replacements) {
       return replacements[key]!;
     }
-    console.warn(`${OUTPUT_SYMBOLS.warn}  unknown template variable {${key}} in key template`);
+    console.warn(formatWarning(`unknown template variable {${key}} in key template`));
     return `{${key}}`;
   });
 }
