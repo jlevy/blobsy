@@ -205,9 +205,12 @@ describe('CLI error messages', () => {
       const { chmod } = await import('node:fs/promises');
       await chmod(brefFile, 0o444);
 
+      // Modify the file so re-tracking will try to update the .bref
+      await writeFile(testFile, 'modified content');
+
       try {
-        // Try to track again (would try to update .bref)
-        const result = await execa('blobsy', ['track', '--force', 'readonly.bin'], {
+        // Try to track again (will try to update read-only .bref)
+        const result = await execa('blobsy', ['track', 'readonly.bin'], {
           cwd: testDir,
           reject: false,
         });
