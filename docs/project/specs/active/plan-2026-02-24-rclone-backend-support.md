@@ -313,49 +313,125 @@ See the detailed audit below.
 - Error messages for missing rclone, misconfigured remote
 - Push/pull output with rclone backend
 
-## Documentation Audit
+## Documentation and Code Audit
 
-All files that reference rclone, GCS, Azure, or transfer tool delegation as “deferred”
-and will need updating when this feature is implemented.
+Precise file:line locations that need updating when this feature is implemented.
+
+### Source code changes
+
+**`packages/blobsy/src/backend-rclone.ts`** — New file.
+`RcloneBackend` class + `isRcloneAvailable()`.
+
+**`packages/blobsy/src/transfer.ts`**
+
+- Line 132-134: Replace `throw BlobsyError('Cloud backend not yet implemented')` stub
+  with `RcloneBackend` instantiation for `gcs` and `azure` cases
+- Line 98-131: Add rclone as fallback in the `s3` case (after aws-cli, before SDK)
+
+**`packages/blobsy/src/types.ts`**
+
+- Line 67-82: Add `rclone_remote?: string | undefined` to `BackendConfig` interface
+
+**`packages/blobsy/src/config.ts`**
+
+- Line 52: `tools: ['aws-cli', 'rclone']` — default already correct, no change needed
+- Add `rclone_remote` to known config keys (for doctor did-you-mean validation)
+
+**`packages/blobsy/src/commands-stage2.ts`** — Add rclone doctor checks (binary
+availability, remote validation)
 
 ### Critical — Design docs
 
-| File | What needs updating |
-| --- | --- |
-| `docs/project/design/current/blobsy-backend-and-transport-design.md` | Lines 14-17: remove “Deferred to V1.1” for transfer tool delegation and GCS. Lines 480-539: update V1 implementation note (rclone now works). Lines 495-502: `sync.tools` and rclone selection now functional. Lines 572: rclone config for auth. |
-| `docs/project/design/current/blobsy-design.md` | Lines 3306-3308: deferred features table — mark transfer tool delegation and GCS as implemented. Lines 2208, 2297: `sync.tools` examples now functional. Line 1297: `gs://` scheme now works via rclone. |
+**`docs/project/design/current/blobsy-backend-and-transport-design.md`**
+
+- Line 14: `⏸️ **Deferred to V1.1+:**` — remove or update header
+- Line 15:
+  `- Transfer tool delegation (aws-cli, rclone, s5cmd) - fully designed but not implemented`
+  — mark rclone as implemented
+- Line 16: `- GCS backend ('gs://')` — mark implemented via rclone
+- Line 17: `- Azure Blob Storage backend ('az://')` — mark implemented via rclone
+- Line 359-364: `gcs` and `azure` backend type descriptions — remove “Deferred to a
+  future version”
+- Line 478-485: `🚧 V1.1 Feature` note — update: rclone delegation now implemented
+- Line 530-539: V1 Implementation Note saying `sync.tools` is “accepted but ignored” and
+  warning message example — remove or mark historical
+- Line 572: `rclone config (when rclone is selected from sync.tools)` — now functional
+
+**`docs/project/design/current/blobsy-design.md`**
+
+- Line 1297-1298: Backend type determination table — `gs://` and `azure://` now work via
+  rclone
+- Line 2208: `tools: [aws-cli, rclone]` — note this is now functional
+- Line 2297: Same `tools: [aws-cli, rclone]` in another config example
+- Line 3304-3309: Deferred features table — mark these rows as implemented:
+  - `Transfer tool delegation (aws-cli, rclone)` — ~2 weeks
+  - `GCS backend (gs://)` — ~1 week
+  - `Azure Blob backend (az://)` — ~1 week
 
 ### High — Specs with deferral references
 
-| File | What needs updating |
-| --- | --- |
-| `docs/project/specs/active/plan-2026-02-21-blobsy-phase1-implementation.md` | Line 31: “Cloud backends (S3, R2, GCS, Azure) — deferred” — GCS/Azure now work via rclone. Line 402: `sync.tools` example. |
-| `docs/project/specs/active/plan-2026-02-21-blobsy-phase2-v1-completion.md` | Line 37: Azure deferred note. Lines 184-187: “GCS Backend — Deferred to V1.1”. Lines 435-438: deferred features list. |
+**`docs/project/specs/active/plan-2026-02-21-blobsy-phase1-implementation.md`**
+
+- Line 31: `Cloud backends (S3, R2, GCS, Azure) -- deferred` — GCS/Azure now work via
+  rclone
+- Line 402: `sync.tools: [aws-cli, rclone]` — now functional
+
+**`docs/project/specs/active/plan-2026-02-21-blobsy-phase2-v1-completion.md`**
+
+- Line 37: `Azure backend (azure://) -- deferred` — now implemented
+- Line 146-147: `Transfer tool delegation (aws-cli, rclone) is deferred to V1.1` —
+  rclone now implemented
+- Line 178-187: `Transfer Tool Delegation (Deferred to V1.1)` and
+  `GCS Backend (Deferred to V1.1)` section headers — update status
+- Line 435-438: Deferred features list: `GCS backend` and `Transfer tool delegation` —
+  update
 
 ### High — Golden tests expecting errors for GCS/Azure
 
-| File | What needs updating |
-| --- | --- |
-| `packages/blobsy/tests/golden/commands/init.tryscript.md` | Lines 55-56, 77, 87, 99, 109: GCS/Azure init examples — currently expect “not yet implemented” error, will now succeed (or fail with “rclone not configured” instead) |
-| `packages/blobsy/tests/golden/commands/setup.tryscript.md` | Lines 104-105: GCS/Azure backend references |
-| `packages/blobsy/tests/golden/errors/validation-errors.tryscript.md` | Lines 59-60: GCS/Azure URL validation examples |
-| `packages/blobsy/tests/golden/json/config-json.tryscript.md` | Line 62: `rclone` in sync tools config |
+**`packages/blobsy/tests/golden/commands/init.tryscript.md`**
+
+- Line 55-56: `gs://my-bucket/prefix/` and `azure://my-container/prefix/` in supported
+  schemes error — init now succeeds (or fails with “rclone not configured”)
+- Line 77: `$ blobsy init gs://my-bucket/prefix/` — test case now succeeds
+- Line 87: `url: gs://my-bucket/prefix/` in expected config output
+- Line 99: `$ blobsy init azure://my-container/prefix/` — test case now succeeds
+- Line 109: `url: azure://my-container/prefix/` in expected config output
+
+**`packages/blobsy/tests/golden/commands/setup.tryscript.md`**
+
+- Line 104-105: `gs://` and `azure://` in supported schemes error output
+
+**`packages/blobsy/tests/golden/errors/validation-errors.tryscript.md`**
+
+- Line 59-60: `gs://` and `azure://` in error output
+
+**`packages/blobsy/tests/golden/json/config-json.tryscript.md`**
+
+- Line 62: `rclone` in sync tools config — no change needed
 
 ### Moderate — User-facing docs
 
-| File | What needs updating |
-| --- | --- |
-| `README.md` | Lines 159-164: add rclone backend examples alongside command backend. Lines 322-324: update comparison table to show GCS/Azure support. |
-| `packages/blobsy/docs/blobsy-docs.md` | Line 63: `sync.tools` example. Line 179: rclone command backend example (can now be a native backend). |
-| `packages/blobsy/SKILL.md` | Add rclone setup instructions for agents. |
+**`README.md`**
+
+- Line 161-163: rclone command backend examples — update to show native rclone backend
+  as preferred, command backend as alternative
+- Line 322-324: Comparison table — update to show GCS/Azure support
+
+**`packages/blobsy/docs/blobsy-docs.md`**
+
+- Line 63: `tools: ["aws-cli", "rclone"]` — now functional
+- Line 179: `command:rclone copyto` example — add native rclone backend example
+
+**`packages/blobsy/SKILL.md`** — Add rclone setup instructions for agents
 
 ### Minor — Reference docs
 
-| File | What needs updating |
-| --- | --- |
-| `docs/project/design/current/issues-history.md` | Line 130: “initial release ships with aws-cli + rclone” — now accurate, no longer deferred. |
-| `docs/project/specs/active/plan-2026-02-21-golden-test-quality-improvement.md` | Line 44: “Adding real cloud backend tests (S3, GCS, Azure)” — GCS via rclone now testable with local remote. |
-| `docs/project/specs/active/plan-2026-02-23-improved-doctor-and-status.md` | Doctor output examples may need rclone check additions. |
+- `docs/project/design/current/issues-history.md` line 130: “initial release ships with
+  aws-cli + rclone” — now accurate
+- `docs/project/specs/active/plan-2026-02-21-golden-test-quality-improvement.md` line
+  44: cloud backend tests — GCS via rclone now testable
+- `docs/project/specs/active/plan-2026-02-23-improved-doctor-and-status.md`: Doctor
+  output may need rclone check additions
 
 ### No updates needed (informational reference only)
 
