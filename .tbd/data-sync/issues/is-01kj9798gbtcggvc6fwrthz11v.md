@@ -3,9 +3,9 @@ type: is
 id: is-01kj9798gbtcggvc6fwrthz11v
 title: "Spec: V1 corrections and bug fixes"
 kind: epic
-status: open
+status: closed
 priority: 0
-version: 18
+version: 19
 spec_path: docs/project/specs/active/plan-2026-02-24-v1-corrections-and-bug-fixes.md
 labels: []
 dependencies: []
@@ -28,5 +28,7 @@ child_order_hints:
   - is-01kj97a2dva46sfa46msh286rq
   - is-01kj97a2jbq7azx19nm6egk9k4
 created_at: 2026-02-25T01:40:43.146Z
-updated_at: 2026-02-25T01:41:09.834Z
+updated_at: 2026-02-25T05:58:33.056Z
+closed_at: 2026-02-25T05:58:33.055Z
+close_reason: "All V1 corrections complete: bug fixes, semantic coloring, --color flag, golden tests, test reliability. PR #2 with all CI passing."
 ---

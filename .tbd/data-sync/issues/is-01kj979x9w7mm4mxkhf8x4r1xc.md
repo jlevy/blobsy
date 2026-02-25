@@ -3,9 +3,9 @@ type: is
 id: is-01kj979x9w7mm4mxkhf8x4r1xc
 title: "Add new format helpers: formatInfo, formatSuccess, formatCommand, formatNextSteps"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 4
+version: 5
 spec_path: docs/project/specs/active/plan-2026-02-24-v1-corrections-and-bug-fixes.md
 labels: []
 dependencies:
@@ -15,5 +15,7 @@ dependencies:
     target: is-01kj979xjkbe14818db9m1djpm
 parent_id: is-01kj9798gbtcggvc6fwrthz11v
 created_at: 2026-02-25T01:41:04.443Z
-updated_at: 2026-02-25T01:41:30.303Z
+updated_at: 2026-02-25T03:13:45.047Z
+closed_at: 2026-02-25T03:13:45.046Z
+close_reason: null
 ---
