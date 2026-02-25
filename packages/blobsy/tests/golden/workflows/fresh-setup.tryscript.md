@@ -41,6 +41,8 @@ $ blobsy track data/model.bin
 Tracking data/model.bin
 Created data/model.bin.bref
 Added data/model.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -49,6 +51,8 @@ $ blobsy track data/dataset.csv
 Tracking data/dataset.csv
 Created data/dataset.csv.bref
 Added data/dataset.csv to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

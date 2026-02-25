@@ -154,6 +154,8 @@ function walkDir(
       walkDir(fullPath, rootDir, ignoreMatcher, callback);
     } else if (entry.isFile()) {
       callback(fullPath);
+    } else if (entry.isSymbolicLink()) {
+      // Symlinks are silently skipped
     }
   }
 }

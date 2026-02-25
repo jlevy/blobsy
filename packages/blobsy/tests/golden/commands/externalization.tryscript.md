@@ -35,6 +35,8 @@ $ blobsy track data/
 Scanning data/...
   data/large.bin        ( 100 B)  -> tracked
 1 file tracked.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

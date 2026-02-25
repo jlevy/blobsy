@@ -1,5 +1,22 @@
 #!/usr/bin/env node
 
+// Process --color flag early, before picocolors evaluates.
+// picocolors checks NO_COLOR/FORCE_COLOR at import time.
+{
+  const colorIdx = process.argv.indexOf('--color');
+  if (colorIdx >= 0) {
+    const colorArg = process.argv[colorIdx + 1];
+    if (colorArg === 'never') {
+      process.env.NO_COLOR = '1';
+      delete process.env.FORCE_COLOR;
+    } else if (colorArg === 'always') {
+      process.env.FORCE_COLOR = '1';
+      delete process.env.NO_COLOR;
+    }
+    // 'auto' is the default — no env changes needed
+  }
+}
+
 /**
  * CLI entry point for blobsy.
  *
@@ -36,6 +53,7 @@ import {
   findSection,
 } from './markdown-output.js';
 import {
+  c,
   formatCount,
   formatDryRun,
   formatError,
@@ -48,7 +66,12 @@ import {
   OUTPUT_SYMBOLS,
 } from './format.js';
 import { ensureDir } from './fs-utils.js';
-import { addGitignoreEntry, removeGitignoreEntry } from './gitignore.js';
+import {
+  addGitignoreEntry,
+  removeGitignoreEntry,
+  detectGitignoreConflicts,
+  fixGitignoreForBlobsy,
+} from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
@@ -99,6 +122,12 @@ function createProgram(): Command {
         .hideHelp(false)
         .preset(true),
     )
+    .addOption(
+      new Option('--color <when>', 'Color output: always, never, auto')
+        .choices(['always', 'never', 'auto'])
+        .default('auto')
+        .hideHelp(false),
+    )
     .configureHelp({
       helpWidth: Math.min(88, process.stdout.columns ?? 80),
       showGlobalOptions: true,
@@ -131,7 +160,6 @@ function createProgram(): Command {
     .command('add')
     .description('Track files and stage changes to git (recommended)')
     .argument('<path...>', 'Files or directories to add')
-    .option('--force', 'Skip confirmation for destructive operations')
     .option(
       '--min-size <size>',
       'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
@@ -142,7 +170,6 @@ function createProgram(): Command {
     .command('track')
     .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
-    .option('--force', 'Skip confirmation for destructive operations')
     .option(
       '--min-size <size>',
       'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
@@ -192,7 +219,6 @@ function createProgram(): Command {
     .description('Bidirectional sync: push unpushed + pull missing')
     .argument('[path...]', 'Files or directories (default: all tracked)')
     .option('--skip-health-check', 'Skip backend health check')
-    .option('--force', 'Force sync (overwrite conflicts)')
     .action(wrapAction(handleSync));
 
   program
@@ -457,11 +483,11 @@ async function handleSetup(
   // Show next steps (unless quiet/json/dry-run)
   if (!globalOpts.quiet && !globalOpts.json && !globalOpts.dryRun) {
     console.log('');
-    console.log('Setup complete! Next steps:');
-    console.log('  blobsy track <file>    Track files with .bref pointers');
-    console.log('  blobsy push            Upload to backend');
-    console.log('  blobsy status          Check sync state');
-    console.log('  blobsy skill           Quick reference for AI agents');
+    console.log(c.success('Setup complete!') + ' Next steps:');
+    console.log(c.hint('  blobsy track <file>    Track files with .bref pointers'));
+    console.log(c.hint('  blobsy push            Upload to backend'));
+    console.log(c.hint('  blobsy status          Check sync state'));
+    console.log(c.hint('  blobsy skill           Quick reference for AI agents'));
   }
 }
 
@@ -724,6 +750,12 @@ async function handleTrack(
       await trackSingleFile(absPath, repoRoot, cacheDir, globalOpts);
     }
   }
+
+  // Next-steps guidance
+  if (!globalOpts.quiet && !globalOpts.json && !globalOpts.dryRun) {
+    console.log('');
+    console.log(c.hint('Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)'));
+  }
 }
 
 async function handleAdd(
@@ -762,10 +794,40 @@ async function handleAdd(
 
   // Stage to git
   if (!globalOpts.dryRun && uniqueFiles.length > 0) {
-    execFileSync('git', ['add', '--', ...uniqueFiles], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
+    // Detect gitignore conflicts before staging
+    const conflicts = detectGitignoreConflicts(uniqueFiles, repoRoot);
+    if (conflicts.length > 0) {
+      // Fix each conflicting gitignore rule
+      for (const conflict of conflicts) {
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(
+            `Fixing .gitignore rule: ${conflict.pattern} (in ${toRepoRelative(conflict.gitignorePath, repoRoot)})`,
+          );
+        }
+        await fixGitignoreForBlobsy(conflict.gitignorePath, conflict.lineNumber, conflict.pattern);
+      }
+      // Re-collect gitignore files that were modified by the fix
+      const fixedGitignores = [...new Set(conflicts.map((c) => c.gitignorePath))];
+      for (const gi of fixedGitignores) {
+        if (!uniqueFiles.includes(gi)) {
+          uniqueFiles.push(gi);
+        }
+      }
+    }
+
+    try {
+      execFileSync('git', ['add', '--', ...uniqueFiles], {
+        cwd: repoRoot,
+        stdio: 'pipe',
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new UserError(
+        `Failed to stage files to git: ${message}`,
+        'Check if the files are inside a gitignored directory.\n  Run `git status` to see the current state.',
+        1,
+      );
+    }
 
     if (!globalOpts.quiet && !globalOpts.json) {
       const brefCount = uniqueFiles.filter((f) => f.endsWith('.bref')).length;
@@ -843,7 +905,7 @@ async function trackSingleFile(
         if (globalOpts.json) {
           console.log(formatJsonMessage(`${relPath} already tracked (unchanged)`));
         } else {
-          console.log(`${relPath} already tracked (unchanged)`);
+          console.log(c.muted(`${relPath} already tracked (unchanged)`));
         }
       }
       result.unchanged++;
@@ -1036,7 +1098,7 @@ async function handleStatus(
     if (useJson) {
       console.log(formatJson({ files: [], summary: { total: 0 } }));
     } else {
-      console.log('No tracked files found.');
+      console.log(c.muted('No tracked files found.'));
     }
     return;
   }
@@ -1130,10 +1192,10 @@ async function handleVerify(
     }
     if (hasIssues) {
       console.log('');
-      console.log('Verification failed.');
+      console.log(c.error('Verification failed.'));
     } else {
       console.log('');
-      console.log('All files verified.');
+      console.log(c.success('All files verified.'));
     }
   }
 
@@ -1206,6 +1268,27 @@ async function untrackFile(
   const cacheDir = getStatCacheDir(repoRoot);
   const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
+
+  // Stage the modified .gitignore
+  const gitignorePath = join(fileDir, '.gitignore');
+  try {
+    execFileSync('git', ['add', '--', gitignorePath], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Non-fatal: gitignore may be in gitignored directory
+  }
+
+  // git rm the old .bref if it was in the index
+  try {
+    execFileSync('git', ['rm', '--cached', '--', refPath], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Not in index — that's fine
+  }
 
   if (!globalOpts.quiet) {
     if (globalOpts.json) {
@@ -1380,6 +1463,27 @@ async function rmFile(
   const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
 
+  // Stage the modified .gitignore
+  const gitignorePath = join(fileDir, '.gitignore');
+  try {
+    execFileSync('git', ['add', '--', gitignorePath], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Non-fatal: gitignore may be in gitignored directory
+  }
+
+  // git rm the old .bref if it was in the index
+  try {
+    execFileSync('git', ['rm', '--cached', '--', refPath], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Not in index — that's fine
+  }
+
   if (!globalOpts.quiet) {
     if (globalOpts.json) {
       console.log(formatJsonMessage(`Removed ${relPath}`));
@@ -1497,6 +1601,31 @@ async function mvSingleFile(
   if (existsSync(destAbs)) {
     const entry = await createCacheEntry(destAbs, destRel, ref.hash);
     await writeCacheEntry(cacheDir, entry);
+  }
+
+  // Stage changes to git
+  const filesToStage = [
+    destRefPath,
+    join(dirname(destAbs), '.gitignore'),
+    join(dirname(srcAbs), '.gitignore'),
+  ];
+  try {
+    execFileSync('git', ['add', '--', ...filesToStage], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Non-fatal: files may be in gitignored directory
+  }
+
+  // git rm the old .bref if it was in the index
+  try {
+    execFileSync('git', ['rm', '--cached', '--', srcRefPath], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch {
+    // Not in index — that's fine
   }
 
   if (!globalOpts.quiet) {

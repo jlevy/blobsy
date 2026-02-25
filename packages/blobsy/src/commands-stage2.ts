@@ -43,6 +43,7 @@ import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from '
 import { isAwsCliAvailable } from './backend-aws-cli.js';
 import { parseBackendUrl } from './backend-url.js';
 import {
+  c,
   formatCheckFail,
   formatCheckFixed,
   formatCheckPass,
@@ -193,7 +194,7 @@ export async function handlePush(
     if (globalOpts.json) {
       console.log(formatJson({ pushed: [], summary: { total: 0 } }));
     } else {
-      console.log('No tracked files to push.');
+      console.log(c.muted('No tracked files to push.'));
     }
     return;
   }
@@ -224,7 +225,7 @@ export async function handlePush(
 
     if (ref.remote_key && !opts.force) {
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  ${file.relPath}  already pushed`);
+        console.log(c.muted(`  ${file.relPath}  already pushed`));
       }
       continue;
     }
@@ -294,7 +295,7 @@ export async function handlePull(
     if (globalOpts.json) {
       console.log(formatJson({ pulled: [], summary: { total: 0 } }));
     } else {
-      console.log('No tracked files to pull.');
+      console.log(c.muted('No tracked files to pull.'));
     }
     return;
   }
@@ -325,7 +326,7 @@ export async function handlePull(
 
     if (!ref.remote_key) {
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  ${file.relPath}  not pushed yet (no remote_key)`);
+        console.log(c.muted(`  ${file.relPath}  not pushed yet (no remote_key)`));
       }
       continue;
     }
@@ -334,7 +335,7 @@ export async function handlePull(
       const currentHash = await computeHash(file.absPath);
       if (currentHash === ref.hash) {
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${file.relPath}  already up to date`);
+          console.log(c.muted(`  ${file.relPath}  already up to date`));
         }
         continue;
       }
@@ -420,7 +421,7 @@ export async function handleSync(
         console.log(formatDryRun(a));
       }
       if (actions.length === 0) {
-        console.log('Everything up to date.');
+        console.log(c.muted('Everything up to date.'));
       }
     }
     return;
@@ -490,7 +491,7 @@ export async function handleSync(
           errors++;
         }
       } else if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`);
+        console.log(c.muted(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`));
       }
     }
   }
@@ -516,7 +517,7 @@ export async function handleHealth(_opts: Record<string, unknown>, cmd: Command)
     if (globalOpts.json) {
       console.log(formatJson({ status: 'ok', message: 'Backend is reachable and writable.' }));
     } else {
-      console.log('Backend is reachable and writable.');
+      console.log(c.success('Backend is reachable and writable.'));
     }
   } catch (err) {
     if (globalOpts.json) {
@@ -580,7 +581,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
       console.log(`${formatCount(fileStates.length, 'tracked file')}: ${stateParts.join(', ')}`);
       console.log('');
     } else {
-      console.log('No tracked files found.');
+      console.log(c.muted('No tracked files found.'));
       console.log('');
     }
   }
@@ -989,7 +990,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   } else {
     const actionableIssues = issues.filter((i) => i.severity !== 'info' || i.fixed);
     if (actionableIssues.length === 0) {
-      console.log('No issues found.');
+      console.log(c.success('No issues found.'));
     } else {
       const unfixed = issues.filter((i) => !i.fixed && i.severity !== 'info').length;
       if (unfixed > 0) {
@@ -997,7 +998,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
           `${formatCount(unfixed, 'issue')} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
         );
       } else if (issues.some((i) => i.fixed)) {
-        console.log('All issues fixed.');
+        console.log(c.success('All issues fixed.'));
       }
     }
   }
@@ -1468,7 +1469,7 @@ export async function handleCheckUnpushed(
     console.log(formatJson({ unpushed, count: unpushed.length }));
   } else {
     if (unpushed.length === 0) {
-      console.log('All tracked files have been pushed.');
+      console.log(c.success('All tracked files have been pushed.'));
     } else {
       for (const path of unpushed) {
         console.log(`  ${path}`);
@@ -1512,7 +1513,7 @@ export async function handlePrePushCheck(
     console.log(formatJson({ missing, count: missing.length, ok: missing.length === 0 }));
   } else {
     if (missing.length === 0) {
-      console.log('All refs have remote blobs. Safe to push.');
+      console.log(c.success('All refs have remote blobs. Safe to push.'));
     } else {
       for (const path of missing) {
         console.log(`  ${path}  missing remote blob`);
@@ -1529,10 +1530,19 @@ export async function handlePrePushCheck(
 
 async function handlePreCommitHook(repoRoot: string): Promise<void> {
   // Find staged .bref files
-  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
-    cwd: repoRoot,
-    encoding: 'utf-8',
-  })
+  let stagedOutput: string;
+  try {
+    stagedOutput = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`blobsy pre-commit: failed to query staged files: ${message}`);
+    process.exitCode = 1;
+    return;
+  }
+  const staged = stagedOutput
     .trim()
     .split('\n')
     .filter((f) => f.endsWith(BREF_EXTENSION));
