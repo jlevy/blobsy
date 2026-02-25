@@ -342,7 +342,18 @@ function createProgram(): Command {
   return program;
 }
 
+declare const __BLOBSY_VERSION__: string;
+
 function getVersion(): string {
+  // Build-time injected version (production builds)
+  if (typeof __BLOBSY_VERSION__ !== 'undefined') {
+    return __BLOBSY_VERSION__;
+  }
+  // Env var fallback (dev mode via pnpm blobsy)
+  if (process.env.BLOBSY_DEV_VERSION) {
+    return process.env.BLOBSY_DEV_VERSION;
+  }
+  // Last resort
   return '0.1.0';
 }
 

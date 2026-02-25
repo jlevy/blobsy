@@ -4,7 +4,7 @@
 
 **Author:** Joshua Levy with LLM assistance
 
-**Status:** Draft
+**Status:** Implemented (2026-02-24)
 
 ## Overview
 
@@ -1766,14 +1766,19 @@ repo-root remains the default.
 - `blobsy config --global` works outside a git repo.
   The current `handleConfig()` always calls `findRepoRoot()` (line 1245). When
   `--global` is set AND no key/value requires repo context, skip `findRepoRoot()`:
+
   ```typescript
   const repoRoot = opts.global ? null : findRepoRoot();
   ```
+
   Then guard repo-dependent code paths with `if (repoRoot)`.
+
 - `blobsy config` (without `--global`) from outside a git repo should error with the
   standard “Not in a blobsy repository” message (existing behavior).
+
 - Precedence order (lowest to highest): builtin < global < repo.
   When both repo and global set the same key, repo wins.
+
 - `--show-origin --json` with all keys returns an array:
   ```json
   {
@@ -1784,10 +1789,13 @@ repo-root remains the default.
     ]
   }
   ```
+
 - `--unset` for a non-existent key: print nothing, exit 0 (idempotent, like git).
+
 - `--unset` for a whole section (e.g. `--unset compress`): deletes the entire
   `compress:` block. Empty parent objects after deletion are harmless (no cleanup needed
   for initial release).
+
 - `loadConfigFile()` in `config.ts:75` returns a partial `BlobsyConfig` — not all fields
   are present. `resolveConfigWithOrigins()` must preserve the partial nature to track
   which level set each key.
