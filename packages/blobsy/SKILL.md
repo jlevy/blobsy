@@ -25,12 +25,32 @@ Use blobsy when:
 ## Quick Reference
 
 ```bash
-blobsy track <path...>     # Track files (creates .bref pointers)
+# Recommended workflow
+blobsy add <path...>       # Track + stage to git (recommended)
 blobsy push [path...]      # Upload blobs to backend
 blobsy pull [path...]      # Download blobs from backend
+
+# Low-level tracking (no git staging)
+blobsy track <path...>     # Track files (creates .bref pointers)
+
+# Diagnostics
 blobsy status --json       # Current state (JSON)
 blobsy doctor --json       # Health check (JSON)
+
+# Configuration
+blobsy config [key] [val]  # Get/set config (supports --global, --show-origin, --unset)
+
+# Documentation
+blobsy readme              # Display README
+blobsy docs [topic]        # User guide (--list for topics, --brief for summary)
 ```
+
+## Key Options
+
+- `blobsy add --min-size <size>`: Override externalization threshold (e.g. `100kb`,
+  `5mb`)
+- `blobsy doctor --fix`: Auto-fix detected issues
+- `blobsy rm --remote`: Delete blob from backend (with confirmation)
 
 ## Current State
 
