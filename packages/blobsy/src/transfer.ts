@@ -25,6 +25,7 @@ import { LocalBackend } from './backend-local.js';
 import { CommandBackend } from './backend-command.js';
 import { BuiltinS3Backend } from './backend-s3.js';
 import { AwsCliBackend, isAwsCliAvailable } from './backend-aws-cli.js';
+import { RcloneBackend, buildRcloneConfig, isRcloneAvailable } from './backend-rclone.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
 import { getCompressConfig } from './config.js';
@@ -127,11 +128,29 @@ export function createBackend(
         return new AwsCliBackend(s3Config);
       }
 
+      // rclone as S3 fallback when aws CLI is unavailable
+      if (config.rclone_remote && isRcloneAvailable()) {
+        return new RcloneBackend(buildRcloneConfig(config));
+      }
+
       return new BuiltinS3Backend(s3Config);
     }
     case 'gcs':
-    case 'azure':
-      throw new BlobsyError(`Cloud backend not yet implemented: ${config.type}`, 'unknown');
+    case 'azure': {
+      if (config.rclone_remote && isRcloneAvailable()) {
+        return new RcloneBackend(buildRcloneConfig(config));
+      }
+      throw new BlobsyError(
+        `${config.type} backend requires rclone. Install rclone and configure a remote.`,
+        'not_found',
+        1,
+        [
+          'Install: https://rclone.org/install/',
+          'Configure: rclone config',
+          'Then set rclone_remote in .blobsy.yml',
+        ],
+      );
+    }
     default: {
       const _exhaustive: never = config.type;
       throw new BlobsyError(

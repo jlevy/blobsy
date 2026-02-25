@@ -3,10 +3,17 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
-import { resolveBackend, pushFile, pullFile, blobExists, runHealthCheck } from '../src/transfer.js';
+import {
+  resolveBackend,
+  createBackend,
+  pushFile,
+  pullFile,
+  blobExists,
+  runHealthCheck,
+} from '../src/transfer.js';
 import { computeHash } from '../src/hash.js';
-import type { BlobsyConfig, Bref } from '../src/types.js';
-import { BREF_FORMAT } from '../src/types.js';
+import type { BlobsyConfig, Bref, ResolvedBackendConfig } from '../src/types.js';
+import { BREF_FORMAT, BlobsyError } from '../src/types.js';
 
 describe('resolveBackend', () => {
   it('resolves the default backend', () => {
@@ -129,5 +136,54 @@ describe('push/pull integration with local backend', () => {
 
   it('runHealthCheck succeeds for valid local backend', async () => {
     await expect(runHealthCheck(config, repoRoot)).resolves.toBeUndefined();
+  });
+});
+
+describe('createBackend for gcs/azure', () => {
+  it('throws helpful error for gcs without rclone_remote', () => {
+    const config: ResolvedBackendConfig = {
+      type: 'gcs',
+      url: 'gs://my-bucket/prefix/',
+    };
+    expect(() => createBackend(config, '/tmp')).toThrow(BlobsyError);
+    try {
+      createBackend(config, '/tmp');
+    } catch (err) {
+      expect((err as BlobsyError).category).toBe('not_found');
+      expect((err as BlobsyError).message).toContain('rclone');
+    }
+  });
+
+  it('throws helpful error for azure without rclone_remote', () => {
+    const config: ResolvedBackendConfig = {
+      type: 'azure',
+      url: 'azure://my-container/prefix/',
+    };
+    expect(() => createBackend(config, '/tmp')).toThrow(BlobsyError);
+    try {
+      createBackend(config, '/tmp');
+    } catch (err) {
+      expect((err as BlobsyError).message).toContain('rclone');
+    }
+  });
+
+  it('resolves gcs URL type correctly', () => {
+    const config: BlobsyConfig = {
+      backends: {
+        default: { url: 'gs://my-bucket/prefix/' },
+      },
+    };
+    const resolved = resolveBackend(config);
+    expect(resolved.type).toBe('gcs');
+  });
+
+  it('resolves azure URL type correctly', () => {
+    const config: BlobsyConfig = {
+      backends: {
+        default: { url: 'azure://my-container/prefix/' },
+      },
+    };
+    const resolved = resolveBackend(config);
+    expect(resolved.type).toBe('azure');
   });
 });
