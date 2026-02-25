@@ -47,6 +47,8 @@ $ blobsy track data/results.csv
 Tracking data/results.csv
 Created data/results.csv.bref
 Added data/results.csv to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

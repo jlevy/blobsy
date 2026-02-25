@@ -190,6 +190,11 @@ describe('CLI error messages', () => {
 
   describe('permission errors', () => {
     it('should show user-friendly permission denied error', async () => {
+      // Root can bypass file permissions, so skip this test when running as root
+      if (process.getuid?.() === 0) {
+        return;
+      }
+
       // Create a file and track it
       const testFile = join(testDir, 'readonly.bin');
       await writeFile(testFile, 'test content');
@@ -200,9 +205,12 @@ describe('CLI error messages', () => {
       const { chmod } = await import('node:fs/promises');
       await chmod(brefFile, 0o444);
 
+      // Modify the file so re-tracking will try to update the .bref
+      await writeFile(testFile, 'modified content');
+
       try {
-        // Try to track again (would try to update .bref)
-        const result = await execa('blobsy', ['track', '--force', 'readonly.bin'], {
+        // Try to track again (will try to update read-only .bref)
+        const result = await execa('blobsy', ['track', 'readonly.bin'], {
           cwd: testDir,
           reject: false,
         });

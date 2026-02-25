@@ -97,5 +97,7 @@ $ blobsy track data/model.bin
 Tracking data/model.bin
 Created data/model.bin.bref
 Added data/model.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```

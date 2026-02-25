@@ -119,6 +119,8 @@ $ blobsy track data/hooktest.bin
 Tracking data/hooktest.bin
 Created data/hooktest.bin.bref
 Added data/hooktest.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

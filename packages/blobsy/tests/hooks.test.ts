@@ -17,6 +17,7 @@ describe('hooks command - absolute path', () => {
     await execa('git', ['init'], { cwd: testDir });
     await execa('git', ['config', 'user.email', 'test@example.com'], { cwd: testDir });
     await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
+    await execa('git', ['config', 'commit.gpgsign', 'false'], { cwd: testDir });
 
     // Initialize blobsy
     await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });

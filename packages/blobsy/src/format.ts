@@ -2,8 +2,13 @@
  * Output formatting for CLI display.
  *
  * State symbols, human-readable sizes, status tables, JSON envelopes,
- * and structured error formatting.
+ * structured error formatting, and semantic coloring via picocolors.
+ *
+ * Colors are automatically disabled when output is piped (non-TTY),
+ * when NO_COLOR is set, or via the --color never flag.
  */
+
+import colors, { createColors } from 'picocolors';
 
 import type { BlobsyError, FileStateSymbol, TransferResult } from './types.js';
 import { FILE_STATE_SYMBOLS } from './types.js';
@@ -13,6 +18,50 @@ const SCHEMA_VERSION = '0.1';
 
 /** Threshold for showing one decimal place in size formatting */
 const SIZE_DECIMAL_THRESHOLD = 10;
+
+// --- Semantic color map ---
+
+type ColorFn = (s: string | number) => string;
+
+/** Semantic color wrappers for CLI output. */
+export const c: {
+  success: ColorFn;
+  error: ColorFn;
+  warning: ColorFn;
+  info: ColorFn;
+  command: ColorFn;
+  heading: ColorFn;
+  hint: ColorFn;
+  muted: ColorFn;
+} = {
+  success: colors.green,
+  error: colors.red,
+  warning: colors.yellow,
+  info: colors.cyan,
+  command: colors.bold,
+  heading: colors.bold,
+  hint: colors.dim,
+  muted: colors.gray,
+};
+
+/**
+ * Re-initialize the semantic color map with explicit color mode.
+ * Call this after parsing the --color flag, before any output.
+ */
+export function initColors(mode: 'always' | 'never' | 'auto'): void {
+  if (mode === 'auto') {
+    return; // Use picocolors default detection
+  }
+  const pc = createColors(mode === 'always');
+  c.success = pc.green;
+  c.error = pc.red;
+  c.warning = pc.yellow;
+  c.info = pc.cyan;
+  c.command = pc.bold;
+  c.heading = pc.bold;
+  c.hint = pc.dim;
+  c.muted = pc.gray;
+}
 
 /** Format a file state line for status output. */
 export function formatFileState(
@@ -108,12 +157,12 @@ export function formatTransferSummary(results: TransferResult[]): string {
 
 /** Format an error with troubleshooting suggestions. */
 export function formatError(error: BlobsyError | Error): string {
-  const lines: string[] = [`Error: ${error.message}`];
+  const lines: string[] = [c.error(`Error: ${error.message}`)];
 
   if ('suggestions' in error && error.suggestions) {
     lines.push('');
     for (const suggestion of error.suggestions) {
-      lines.push(`  ${suggestion}`);
+      lines.push(c.hint(`  ${suggestion}`));
     }
   }
 
@@ -146,34 +195,34 @@ export const OUTPUT_SYMBOLS = {
 
 /** Format a section heading: "=== NAME ===" */
 export function formatHeading(name: string): string {
-  return `=== ${name.toUpperCase()} ===`;
+  return c.heading(`=== ${name.toUpperCase()} ===`);
 }
 
 // --- Diagnostic check results (for doctor) ---
 
 /** Format a passing check: "  ✓  message" */
 export function formatCheckPass(message: string): string {
-  return `  ${OUTPUT_SYMBOLS.pass}  ${message}`;
+  return `  ${c.success(OUTPUT_SYMBOLS.pass)}  ${message}`;
 }
 
 /** Format a failing check: "  ✗  message" */
 export function formatCheckFail(message: string): string {
-  return `  ${OUTPUT_SYMBOLS.fail}  ${message}`;
+  return `  ${c.error(OUTPUT_SYMBOLS.fail)}  ${message}`;
 }
 
 /** Format a warning check: "  ⚠  message" */
 export function formatCheckWarn(message: string): string {
-  return `  ${OUTPUT_SYMBOLS.warn}  ${message}`;
+  return `  ${c.warning(OUTPUT_SYMBOLS.warn)}  ${message}`;
 }
 
 /** Format an info check: "  ℹ  message" */
 export function formatCheckInfo(message: string): string {
-  return `  ${OUTPUT_SYMBOLS.info}  ${message}`;
+  return `  ${c.info(OUTPUT_SYMBOLS.info)}  ${message}`;
 }
 
 /** Format a fixed issue: "  ✓ Fixed  message" */
 export function formatCheckFixed(message: string): string {
-  return `  ${OUTPUT_SYMBOLS.pass} Fixed  ${message}`;
+  return `  ${c.success(OUTPUT_SYMBOLS.pass + ' Fixed')}  ${message}`;
 }
 
 // --- Transfer results (for push/pull/sync) ---
@@ -181,18 +230,18 @@ export function formatCheckFixed(message: string): string {
 /** Format a single push result: "  ↑  path (size)" */
 export function formatPushResult(path: string, size?: number): string {
   const sizeStr = size != null ? ` (${formatSize(size)})` : '';
-  return `  ${OUTPUT_SYMBOLS.push}  ${path}${sizeStr}`;
+  return `  ${c.success(OUTPUT_SYMBOLS.push)}  ${path}${sizeStr}`;
 }
 
 /** Format a single pull result: "  ↓  path (size)" */
 export function formatPullResult(path: string, size?: number): string {
   const sizeStr = size != null ? ` (${formatSize(size)})` : '';
-  return `  ${OUTPUT_SYMBOLS.pull}  ${path}${sizeStr}`;
+  return `  ${c.success(OUTPUT_SYMBOLS.pull)}  ${path}${sizeStr}`;
 }
 
 /** Format a transfer failure: "  ✗  path - FAILED: error" */
 export function formatTransferFail(path: string, error: string): string {
-  return `  ${OUTPUT_SYMBOLS.fail}  ${path} - FAILED: ${error}`;
+  return `  ${c.error(OUTPUT_SYMBOLS.fail)}  ${path} - ${c.error('FAILED: ' + error)}`;
 }
 
 // --- Summaries ---
@@ -206,12 +255,38 @@ export function formatCount(n: number, singular: string, plural?: string): strin
 
 /** Format a warning message: "⚠  message" */
 export function formatWarning(message: string): string {
-  return `${OUTPUT_SYMBOLS.warn}  ${message}`;
+  return `${c.warning(OUTPUT_SYMBOLS.warn)}  ${c.warning(message)}`;
 }
 
 /** Format a note/hint: "  hint text" */
 export function formatHint(hint: string): string {
-  return `  ${hint}`;
+  return c.hint(`  ${hint}`);
+}
+
+// --- New semantic helpers ---
+
+/** Format an info/status message with color. */
+export function formatInfo(message: string): string {
+  return c.info(message);
+}
+
+/** Format a success/completion message with color. */
+export function formatSuccess(message: string): string {
+  return c.success(message);
+}
+
+/** Format a CLI command reference with bold. */
+export function formatCommand(command: string): string {
+  return c.command(command);
+}
+
+/** Format a "next steps" block: heading + indented step list. */
+export function formatNextSteps(heading: string, steps: { cmd: string; desc: string }[]): string {
+  const lines: string[] = [heading];
+  for (const step of steps) {
+    lines.push(`  ${c.command(step.cmd)}    ${step.desc}`);
+  }
+  return lines.join('\n');
 }
 
 export { FILE_STATE_SYMBOLS, SCHEMA_VERSION };

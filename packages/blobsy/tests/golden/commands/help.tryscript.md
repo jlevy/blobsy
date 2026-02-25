@@ -17,6 +17,8 @@ Options:
   --quiet                         Suppress all output except errors
   --verbose                       Detailed progress output
   --dry-run                       Show what would happen without doing it
+  --color <when>                  Color output: always, never, auto (choices:
+                                  "always", "never", "auto", default: "auto")
   -h, --help                      Display help for command
 
 Commands:
@@ -83,7 +85,6 @@ Arguments:
   path               Files or directories to track
 
 Options:
-  --force            Skip confirmation for destructive operations
   --min-size <size>  Override minimum file size for directory tracking (e.g.
                      "100kb", "5mb")
   -h, --help         Display help for command
@@ -94,6 +95,8 @@ Global Options:
   --quiet            Suppress all output except errors
   --verbose          Detailed progress output
   --dry-run          Show what would happen without doing it
+  --color <when>     Color output: always, never, auto (choices: "always",
+                     "never", "auto", default: "auto")
 ? 0
 ```
 
@@ -106,18 +109,20 @@ Usage: blobsy push [options] [path...]
 Upload local blobs to the configured backend
 
 Arguments:
-  path        Files or directories (default: all tracked)
+  path            Files or directories (default: all tracked)
 
 Options:
-  --force     Re-push even if remote exists
-  -h, --help  Display help for command
+  --force         Re-push even if remote exists
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -130,18 +135,20 @@ Usage: blobsy pull [options] [path...]
 Download blobs from the configured backend
 
 Arguments:
-  path        Files or directories (default: all tracked)
+  path            Files or directories (default: all tracked)
 
 Options:
-  --force     Overwrite local modifications
-  -h, --help  Display help for command
+  --force         Overwrite local modifications
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -154,18 +161,20 @@ Usage: blobsy status [options] [path...]
 Show sync state of tracked files
 
 Arguments:
-  path        Files or directories (default: all tracked)
+  path            Files or directories (default: all tracked)
 
 Options:
-  --json      Structured JSON output
-  -h, --help  Display help for command
+  --json          Structured JSON output
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -182,7 +191,6 @@ Arguments:
 
 Options:
   --skip-health-check  Skip backend health check
-  --force              Force sync (overwrite conflicts)
   -h, --help           Display help for command
 
 Global Options:
@@ -191,6 +199,8 @@ Global Options:
   --quiet              Suppress all output except errors
   --verbose            Detailed progress output
   --dry-run            Show what would happen without doing it
+  --color <when>       Color output: always, never, auto (choices: "always",
+                       "never", "auto", default: "auto")
 ? 0
 ```
 
@@ -203,18 +213,20 @@ Usage: blobsy verify [options] [path...]
 Verify local files match their .bref hashes
 
 Arguments:
-  path        Files or directories (default: all tracked)
+  path            Files or directories (default: all tracked)
 
 Options:
-  --json      Structured JSON output
-  -h, --help  Display help for command
+  --json          Structured JSON output
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -227,21 +239,23 @@ Usage: blobsy rm [options] <path...>
 Remove tracked files: delete local + move .bref to trash
 
 Arguments:
-  path         Files or directories to remove
+  path            Files or directories to remove
 
 Options:
-  --local      Delete local file only, keep .bref and remote
-  --remote     Also delete blob from backend (requires confirmation)
-  --force      Skip confirmation prompts
-  --recursive  Required for directory removal
-  -h, --help   Display help for command
+  --local         Delete local file only, keep .bref and remote
+  --remote        Also delete blob from backend (requires confirmation)
+  --force         Skip confirmation prompts
+  --recursive     Required for directory removal
+  -h, --help      Display help for command
 
 Global Options:
-  --version    Show version number
-  --json       Structured JSON output
-  --quiet      Suppress all output except errors
-  --verbose    Detailed progress output
-  --dry-run    Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -254,17 +268,19 @@ Usage: blobsy doctor [options]
 Run diagnostics and optionally auto-fix issues
 
 Options:
-  --fix       Attempt to automatically fix detected issues
-  --json      Structured JSON output
-  --verbose   Show detailed diagnostic logs
-  -h, --help  Display help for command
+  --fix           Attempt to automatically fix detected issues
+  --json          Structured JSON output
+  --verbose       Show detailed diagnostic logs
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -291,6 +307,8 @@ Global Options:
   --quiet                Suppress all output except errors
   --verbose              Detailed progress output
   --dry-run              Show what would happen without doing it
+  --color <when>         Color output: always, never, auto (choices: "always",
+                         "never", "auto", default: "auto")
 ? 0
 ```
 
@@ -303,18 +321,20 @@ Usage: blobsy untrack [options] <path...>
 Stop tracking files (keeps local files, moves .bref to trash)
 
 Arguments:
-  path         Files or directories to untrack
+  path            Files or directories to untrack
 
 Options:
-  --recursive  Required for directory removal
-  -h, --help   Display help for command
+  --recursive     Required for directory removal
+  -h, --help      Display help for command
 
 Global Options:
-  --version    Show version number
-  --json       Structured JSON output
-  --quiet      Suppress all output except errors
-  --verbose    Detailed progress output
-  --dry-run    Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -327,18 +347,20 @@ Usage: blobsy mv [options] <source> <dest>
 Rename or move tracked files or directories (updates .bref + .gitignore)
 
 Arguments:
-  source      Source tracked file or directory
-  dest        Destination path
+  source          Source tracked file or directory
+  dest            Destination path
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -351,21 +373,23 @@ Usage: blobsy config [options] [key] [value]
 Show, get, or set .blobsy.yml values
 
 Arguments:
-  key            Config key (dot-separated, e.g. compress.algorithm)
-  value          Value to set
+  key             Config key (dot-separated, e.g. compress.algorithm)
+  value           Value to set
 
 Options:
-  --global       Use global config (~/.blobsy.yml)
-  --show-origin  Show which config file each value comes from
-  --unset        Remove the specified config key
-  -h, --help     Display help for command
+  --global        Use global config (~/.blobsy.yml)
+  --show-origin   Show which config file each value comes from
+  --unset         Remove the specified config key
+  -h, --help      Display help for command
 
 Global Options:
-  --version      Show version number
-  --json         Structured JSON output
-  --quiet        Suppress all output except errors
-  --verbose      Detailed progress output
-  --dry-run      Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -378,17 +402,19 @@ Usage: blobsy hooks [options] <action>
 Install or uninstall blobsy git hooks (pre-commit, pre-push)
 
 Arguments:
-  action      install or uninstall
+  action          install or uninstall
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -401,14 +427,16 @@ Usage: blobsy health [options]
 Test backend connectivity and permissions
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -421,14 +449,16 @@ Usage: blobsy check-unpushed [options]
 List committed .bref files whose blobs are not yet pushed
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -441,14 +471,16 @@ Usage: blobsy pre-push-check [options]
 CI guard: fail if any .bref is missing its remote blob
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -461,14 +493,16 @@ Usage: blobsy readme [options]
 Display the blobsy README
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -481,19 +515,21 @@ Usage: blobsy docs [options] [topic]
 Display blobsy user documentation
 
 Arguments:
-  topic       Section to display (e.g. "compression", "backends")
+  topic           Section to display (e.g. "compression", "backends")
 
 Options:
-  --list      List available sections
-  --brief     Condensed version
-  -h, --help  Display help for command
+  --list          List available sections
+  --brief         Condensed version
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```
 
@@ -506,13 +542,15 @@ Usage: blobsy skill [options]
 Output blobsy skill documentation (for AI agents)
 
 Options:
-  -h, --help  Display help for command
+  -h, --help      Display help for command
 
 Global Options:
-  --version   Show version number
-  --json      Structured JSON output
-  --quiet     Suppress all output except errors
-  --verbose   Detailed progress output
-  --dry-run   Show what would happen without doing it
+  --version       Show version number
+  --json          Structured JSON output
+  --quiet         Suppress all output except errors
+  --verbose       Detailed progress output
+  --dry-run       Show what would happen without doing it
+  --color <when>  Color output: always, never, auto (choices: "always", "never",
+                  "auto", default: "auto")
 ? 0
 ```

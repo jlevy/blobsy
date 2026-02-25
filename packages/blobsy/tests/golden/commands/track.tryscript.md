@@ -33,6 +33,8 @@ $ blobsy track data/model.bin
 Tracking data/model.bin
 Created data/model.bin.bref
 Added data/model.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -83,6 +85,8 @@ model.bin
 ```console
 $ blobsy track data/model.bin
 data/model.bin already tracked (unchanged)
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -96,6 +100,8 @@ $ echo "updated content for model" > data/model.bin
 ```console
 $ blobsy track data/model.bin
 Updated data/model.bin.bref (hash changed)
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -118,6 +124,8 @@ $ echo "hello blobsy" > data/model.bin
 ```console
 $ blobsy track data/model.bin.bref
 Updated data/model.bin.bref (hash changed)
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -152,6 +160,8 @@ Scanning data/research/...
   data/research/data.bin (  12 B)  -> tracked
   data/research/report.bin (  13 B)  -> tracked
 2 files tracked.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -191,5 +201,7 @@ Scanning data/research/...
   data/research/data.bin (  12 B)  -> already tracked (unchanged)
   data/research/report.bin (  13 B)  -> already tracked (unchanged)
 0 files tracked, 2 unchanged.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```

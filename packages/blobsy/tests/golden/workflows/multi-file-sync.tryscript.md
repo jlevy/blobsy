@@ -30,6 +30,8 @@ Scanning data/models/...
   data/models/model-2.bin (   8 B)  -> tracked
   data/models/model-3.bin (   8 B)  -> tracked
 3 files tracked.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
@@ -40,6 +42,8 @@ Scanning data/datasets/...
   data/datasets/data-2.bin (  10 B)  -> tracked
   data/datasets/data-3.bin (  10 B)  -> tracked
 3 files tracked.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 
