@@ -108,6 +108,8 @@ $ cp small-file.txt data/orphan.bin && blobsy track data/orphan.bin && rm data/o
 Tracking data/orphan.bin
 Created data/orphan.bin.bref
 Added data/orphan.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

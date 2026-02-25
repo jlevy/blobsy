@@ -39,6 +39,8 @@ $ blobsy track data/readme.txt
 Tracking data/readme.txt
 Created data/readme.txt.bref
 Added data/readme.txt to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

@@ -134,6 +134,8 @@ Scanning data/research/...
   data/research/data.bin (  14 B)  -> tracked
   data/research/model.bin (  15 B)  -> tracked
 2 files tracked.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

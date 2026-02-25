@@ -25,6 +25,8 @@ $ echo "updated" > data/model.bin
 ```console
 $ blobsy track --verbose data/model.bin
 Updated data/model.bin.bref (hash changed)
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
 

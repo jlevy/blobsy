@@ -196,5 +196,7 @@ Global Options:
   --quiet                Suppress all output except errors
   --verbose              Detailed progress output
   --dry-run              Show what would happen without doing it
+  --color <when>         Color output: always, never, auto (choices: "always",
+                         "never", "auto", default: "auto")
 ? 0
 ```
