@@ -8,7 +8,7 @@
  * when NO_COLOR is set, or via the --color never flag.
  */
 
-import colors from 'picocolors';
+import colors, { createColors } from 'picocolors';
 
 import type { BlobsyError, FileStateSymbol, TransferResult } from './types.js';
 import { FILE_STATE_SYMBOLS } from './types.js';
@@ -21,8 +21,19 @@ const SIZE_DECIMAL_THRESHOLD = 10;
 
 // --- Semantic color map ---
 
+type ColorFn = (s: string | number) => string;
+
 /** Semantic color wrappers for CLI output. */
-export const c = {
+export const c: {
+  success: ColorFn;
+  error: ColorFn;
+  warning: ColorFn;
+  info: ColorFn;
+  command: ColorFn;
+  heading: ColorFn;
+  hint: ColorFn;
+  muted: ColorFn;
+} = {
   success: colors.green,
   error: colors.red,
   warning: colors.yellow,
@@ -31,7 +42,26 @@ export const c = {
   heading: colors.bold,
   hint: colors.dim,
   muted: colors.gray,
-} as const;
+};
+
+/**
+ * Re-initialize the semantic color map with explicit color mode.
+ * Call this after parsing the --color flag, before any output.
+ */
+export function initColors(mode: 'always' | 'never' | 'auto'): void {
+  if (mode === 'auto') {
+    return; // Use picocolors default detection
+  }
+  const pc = createColors(mode === 'always');
+  c.success = pc.green;
+  c.error = pc.red;
+  c.warning = pc.yellow;
+  c.info = pc.cyan;
+  c.command = pc.bold;
+  c.heading = pc.bold;
+  c.hint = pc.dim;
+  c.muted = pc.gray;
+}
 
 /** Format a file state line for status output. */
 export function formatFileState(

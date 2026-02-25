@@ -182,6 +182,11 @@ export function detectGitignoreConflicts(
     const lineNumber = parseInt(source.slice(firstColon + 1, secondColon), 10);
     const pattern = source.slice(secondColon + 1).trim();
 
+    // Negation patterns (starting with !) mean the file is NOT ignored — skip
+    if (pattern.startsWith('!')) {
+      continue;
+    }
+
     // Deduplicate by source rule (same file + line)
     const ruleKey = `${gitignorePath}:${lineNumber}`;
     if (seenRules.has(ruleKey)) {

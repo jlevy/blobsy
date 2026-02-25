@@ -1,22 +1,5 @@
 #!/usr/bin/env node
 
-// Process --color flag early, before picocolors evaluates.
-// picocolors checks NO_COLOR/FORCE_COLOR at import time.
-{
-  const colorIdx = process.argv.indexOf('--color');
-  if (colorIdx >= 0) {
-    const colorArg = process.argv[colorIdx + 1];
-    if (colorArg === 'never') {
-      process.env.NO_COLOR = '1';
-      delete process.env.FORCE_COLOR;
-    } else if (colorArg === 'always') {
-      process.env.FORCE_COLOR = '1';
-      delete process.env.NO_COLOR;
-    }
-    // 'auto' is the default — no env changes needed
-  }
-}
-
 /**
  * CLI entry point for blobsy.
  *
@@ -58,6 +41,7 @@ import {
   formatDryRun,
   formatError,
   formatFileState,
+  initColors,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
@@ -135,7 +119,13 @@ function createProgram(): Command {
       styleCommandText: (str: string) => colors.green(str),
       styleOptionText: (str: string) => colors.yellow(str),
     })
-    .showHelpAfterError('(use --help for usage, or blobsy docs for full guide)');
+    .showHelpAfterError('(use --help for usage, or blobsy docs for full guide)')
+    .hook('preAction', (thisCommand) => {
+      const colorMode = thisCommand.opts().color as 'always' | 'never' | 'auto' | undefined;
+      if (colorMode) {
+        initColors(colorMode);
+      }
+    });
 
   program
     .command('setup')
@@ -981,7 +971,12 @@ async function trackDirectory(
 ): Promise<TrackResult> {
   const result = emptyTrackResult();
   const relDir = toRepoRelative(absDir, repoRoot);
-  const files = findTrackableFiles(absDir, config.ignore);
+  const onSymlink = globalOpts.verbose
+    ? (path: string) => {
+        console.error(`Skipping symlink: ${toRepoRelative(path, repoRoot)}`);
+      }
+    : undefined;
+  const files = findTrackableFiles(absDir, config.ignore, onSymlink);
   const baseExtConfig = getExternalizeConfig(config);
   const extConfig = minSizeOverride
     ? { ...baseExtConfig, min_size: minSizeOverride }

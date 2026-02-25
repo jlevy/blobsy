@@ -113,16 +113,27 @@ export function findBrefFiles(dir: string, repoRoot: string): string[] {
 /**
  * Find all non-bref, non-hidden files in a directory for tracking.
  * Returns absolute paths. Applies ignore patterns to skip directories and files.
+ * Optional onSymlink callback is invoked with the path of each skipped symlink.
  */
-export function findTrackableFiles(dir: string, ignorePatterns?: string[]): string[] {
+export function findTrackableFiles(
+  dir: string,
+  ignorePatterns?: string[],
+  onSymlink?: (path: string) => void,
+): string[] {
   const matcher = ignorePatterns?.length ? picomatch(ignorePatterns, { dot: true }) : null;
   const results: string[] = [];
-  walkDir(dir, dir, matcher, (filePath) => {
-    const name = basename(filePath);
-    if (!name.endsWith(BREF_EXTENSION) && !name.startsWith('.')) {
-      results.push(filePath);
-    }
-  });
+  walkDir(
+    dir,
+    dir,
+    matcher,
+    (filePath) => {
+      const name = basename(filePath);
+      if (!name.endsWith(BREF_EXTENSION) && !name.startsWith('.')) {
+        results.push(filePath);
+      }
+    },
+    onSymlink,
+  );
   return results.sort();
 }
 
@@ -131,6 +142,7 @@ function walkDir(
   rootDir: string,
   ignoreMatcher: ((path: string) => boolean) | null,
   callback: (filePath: string) => void,
+  onSymlink?: (path: string) => void,
 ): void {
   if (!existsSync(dir)) {
     return;
@@ -151,11 +163,11 @@ function walkDir(
       if (ignoreMatcher?.(dirRel)) {
         continue;
       }
-      walkDir(fullPath, rootDir, ignoreMatcher, callback);
+      walkDir(fullPath, rootDir, ignoreMatcher, callback, onSymlink);
     } else if (entry.isFile()) {
       callback(fullPath);
     } else if (entry.isSymbolicLink()) {
-      // Symlinks are silently skipped
+      onSymlink?.(fullPath);
     }
   }
 }
