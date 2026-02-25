@@ -190,6 +190,11 @@ describe('CLI error messages', () => {
 
   describe('permission errors', () => {
     it('should show user-friendly permission denied error', async () => {
+      // Root can bypass file permissions, so skip this test when running as root
+      if (process.getuid?.() === 0) {
+        return;
+      }
+
       // Create a file and track it
       const testFile = join(testDir, 'readonly.bin');
       await writeFile(testFile, 'test content');

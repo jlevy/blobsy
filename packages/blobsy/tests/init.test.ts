@@ -69,6 +69,11 @@ describe('init command - auto-create directories', () => {
   });
 
   it('should error if parent directory is not writable', async () => {
+    // Root can bypass file permissions, so skip this test when running as root
+    if (process.getuid?.() === 0) {
+      return;
+    }
+
     // Create a read-only parent directory outside the repo
     const readonlyParent = join(testDir, '..', 'readonly');
     await mkdir(readonlyParent);
