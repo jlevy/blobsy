@@ -36,7 +36,7 @@ const SCHEME_EXAMPLES = [
 export function parseBackendUrl(url: string): ParsedBackendUrl {
   if (!url || url.trim().length === 0) {
     throw new ValidationError('Backend URL is required.', [
-      'Provide a URL like: blobsy init s3://my-bucket/prefix/',
+      'Provide a URL like: blobsy setup --auto s3://my-bucket/prefix/',
       ...SCHEME_EXAMPLES,
     ]);
   }

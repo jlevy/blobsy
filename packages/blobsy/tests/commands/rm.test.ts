@@ -13,7 +13,7 @@ describe('rm command with --remote flag', () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'blobsy-rm-test-'));
-    backendDir = join(testDir, '..', 'backend');
+    backendDir = await mkdtemp(join(tmpdir(), 'blobsy-rm-backend-'));
 
     // Initialize git repo
     await execa('git', ['init'], { cwd: testDir });
@@ -21,7 +21,7 @@ describe('rm command with --remote flag', () => {
     await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
 
     // Initialize blobsy
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
   });
 
   afterEach(async () => {
@@ -75,8 +75,7 @@ describe('rm command with --remote flag', () => {
       expect(existsSync(trashDir)).toBe(true);
     });
 
-    // TODO: Flaky test - backend path construction issues in test environment
-    it.skip('should show success message when deleting from backend', async () => {
+    it('should show success message when deleting from backend', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
       await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
 
@@ -118,8 +117,7 @@ describe('rm command with --remote flag', () => {
   });
 
   describe('confirmation prompt', () => {
-    // TODO: Flaky test - backend path construction issues in test environment
-    it.skip('should prompt for confirmation without --force', async () => {
+    it('should prompt for confirmation without --force', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
       await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
       await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });

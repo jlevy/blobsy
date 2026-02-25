@@ -38,7 +38,7 @@ missing
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin (13 B) - pulled
+  ↓  data/model.bin (13 B)
 Done: 1 pulled.
 ? 0
 ```

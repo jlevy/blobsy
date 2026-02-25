@@ -20,9 +20,9 @@ before: |
 
 ```console
 $ blobsy status
-  ✓  data/model.bin  synced
+  ✓  data/model.bin  synced (13 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```
 
@@ -53,7 +53,7 @@ hash: [HASH]
 
 ```console
 $ blobsy push
-  data/model.bin (24 B) - pushed
+  ↑  data/model.bin (24 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -85,8 +85,8 @@ All files verified.
 
 ```console
 $ blobsy status
-  ✓  data/model.bin  synced
+  ✓  data/model.bin  synced (24 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```

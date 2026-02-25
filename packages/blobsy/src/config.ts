@@ -24,19 +24,7 @@ export function getBuiltinDefaults(): BlobsyConfig {
   return {
     externalize: {
       min_size: '1mb',
-      always: [
-        '*.parquet',
-        '*.bin',
-        '*.weights',
-        '*.onnx',
-        '*.safetensors',
-        '*.pkl',
-        '*.pt',
-        '*.h5',
-        '*.arrow',
-        '*.sqlite',
-        '*.db',
-      ],
+      always: [],
       never: [],
     },
     compress: {
@@ -67,7 +55,17 @@ export function getBuiltinDefaults(): BlobsyConfig {
     checksum: {
       algorithm: 'sha256',
     },
-    ignore: ['node_modules/**', '.git/**', '.blobsy/**', '*.tmp'],
+    ignore: [
+      'node_modules/**',
+      '.git/**',
+      '.blobsy/**',
+      '*.tmp',
+      'dist/**',
+      'build/**',
+      '__pycache__/**',
+      '*.pyc',
+      '.DS_Store',
+    ],
   };
 }
 
@@ -129,7 +127,7 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   let config = getBuiltinDefaults();
 
   // User-global config
-  const globalConfig = join(homedir(), CONFIG_FILENAME);
+  const globalConfig = getGlobalConfigPath();
   if (existsSync(globalConfig)) {
     const globalOverride = await loadConfigFile(globalConfig);
     config = mergeConfigs(config, globalOverride);
@@ -160,6 +158,134 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   }
 
   return config;
+}
+
+export type ConfigOrigin = 'builtin' | 'global' | 'repo' | 'subdir';
+
+export interface ConfigValueWithOrigin {
+  value: unknown;
+  origin: ConfigOrigin;
+  file?: string;
+}
+
+/**
+ * Like resolveConfig, but returns origin information for each config value.
+ * Used by blobsy config --show-origin to show which file each value comes from.
+ */
+export async function resolveConfigWithOrigins(
+  targetPath: string,
+  repoRoot: string,
+): Promise<Map<string, ConfigValueWithOrigin>> {
+  const origins = new Map<string, ConfigValueWithOrigin>();
+
+  // Builtin defaults
+  const builtinConfig = getBuiltinDefaults();
+  recordOrigins(builtinConfig as Record<string, unknown>, 'builtin', undefined, origins);
+
+  // User-global config
+  const globalConfigPath = getGlobalConfigPath();
+  if (existsSync(globalConfigPath)) {
+    const globalConfig = await loadConfigFile(globalConfigPath);
+    recordOrigins(globalConfig as Record<string, unknown>, 'global', globalConfigPath, origins);
+  }
+
+  // Collect config files from repo root up to target directory
+  const configFiles: string[] = [];
+  const targetDir = resolve(targetPath);
+  let dir = targetDir;
+  const repoRootResolved = resolve(repoRoot);
+
+  while (dir.startsWith(repoRootResolved)) {
+    const configPath = join(dir, CONFIG_FILENAME);
+    if (existsSync(configPath)) {
+      configFiles.unshift(configPath);
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+
+  // Apply in order: repo root first, deepest subdirectory last
+  for (const configPath of configFiles) {
+    const override = await loadConfigFile(configPath);
+    const isRepoRoot = configPath === join(repoRootResolved, CONFIG_FILENAME);
+    const origin: ConfigOrigin = isRepoRoot ? 'repo' : 'subdir';
+    recordOrigins(override as Record<string, unknown>, origin, configPath, origins);
+  }
+
+  return origins;
+}
+
+/**
+ * Record all keys in a config object with their origin information.
+ * Handles nested objects by flattening to dot-notation keys.
+ */
+function recordOrigins(
+  config: Record<string, unknown>,
+  origin: ConfigOrigin,
+  file: string | undefined,
+  origins: Map<string, ConfigValueWithOrigin>,
+  prefix = '',
+): void {
+  for (const [key, value] of Object.entries(config)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+
+    if (
+      value !== undefined &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
+      // Recurse into nested objects
+      recordOrigins(value as Record<string, unknown>, origin, file, origins, fullKey);
+    } else {
+      // Record leaf value
+      origins.set(fullKey, { value, origin, file });
+    }
+  }
+}
+
+/**
+ * Remove a config key at the specified dot-notation path.
+ * Also removes parent objects if they become empty after deletion.
+ * Returns true if the key existed and was removed, false otherwise.
+ */
+export function unsetNestedValue(obj: Record<string, unknown>, keyPath: string): boolean {
+  const parts = keyPath.split('.');
+  const parents: { obj: Record<string, unknown>; key: string }[] = [];
+  let current = obj;
+
+  // Navigate to parent of target key, tracking the path
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i]!;
+    if (typeof current[part] !== 'object' || current[part] === null) {
+      return false; // Path doesn't exist
+    }
+    parents.push({ obj: current, key: part });
+    current = current[part] as Record<string, unknown>;
+  }
+
+  const lastKey = parts[parts.length - 1]!;
+  if (!(lastKey in current)) {
+    return false; // Key doesn't exist
+  }
+
+  delete current[lastKey];
+
+  // Clean up empty parent objects
+  for (let i = parents.length - 1; i >= 0; i--) {
+    const { obj, key } = parents[i]!;
+    const parentObj = obj[key] as Record<string, unknown>;
+    if (Object.keys(parentObj).length === 0) {
+      delete obj[key];
+    } else {
+      break; // Stop at the first non-empty parent
+    }
+  }
+
+  return true;
 }
 
 function validateConfigFields(parsed: Record<string, unknown>, filePath: string): void {
@@ -199,6 +325,15 @@ export async function writeConfigFile(
 /** Get the config file path for a repo root. */
 export function getConfigPath(repoRoot: string): string {
   return join(repoRoot, CONFIG_FILENAME);
+}
+
+/**
+ * Get the global config file path (~/.blobsy.yml).
+ * Respects BLOBSY_HOME environment variable for testing.
+ */
+export function getGlobalConfigPath(): string {
+  const home = process.env.BLOBSY_HOME ?? homedir();
+  return join(home, CONFIG_FILENAME);
 }
 
 /** Bytes per kilobyte (base-2) */

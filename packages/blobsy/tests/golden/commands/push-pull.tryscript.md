@@ -30,7 +30,7 @@ no remote_key
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin (13 B) - pushed
+  ↑  data/model.bin (13 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -56,7 +56,7 @@ blob exists
 ```console
 $ blobsy push
   data/model.bin  already pushed
-  data/dataset.csv (21 B) - pushed
+  ↑  data/dataset.csv (32 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -86,7 +86,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin
-  data/model.bin (13 B) - pulled
+  ↓  data/model.bin (13 B)
 Done: 1 pulled.
 ? 0
 ```
@@ -123,7 +123,7 @@ Updated data/model.bin.bref (hash changed)
 
 ```console
 $ blobsy push data/model.bin
-  data/model.bin (12 B) - pushed
+  ↑  data/model.bin (12 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -151,7 +151,7 @@ Updated data/model.bin.bref (hash changed)
 
 ```console
 $ blobsy push data/model.bin.bref
-  data/model.bin (15 B) - pushed
+  ↑  data/model.bin (15 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -165,7 +165,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin.bref
-  data/model.bin (15 B) - pulled
+  ↓  data/model.bin (15 B)
 Done: 1 pulled.
 ? 0
 ```

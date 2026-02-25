@@ -185,8 +185,26 @@ export class CommandBackend implements Backend {
     return Promise.reject(new Error('Delete operation not supported for command backends'));
   }
 
-  async healthCheck(): Promise<void> {
-    // No health check for command backends -- commands are user-defined
+  healthCheck(): Promise<void> {
+    // Check that at least one command is configured
+    if (!this.config.pushCommand && !this.config.pullCommand) {
+      throw new ValidationError('Command backend has no push or pull commands configured.');
+    }
+    // Verify the command binary exists in PATH
+    const command = this.config.pushCommand ?? this.config.pullCommand!;
+    const binary = command.split(/\s+/)[0];
+    if (!binary) {
+      throw new ValidationError('Command template is empty.');
+    }
+    try {
+      execFileSync('which', [binary], { stdio: 'pipe' });
+    } catch {
+      throw new BlobsyError(
+        `Command not found: ${binary}. Ensure it is installed and in your PATH.`,
+        'not_found',
+      );
+    }
+    return Promise.resolve();
   }
 }
 

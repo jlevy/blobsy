@@ -15,6 +15,7 @@ before: |
   cp another-file.txt data/dataset.csv
   cp small-file.txt data/old/file1.bin
   cp another-file.txt data/old/file2.bin
+  blobsy config externalize.min_size 5
   blobsy track data/model.bin
   blobsy track data/dataset.csv
   blobsy track data/old/

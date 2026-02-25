@@ -14,6 +14,7 @@ before: |
   cp small-file.txt data/model.bin
   cp another-file.txt data/research/data.bin
   cp small-file.txt data/research/report.bin
+  blobsy config externalize.min_size 5
   blobsy track data/model.bin
   blobsy track data/research/
   git add -A && git commit -q -m "track files"

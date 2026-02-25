@@ -32,7 +32,7 @@ Updated data/model.bin.bref (hash changed)
 
 ```console
 $ blobsy push --verbose
-  data/model.bin (8 B) - pushed
+  ↑  data/model.bin (8 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -41,8 +41,8 @@ Done: 1 pushed.
 
 ```console
 $ blobsy status --verbose
-  ✓  data/model.bin  synced
+  ✓  data/model.bin  synced (8 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```

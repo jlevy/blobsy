@@ -123,6 +123,12 @@ $ echo "research data" > data/research/data.bin
 ```
 
 ```console
+$ blobsy config externalize.min_size 5
+Set externalize.min_size = 5
+? 0
+```
+
+```console
 $ blobsy track data/research/
 Scanning data/research/...
   data/research/data.bin (  14 B)  -> tracked

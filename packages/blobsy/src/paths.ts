@@ -10,6 +10,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
+import picomatch from 'picomatch';
+
 import { ValidationError, BREF_EXTENSION } from './types.js';
 
 /** Find the git repository root by walking up from cwd. */
@@ -100,7 +102,7 @@ export function isDirectory(path: string): boolean {
  */
 export function findBrefFiles(dir: string, repoRoot: string): string[] {
   const results: string[] = [];
-  walkDir(dir, (filePath) => {
+  walkDir(dir, dir, null, (filePath) => {
     if (filePath.endsWith(BREF_EXTENSION)) {
       results.push(toRepoRelative(stripBrefExtension(filePath), repoRoot));
     }
@@ -110,11 +112,12 @@ export function findBrefFiles(dir: string, repoRoot: string): string[] {
 
 /**
  * Find all non-bref, non-hidden files in a directory for tracking.
- * Returns absolute paths.
+ * Returns absolute paths. Applies ignore patterns to skip directories and files.
  */
-export function findTrackableFiles(dir: string): string[] {
+export function findTrackableFiles(dir: string, ignorePatterns?: string[]): string[] {
+  const matcher = ignorePatterns?.length ? picomatch(ignorePatterns, { dot: true }) : null;
   const results: string[] = [];
-  walkDir(dir, (filePath) => {
+  walkDir(dir, dir, matcher, (filePath) => {
     const name = basename(filePath);
     if (!name.endsWith(BREF_EXTENSION) && !name.startsWith('.')) {
       results.push(filePath);
@@ -123,7 +126,12 @@ export function findTrackableFiles(dir: string): string[] {
   return results.sort();
 }
 
-function walkDir(dir: string, callback: (filePath: string) => void): void {
+function walkDir(
+  dir: string,
+  rootDir: string,
+  ignoreMatcher: ((path: string) => boolean) | null,
+  callback: (filePath: string) => void,
+): void {
   if (!existsSync(dir)) {
     return;
   }
@@ -132,8 +140,18 @@ function walkDir(dir: string, callback: (filePath: string) => void): void {
       continue;
     }
     const fullPath = join(dir, entry.name);
+    const relPath = normalizePath(relative(rootDir, fullPath));
+    // Check ignore patterns against relative path and name
+    if (ignoreMatcher && (ignoreMatcher(relPath) || ignoreMatcher(entry.name))) {
+      continue;
+    }
     if (entry.isDirectory()) {
-      walkDir(fullPath, callback);
+      // Also check directory with trailing slash for glob patterns like "node_modules/"
+      const dirRel = relPath + '/';
+      if (ignoreMatcher?.(dirRel)) {
+        continue;
+      }
+      walkDir(fullPath, rootDir, ignoreMatcher, callback);
     } else if (entry.isFile()) {
       callback(fullPath);
     }

@@ -11,8 +11,8 @@ describe('init command - auto-create directories', () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'blobsy-init-test-'));
-    // Backend must be outside the git repo
-    backendDir = join(testDir, '..', 'backend');
+    // Backend must be outside the git repo - make it unique per test
+    backendDir = await mkdtemp(join(tmpdir(), 'blobsy-backend-'));
 
     // Initialize git repo
     await execa('git', ['init'], { cwd: testDir });
@@ -29,22 +29,25 @@ describe('init command - auto-create directories', () => {
   });
 
   it('should auto-create local backend directory if it does not exist', async () => {
+    // Remove the pre-created backend directory to test auto-creation
+    await rm(backendDir, { recursive: true, force: true });
+
     // Verify backend directory doesn't exist yet
     expect(existsSync(backendDir)).toBe(false);
 
     // Run init with local backend (outside repo)
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
 
     // Backend directory should now exist
     expect(existsSync(backendDir)).toBe(true);
   });
 
   it('should succeed if backend directory already exists', async () => {
-    // Pre-create backend directory
-    await mkdir(backendDir, { recursive: true });
+    // Backend directory is already created by mkdtemp in beforeEach
+    expect(existsSync(backendDir)).toBe(true);
 
     // Should not throw
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
 
     expect(existsSync(backendDir)).toBe(true);
   });

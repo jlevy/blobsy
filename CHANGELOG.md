@@ -11,6 +11,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Core CLI: init, track, untrack, rm, mv, push, pull, sync, status, verify, config,
   health, doctor, hooks, check-unpushed, pre-push-check
+- Config command enhancements (git-style multi-level configuration):
+  - `--global` flag: Read/write user-global config (~/.blobsy.yml), works outside git
+    repos
+  - `--show-origin` flag: Show which config file each value comes from
+    (builtin/global/repo/subdir)
+  - `--unset` flag: Remove config keys with automatic fallback to other scopes
+  - Config precedence: subdir .blobsy.yml → repo root .blobsy.yml → global ~/.blobsy.yml
+    → builtin defaults
+  - Smart path formatting: displays ~/.blobsy.yml with tilde, repo files as relative
+    paths
 - S3 backend with SHA-256 checksums, atomic downloads, and custom endpoint support
 - Local filesystem backend
 - Custom command backend with shell-free execution model

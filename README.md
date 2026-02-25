@@ -15,20 +15,29 @@ No hosting requirements.
 # Install
 npm install -g blobsy
 
-# Initialize in a git repo
+# Set up in a git repo (creates config, installs hooks, sets up agent integration)
 cd my-project
-blobsy init s3://my-bucket/blobs/
+blobsy setup --auto s3://my-bucket/my-project/blobs/
 
-# Track large files (creates .bref pointers)
-blobsy track data/model.bin
-blobsy track assets/
+# Add files: externalizes large (by default >1MB) files, stages everything to git
+blobsy add data/
+```
 
-# Commit .bref files to Git
-git add *.bref .gitignore
+```
+Scanning data/...
+  data/model.bin         (500 MB)  -> tracked (.bref)
+  data/config.json       (  2 KB)  -> kept in git
+  data/notes.txt         (500  B)  -> kept in git
+1 file externalized, 2 kept in git.
+Staged 4 files (1 .bref, 1 .gitignore, 2 kept in git).
+Changes have been staged to git: run `git status` to review and `git commit` to commit.
+```
+
+```bash
+# Review what was staged, then commit and push
+git status
 git commit -m "Track large files with blobsy"
-
-# Push blobs to remote storage
-blobsy push
+git push                    # pre-push hook auto-uploads blobs
 
 # On another machine, pull blobs back
 git clone <repo>
@@ -36,15 +45,25 @@ cd <repo>
 blobsy pull
 ```
 
+`blobsy add` scans a directory (or accepts specific files/subdirectories), creates
+`.bref` pointer files for large files, adds originals to `.gitignore`, and stages
+everything to git. By default, files **1 MB or larger** are externalized; smaller files
+are staged directly to git.
+See [Externalization Rules](#externalization-rules) for details.
+
 ## How It Works
 
-1. `blobsy track` computes a SHA-256 hash of each file and writes a `.bref` pointer file
-2. The original file is added to `.gitignore` automatically
-3. You commit the `.bref` pointer file to Git (the original stays local)
-4. `blobsy push` uploads the blob to your configured backend and adds `remote_key` to
-   `.bref`
-5. `blobsy pull` downloads files from remote using the `.bref` metadata
-6. Content-addressable storage means identical files are never uploaded twice
+1. `blobsy add` scans your files and decides which to externalize (based on size and
+   [rules](#externalization-rules))
+2. Large files get a `.bref` pointer file and are added to `.gitignore`
+3. Small files and `.bref` pointers are staged to git automatically
+4. You commit the staged changes (`git commit`)
+5. `blobsy push` uploads blobs to your configured backend
+6. `blobsy pull` downloads blobs on another machine using the `.bref` metadata
+7. Content-addressable storage (SHA-256) means identical files are never uploaded twice
+
+For fine-grained control, `blobsy track` does step 1-2 without git staging — you then
+`git add` manually.
 
 A `.bref` file after `track` (before push):
 
@@ -71,8 +90,10 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 
 | Command | Description |
 | --- | --- |
-| `blobsy init <url>` | Initialize blobsy with a backend URL |
-| `blobsy track <path...>` | Start tracking files or directories |
+| `blobsy setup --auto <url>` | Set up blobsy in a git repo (recommended) |
+| `blobsy init <url>` | Initialize blobsy config (low-level) |
+| `blobsy add <path...>` | Track files and stage changes to git (recommended) |
+| `blobsy track <path...>` | Track files without git staging (low-level) |
 | `blobsy untrack <path...>` | Stop tracking (keep local files) |
 | `blobsy push [path...]` | Upload local blobs to remote |
 | `blobsy pull [path...]` | Download remote blobs to local |
@@ -81,14 +102,13 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy verify [path...]` | Verify local files match ref hashes |
 | `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .bref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
-| `blobsy config [key] [val]` | Get or set configuration |
+| `blobsy config [key] [val]` | Get or set configuration (supports `--global`, `--show-origin`, `--unset`) |
 | `blobsy health` | Check backend connectivity |
 | `blobsy doctor [--fix]` | Diagnostics and self-repair |
-| `blobsy hooks <action>` | Install or uninstall pre-commit hook |
+| `blobsy hooks <action>` | Install or uninstall git hooks (pre-commit, pre-push) |
 | `blobsy check-unpushed` | List committed .bref files missing remote blobs |
 | `blobsy pre-push-check` | CI guard: fail if any .bref lacks remote blob |
 | `blobsy skill` | Output skill documentation for AI agents |
-| `blobsy prime` | Output context primer for AI agents |
 
 ### Global Options
 
@@ -150,13 +170,65 @@ will continue to reference their existing remote keys.
 To migrate files to a new backend, you must manually re-push them with
 `blobsy push --force`.
 
+## Configuration Management
+
+Blobsy supports multi-level configuration with git-style flags for managing settings
+across builtin defaults, user-global config (~/.blobsy.yml), and repo-level config
+(.blobsy.yml):
+
+```bash
+# View all config values (merged from all levels)
+blobsy config
+
+# Get a specific value
+blobsy config compress.algorithm
+
+# Set a value in repo config (.blobsy.yml)
+blobsy config compress.algorithm zstd
+
+# Set a value in global config (~/.blobsy.yml)
+blobsy config --global sync.parallel 16
+
+# See where a value comes from
+blobsy config --show-origin compress.algorithm
+# Output: repo    .blobsy.yml    zstd
+
+# Remove a config value
+blobsy config --unset compress.algorithm
+# Falls back to global or builtin default
+```
+
+**Config Precedence** (highest to lowest):
+1. Subdirectory `.blobsy.yml` (most specific)
+2. Repo root `.blobsy.yml`
+3. Global `~/.blobsy.yml`
+4. Built-in defaults
+
+**Global vs Repo Config:**
+- `--global`: Operates on `~/.blobsy.yml` (works outside git repos)
+- Without `--global`: Operates on repo config (requires git repo)
+
+**Use `BLOBSY_HOME` to override the global config directory** (useful for testing):
+```bash
+export BLOBSY_HOME=/tmp/test-config
+blobsy config --global compress.algorithm gzip
+```
+
 ## Externalization Rules
 
-Control which files get tracked automatically when using `blobsy track <directory>`:
+When you run `blobsy add <directory>` (or `blobsy track <directory>`), blobsy decides
+per-file whether to externalize based on these rules (checked in order):
+
+1. **`never` patterns** (highest priority) -- matching files stay in git
+2. **`always` patterns** -- matching files are externalized regardless of size
+3. **`min_size` threshold** (default: `1mb`) -- files at or above this size are
+   externalized
+
+Configure in `.blobsy.yml` at your repo root:
 
 ```yaml
 externalize:
-  min_size: 1mb
+  min_size: 1mb           # default; accepts units like 500kb, 2mb, 1gb
   always:
     - "*.bin"
     - "*.onnx"
@@ -164,6 +236,34 @@ externalize:
   never:
     - "*.md"
     - "*.json"
+```
+
+**Note:** Tracking a specific file by name (`blobsy add data/model.bin`) always
+externalizes it, bypassing these rules.
+
+## Git Hooks
+
+Blobsy installs two git hooks by default (via `blobsy setup --auto` or `blobsy init`):
+
+| Hook | When | What it does |
+| --- | --- | --- |
+| **pre-commit** | `git commit` | Verifies staged `.bref` files match their local files (catches modifications after tracking) |
+| **pre-push** | `git push` | Auto-runs `blobsy push` to upload any unpushed blobs (ensures blobs and refs arrive together) |
+
+**Opting out:**
+
+- Skip during setup: `blobsy setup --auto --no-hooks s3://...`
+- Bypass once: `git commit --no-verify` or `git push --no-verify`
+- Disable via environment: `BLOBSY_NO_HOOKS=1`
+- Remove entirely: `blobsy hooks uninstall`
+
+If you use a hook manager (lefthook, husky), blobsy skips auto-installation and tells
+you what to add to your config:
+
+```bash
+# In your hook manager config:
+blobsy hook pre-commit    # pre-commit hook
+blobsy hook pre-push      # pre-push hook
 ```
 
 ## Compression
@@ -195,7 +295,7 @@ blobsy push              # Upload missing blobs
 blobsy pre-push-check
 ```
 
-**Workflow:** `blobsy track` → commit `.bref` → `blobsy push` → `git push` → CI runs
+**Workflow:** `blobsy add` → `git commit` → `blobsy push` → `git push` → CI runs
 `pre-push-check`
 
 ### Syncing in CI
@@ -225,6 +325,19 @@ blobsy push
 | Content-addressable | Yes (SHA-256) | Yes (OID) | Yes (MD5) |
 | JSON output | Yes (`--json`) | No | Yes |
 | Agent-friendly | Yes (non-interactive) | Partial | Partial |
+
+## Agent Integration
+
+`blobsy setup --auto` automatically installs integration files for AI coding agents:
+
+- **`.claude/skills/blobsy/SKILL.md`** -- Installed when Claude Code is detected
+  (`~/.claude/` exists, project `.claude/` directory, or `CLAUDE_*` env vars).
+  Provides context-efficient orientation (~200-300 tokens) for the agent.
+- **`AGENTS.md` section** -- If `AGENTS.md` exists in the repo, appends a blobsy
+  integration section with markers (`<!-- BEGIN BLOBSY INTEGRATION -->`) for idempotent
+  updates on re-run.
+
+For manual agent orientation, run `blobsy skill` to output the skill documentation.
 
 ## Development
 

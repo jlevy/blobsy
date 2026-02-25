@@ -8,6 +8,7 @@ before: |
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
+  echo ".blobsy/" >> .gitignore
   git add -A && git commit -q -m "init"
   mkdir -p remote
   mkdir -p data
@@ -20,7 +21,15 @@ before: |
 
 ```console
 $ blobsy doctor
-No issues found.
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+2 issues found. Run with --fix to attempt repairs.
 ? 0
 ```
 
@@ -35,9 +44,18 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+=== INTEGRITY ===
   ✗  data/model.bin: missing from .gitignore
 
-1 issue found. Run with --fix to attempt repairs.
+3 issues found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -45,6 +63,15 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ✓ Fixed  Installed pre-commit hook
+  ✓ Fixed  Installed pre-push hook
+
+=== INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
 All issues fixed.
@@ -63,6 +90,10 @@ model.bin
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```
@@ -82,6 +113,12 @@ Added data/orphan.bin to .gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ?  data/orphan.bin  file missing (13 B)
+
+2 tracked files: 1 synced, 1 missing_file
+
+=== INTEGRITY ===
   ✗  data/orphan.bin: .bref exists but local file missing and no remote_key
 
 1 issue found. Run with --fix to attempt repairs.
@@ -104,6 +141,12 @@ $ rm -rf .blobsy
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
+=== INTEGRITY ===
   ✗  .blobsy/ directory missing
 
 1 issue found. Run with --fix to attempt repairs.
@@ -112,6 +155,12 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
+=== INTEGRITY ===
   ✓ Fixed  Created .blobsy/ directory
 
 All issues fixed.
@@ -120,6 +169,11 @@ All issues fixed.
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+  ○  data/orphan.bin  not pushed (13 B)
+
+2 tracked files: 1 synced, 1 new
+
 No issues found.
 ? 0
 ```

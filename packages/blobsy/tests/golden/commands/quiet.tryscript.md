@@ -40,11 +40,13 @@ $ blobsy --quiet --json status
     {
       "path": "data/model.bin",
       "state": "new",
-      "details": "not pushed"
+      "details": "not pushed",
+      "size": 13
     }
   ],
   "summary": {
-    "total": 1
+    "total": 1,
+    "new": 1
   }
 }
 ? 0

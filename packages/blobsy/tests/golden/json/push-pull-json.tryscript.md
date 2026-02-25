@@ -29,11 +29,11 @@ $ blobsy push --json
       "path": "data/dataset.csv",
       "success": true,
       "action": "push",
-      "bytesTransferred": 21,
+      "bytesTransferred": 32,
       "refUpdates": {
         "remote_key": "[REMOTE_KEY]",
-        "compressed": "zstd",
-        "compressed_size": 21
+        "compressed": "gzip",
+        "compressed_size": 32
       }
     },
     {

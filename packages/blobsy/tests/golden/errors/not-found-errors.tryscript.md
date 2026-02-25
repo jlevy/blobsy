@@ -36,7 +36,8 @@ $ echo "content" > data/untracked.bin
 
 ```console
 $ blobsy push data/untracked.bin 2>&1
-Error: Cannot read .bref file: [LOCAL_PATH]/data/untracked.bin.bref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.bref'
+✗ File not tracked: untracked.bin
+  Run: blobsy track untracked.bin
 ? 1
 ```
 
@@ -62,7 +63,7 @@ $ rm data/model.bin
 
 ```console
 $ blobsy pull data/model.bin 2>&1
-  data/model.bin - FAILED: Remote blob not found: [REMOTE_KEY]
+  ✗  data/model.bin - FAILED: Remote blob not found: [REMOTE_KEY]
 Done: 0 pulled, 1 failed.
 ? 1
 ```

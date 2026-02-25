@@ -165,4 +165,8 @@ stale.
 - Use `--verbose` for detailed output on any command.
 - Use `--json` for machine-readable output (useful for debugging scripts).
 - Run `blobsy doctor` to check for common issues.
-- Run `blobsy doctor --fix` to attempt automatic repairs.
+  Output is organized by category: configuration, git hooks, integrity, and backend
+  connectivity.
+- Run `blobsy doctor --verbose` for full diagnostic detail, including passing checks.
+- Run `blobsy doctor --fix` to attempt automatic repairs (gitignore entries, directory
+  creation, cache cleanup, hook permissions).

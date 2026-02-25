@@ -1236,10 +1236,23 @@ blobsy track data/*.bin
 find data -name "*.bin" -exec blobsy track {} +
 ```
 
+### `blobsy setup` (recommended)
+
+Set up blobsy in a git repo.
+Wraps `init` with agent integration: creates `.blobsy.yml`, installs git hooks, and
+installs agent integration files (`.claude/skills/blobsy/SKILL.md` if Claude Code is
+detected, `AGENTS.md` section if the file exists).
+Idempotent -- safe to re-run.
+
+```bash
+blobsy setup --auto s3://my-datasets/project-v1/ --region us-east-1
+blobsy setup --auto local:../blobsy-remote
+```
+
 ### `blobsy init`
 
-Initialize blobsy in a git repo.
-Idempotent — every developer runs this after cloning.
+Low-level initialization (prefer `blobsy setup --auto`). Initialize blobsy in a git
+repo. Idempotent — every developer runs this after cloning.
 
 Fully non-interactive.
 Backend is specified as a URL (positional argument).
@@ -1298,8 +1311,9 @@ See
 [Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
 for details.
 
-Also installs a pre-commit hook that auto-pushes blobs when committing `.bref` files.
-See [Conflict Detection](#conflict-detection) and `blobsy hooks` below.
+Also installs two git hooks: a pre-commit hook that validates `.bref` hashes, and a
+pre-push hook that auto-uploads blobs before git refs are pushed.
+See `blobsy hooks` below.
 
 ### `blobsy track`
 
@@ -1744,18 +1758,21 @@ Show the state of all tracked files.
 
 ```bash
 $ blobsy status
-  data/bigfile.zip              ok (500 MB)
-  data/research/report.md       modified (local != ref) (12 KB)
-  data/research/raw/resp.json   missing locally (1.2 MB)
-  data/research/raw/data.parq   ok (not pushed) (45 MB)
+  ✓  data/bigfile.zip  synced (500 MB)
+  ~  data/research/report.md  modified (12 KB)
+  ?  data/research/raw/resp.json  file missing (1.2 MB)
+  ○  data/research/raw/data.parq  not pushed (45 MB)
+
+4 tracked files: 1 synced, 1 modified, 1 missing_file, 1 new
 ```
 
 What it does:
 
 1. Find all `.bref` files in the repo.
 2. For each, compare local file hash against the ref’s `hash`.
-3. Report: ok, modified, missing, not pushed (no `remote_key`).
-4. Show human-readable file sizes from `.bref` metadata.
+3. Display file sizes from `.bref` metadata and a per-state summary footer.
+4. Report: ok, modified, missing, not pushed (no `remote_key`).
+5. Show human-readable file sizes from `.bref` metadata.
 
 No network access. The ref file has everything needed.
 
@@ -1832,134 +1849,157 @@ For definitive integrity verification.
 ### `blobsy doctor`
 
 Comprehensive diagnostic and health check command.
-**Deferred enhancement:** Expanded to include common error detection, troubleshooting
-advice, and integration validation.
+Runs categorized checks across configuration, hooks, integrity, and backend
+connectivity.
 
 ```bash
 $ blobsy doctor
+  ✓  data/bigfile.zip  synced (500 MB)
+  ~  data/research/report.md  modified (12 KB)
 
-=== CONFIGURATION ===
-Backend: s3://my-datasets/project-v1/ (region: us-east-1)
-Key template: {iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}
-Remote layout: Timestamp+Hash (default, recommended)
-
-Sync tools:
-  ✓ aws-cli v2.13.5 (detected at /usr/local/bin/aws)
-  ✗ rclone (not found)
-  → Using: aws-cli
-
-Compression: zstd (via Node.js built-in)
-Externalization threshold: 1 MB (files below this stay in git)
-
-=== REPOSITORY STATE ===
-Git repository: /Users/alice/projects/ml-research
-Branch: main (clean working tree)
-
-Tracked files: 18 total (5.1 GB)
-  ✓ 8 fully synced (2.1 GB)
-  ◐ 3 committed, not synced (1.2 GB)
-  ~ 2 modified locally (850 MB)
-  ? 1 missing locally (120 MB)
-
-Stat cache: 18 entries, 0 stale, 245 KB
-Trash: 3 expired refs (last GC: never)
+2 tracked files: 1 synced, 1 modified
 
 === GIT HOOKS ===
-✓ pre-commit hook installed (.git/hooks/pre-commit)
-  Purpose: Auto-push blobs when committing .bref files
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
 
-=== CONNECTIVITY ===
-✓ Backend reachable (s3://my-datasets/project-v1/)
-✓ Credentials valid (AWS profile: default)
-✓ Test upload: ok (wrote + deleted 1 KB test object)
-
-=== INTEGRITY CHECKS ===
-✓ All .bref files valid YAML
-✓ All .bref format versions supported (blobsy-bref/0.1)
-✓ No orphaned .gitignore entries
-✓ No .bref files missing corresponding .gitignore entries
-⚠ 2 files modified locally (hash mismatch with .bref)
-  → Run 'blobsy track <path>' to update refs
-
-=== COMMON ISSUES ===
-No issues detected.
-
-=== TROUBLESHOOTING TIPS ===
-• Modified files: Run 'blobsy track <path>' to update .bref after changes
-• Missing files: Run 'blobsy pull <path>' to restore from remote
-• Uncommitted refs: Run 'git add -A && git commit' after track/push
-• Sync failures: Check 'blobsy doctor' for credential/connectivity issues
-• Large gitignore: Normal (1 line per tracked file in blobsy-managed block)
-
-For detailed help: https://github.com/jlevy/blobsy/docs
+3 issues found. Run with --fix to attempt repairs.
 ```
 
-**Current behavior:** Basic configuration and connectivity checks.
+**Current checks:**
 
-**Deferred enhancements:**
-1. **Comprehensive state overview** - Includes stats rollup (superset of `blobsy stats`)
-2. **Common error detection** - Detects and reports common configuration mistakes:
-   - Missing `.gitignore` entries for tracked files
-   - Orphaned `.gitignore` entries (file no longer tracked)
-   - Invalid `.bref` files (malformed YAML, unsupported format version)
-   - Uncommitted refs after push (common mistake)
-   - Modified files not re-tracked
-   - Stale stat cache entries
-   - Missing pre-commit hook (recommends `blobsy hooks install`)
-   - Credential expiration warnings
-3. **Troubleshooting advice** - Context-aware suggestions based on detected issues:
-   - How to fix each detected problem
-   - Links to relevant documentation sections
-   - Common workflows that might have caused the issue
-4. **Integration validation** - Verifies all components work together:
-   - Test upload/download to backend
-   - Compression library availability
-   - Transfer tool version compatibility
-   - Git repository health (no corruption)
-   - `.blobsy/` directory structure valid
-5. **Extensible diagnostics** - New checks added as common errors are discovered in the
-   field
+1. **Status overview** — Shows tracked file states (superset of `blobsy status`) with
+   sizes and per-state counts.
+2. **Configuration validation** — Config file exists, YAML valid, backend resolves,
+   size/algorithm settings valid, unknown keys detected.
+3. **Git hook checks** — Pre-commit and pre-push hooks: existence, blobsy-managed
+   content, executable permissions.
+4. **Integrity checks:**
+   - `.blobsy/` directory exists and is writable
+   - `.blobsy/` listed in root `.gitignore`
+   - `.bref` files valid YAML with expected format version
+   - No orphaned `.bref` files (local file missing, no remote key)
+   - No missing `.gitignore` entries for tracked files
+   - No dangling `.gitignore` entries (no corresponding `.bref`)
+   - Stat cache files valid, no stale entries
+5. **Backend checks** — Tool availability (AWS CLI for S3, command binaries for command
+   backends), health check (connectivity and permissions).
 
 **Flags:**
 - `--fix` - Attempt to automatically fix detected issues (safe repairs only):
   - Add missing `.gitignore` entries
-  - Remove orphaned `.gitignore` entries
-  - Clean up stale stat cache entries
-  - Install missing pre-commit hook
-  - Remove orphaned temp files (`.blobsy-tmp-*`)
-- `--verbose` - Show detailed diagnostic logs (useful for bug reports)
+  - Remove dangling `.gitignore` entries
+  - Create missing `.blobsy/` directory
+  - Add `.blobsy/` to root `.gitignore`
+  - Clean up stale/corrupt stat cache entries
+  - Fix hook executable permissions
+- `--verbose` - Show all checks including passing ones
 - `--json` - Machine-readable output for scripting
 
 **Exit codes:**
-- `0` - All checks passed
-- `1` - Warnings detected (repo functional but suboptimal)
-- `2` - Errors detected (action required before sync operations)
+- `0` - No errors (warnings may be present)
+- `1` - Errors detected (action required)
 
 ### `blobsy config`
 
-Get or set configuration values:
+Get or set configuration values with multi-level precedence support.
+
+**Basic usage:**
 
 ```bash
-$ blobsy config [key] [value]    # get/set
-$ blobsy config backend          # show current backend
+$ blobsy config                     # show all config (merged from all levels)
+$ blobsy config compress            # show a top-level section
+$ blobsy config compress.algorithm  # show a specific key
+$ blobsy config compress.algorithm zstd  # set a value in repo config
+```
+
+**Multi-level config flags:**
+
+```bash
+$ blobsy config --global compress.algorithm gzip
+  # Set value in user-global config (~/.blobsy.yml)
+  # Works outside git repositories
+
+$ blobsy config --show-origin compress.algorithm
+  # Show which config file a value comes from
+  # Output: repo    .blobsy.yml    zstd
+  # Possible origins: builtin, global (~/.blobsy.yml), repo (.blobsy.yml), subdir (<path>/.blobsy.yml)
+
+$ blobsy config --unset compress.algorithm
+  # Remove a key from repo config
+  # Falls back to global or builtin default
+  # Output shows effective value after removal
+
+$ blobsy config --global --unset compress.algorithm
+  # Remove a key from global config
+```
+
+**Config precedence** (highest to lowest):
+1. Subdirectory `.blobsy.yml` (most specific, applies to subdirectory and descendants)
+2. Repo root `.blobsy.yml` (applies to entire repository)
+3. Global `~/.blobsy.yml` (user-wide defaults)
+4. Built-in defaults (hardcoded)
+
+**Scope rules:**
+- Without `--global`: Operates on repository config (requires git repository)
+- With `--global`: Operates on `~/.blobsy.yml` (works anywhere, even outside git repos)
+
+**Environment variable override:**
+- `BLOBSY_HOME`: Override the global config directory (default: `~`)
+- Useful for testing or custom config isolation
+- Example: `BLOBSY_HOME=/tmp/test blobsy config --global compress.algorithm gzip`
+
+**JSON output:**
+
+All config operations support `--json` for machine-readable output:
+
+```bash
+$ blobsy config --json compress.algorithm
+{"schema_version":"0.1","key":"compress.algorithm","value":"zstd"}
+
+$ blobsy config --json --show-origin compress.algorithm
+{"schema_version":"0.1","key":"compress.algorithm","value":"zstd","origin":"repo","file":".blobsy.yml"}
+
+$ blobsy config --json --global compress.algorithm gzip
+{"schema_version":"0.1","message":"Set compress.algorithm = gzip","level":"info"}
 ```
 
 ### `blobsy hooks`
 
-Manage the pre-commit hook that auto-pushes blobs when committing `.bref` files.
+Manage the blobsy git hooks (pre-commit and pre-push).
+
+Blobsy installs two hooks:
+
+| Hook | When | What it does | Why it’s automatic |
+| --- | --- | --- | --- |
+| **pre-commit** | `git commit` | Verifies staged `.bref` files match their local files (catches modifications after tracking) | Fast local check; prevents committing stale refs |
+| **pre-push** | `git push` | Auto-runs `blobsy push` to upload unpushed blobs | **Prevents data loss**: without this, other users get `.bref` pointers with no blobs to download |
+
+**Why push is hooked but pull is not:** Pushing blobs is a safety requirement — if
+`.bref` files reach the remote without their corresponding blobs, other users experience
+data loss (they cannot download the files).
+The cost of auto-push is bounded by what you’re committing.
+Pulling, by contrast, has an unbounded cost (network time, disk space for potentially
+large files) and not every user needs all blobs immediately.
+Pull remains an explicit `blobsy pull` operation.
+See the deferred features appendix for discussion of a future post-merge auto-pull hook.
 
 ```bash
 $ blobsy hooks install
 ✓ Installed pre-commit hook (.git/hooks/pre-commit)
+✓ Installed pre-push hook (.git/hooks/pre-push)
 
 $ blobsy hooks uninstall
 ✓ Removed pre-commit hook
+✓ Removed pre-push hook
 ```
 
-Installed automatically by `blobsy init`. To bypass the hook for a specific commit:
+Installed automatically by `blobsy init` (skip with `--no-hooks`). To bypass:
 
 ```bash
-$ git commit --no-verify
+$ git commit --no-verify   # skip pre-commit
+$ git push --no-verify     # skip pre-push
+$ BLOBSY_NO_HOOKS=1 git commit  # disable via environment
 ```
 
 ### `blobsy check-unpushed`
@@ -2008,14 +2048,19 @@ entering the main branch.
 
 ```
 SETUP
-  blobsy init                          Initialize blobsy in a git repo
+  blobsy setup --auto <url>            Set up blobsy (wraps init + agent integration)
+  blobsy init <url>                    Initialize blobsy config (low-level)
   blobsy config [key] [value]          Get/set configuration
+       [--global]                    Use global config (~/.blobsy.yml)
+       [--show-origin]               Show which config file each value comes from
+       [--unset]                     Remove a config key (falls back to parent scope)
   blobsy health                        Check transport backend health (credentials, connectivity)
   blobsy doctor                        Comprehensive diagnostics and health check (Deferred: enhanced)
        [--fix]                       Auto-fix detected issues
-  blobsy hooks install|uninstall       Manage pre-commit hook (auto-push on commit)
+  blobsy hooks install|uninstall       Manage git hooks (pre-commit validation, pre-push upload)
 
 TRACKING
+  blobsy add <path>...                 Track files and stage changes to git (recommended)
   blobsy track <path>...               Start tracking a file or directory (creates/updates .bref)
   blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .bref to trash)
   blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
@@ -2035,9 +2080,12 @@ SYNC
 VERIFICATION
   blobsy verify [path...]              Verify local files match ref hashes
 
+DOCUMENTATION
+  blobsy readme                        Display the README
+  blobsy docs [topic] [--list|--brief] Display user documentation
+
 AGENT INTEGRATION
-  blobsy skill [--brief]               Output skill documentation for AI agents
-  blobsy prime [--brief]               Output context primer for AI agents
+  blobsy skill                         Output skill documentation for AI agents
 ```
 
 ### Flags (Global)
@@ -2748,9 +2796,10 @@ but doesn’t run `blobsy push`. Other users pull from git, see the updated ref,
 Recovery: the original user runs `blobsy push` to upload the data that matches the
 committed ref.
 
-Prevention: the pre-commit hook (installed by `blobsy init`) auto-pushes blobs when
-committing `.bref` files, preventing this scenario.
-See [Conflict Detection](#conflict-detection).
+Prevention: the pre-push hook (installed by `blobsy init`) auto-uploads blobs before git
+refs are pushed, ensuring blobs and refs arrive at the remote together.
+The pre-commit hook separately validates that staged `.bref` hashes still match their
+local files, catching modifications after tracking.
 
 Detection: `blobsy pull` errors with “missing (no remote!)”. `blobsy check-unpushed`
 finds all such cases.
@@ -2767,8 +2816,8 @@ working tree. If lost, re-run `blobsy track` then `blobsy push`.
 **File modified after tracking, before commit.** User runs `blobsy track`, then modifies
 the file before committing.
 The `.bref` hash no longer matches the file.
-The pre-commit hook’s sanity check catches this: `blobsy push` fails with a hash
-mismatch error, blocking the commit.
+The pre-commit hook catches this: it verifies that staged `.bref` hashes match the local
+files, blocking the commit with a hash mismatch error.
 Resolution: re-run `blobsy track` to update the `.bref`.
 
 ### Interrupted Transfers
@@ -3264,11 +3313,20 @@ This section consolidates all features designed but deferred to future versions.
 
 | Feature | Rationale for Deferral | Design Status |
 | --- | --- | --- |
+| **Post-merge auto-pull hook** (`blobsy pull` after `git pull`) | Pull has unbounded cost (network, disk) and not every user needs all blobs immediately — unlike push, where skipping causes data loss for other users (see `blobsy hooks`). Git LFS uses smudge filters for transparent download, not hooks. A hook-based approach is unreliable (fails silently on network errors, no retry). Keep `blobsy pull` explicit for V1. | Investigated; see notes below |
 | **Garbage collection** (`blobsy gc`) | Complex safety requirements; V1 doesn’t generate much orphaned data | Fully designed (see GC section) |
 | **Branch-isolated mode** (`{git_branch}` variable) | Unclear user demand; adds complexity | Fully designed (see template variables) |
 | **Remote checksum storage** (`.bref` `remote_checksum` field) | V1 content-hash sufficient for integrity; ETags are optimization | Format reserved (forward-compatible) |
-| **Export/import** (repo-to-repo blob transfer) | Complex; unclear use cases | Not designed |
-| **Dictionary compression** (shared compression dictionaries) | Minor storage savings; high complexity | Not designed |
+
+**Post-merge auto-pull notes:** Git LFS installs a `post-merge` hook but only for file
+locking, not for blob download.
+LFS achieves transparent download via the git smudge filter mechanism (`.gitattributes`
+filter driver that converts pointer files to real content on checkout).
+Blobsy intentionally uses visible `.bref` files rather than transparent filter drivers,
+so the smudge approach doesn’t directly apply.
+If user demand warrants it, a `post-merge` hook could run `blobsy pull --quiet` as a
+best-effort convenience, but failures should be non-blocking (log a warning, don’t fail
+the merge).
 
 ### Explicitly Won’t Do (Design Decisions)
 

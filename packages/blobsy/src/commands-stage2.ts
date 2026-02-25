@@ -4,15 +4,29 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
-import { readFile, unlink } from 'node:fs/promises';
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { appendFile, chmod, readdir, readFile, unlink } from 'node:fs/promises';
 import { basename, dirname, join, isAbsolute } from 'node:path';
 
 import type { Command } from 'commander';
 
-import { getConfigPath, resolveConfig } from './config.js';
+import {
+  getConfigPath,
+  getGlobalConfigPath,
+  loadConfigFile,
+  parseSize,
+  resolveConfig,
+} from './config.js';
 import { ensureDir } from './fs-utils.js';
-import { addGitignoreEntry } from './gitignore.js';
+import { addGitignoreEntry, readBlobsyBlock, removeGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
@@ -25,16 +39,35 @@ import {
 } from './paths.js';
 import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
-import { pushFile, pullFile, blobExists, runHealthCheck } from './transfer.js';
+import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
+import { isAwsCliAvailable } from './backend-aws-cli.js';
+import { parseBackendUrl } from './backend-url.js';
 import {
+  formatCheckFail,
+  formatCheckFixed,
+  formatCheckPass,
+  formatCheckWarn,
+  formatCount,
   formatDryRun,
+  formatFileState,
+  formatHeading,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
-  formatSize,
+  formatPullResult,
+  formatPushResult,
+  formatTransferFail,
+  formatWarning,
+  OUTPUT_SYMBOLS,
 } from './format.js';
-import type { GlobalOptions, TransferResult } from './types.js';
-import { ValidationError } from './types.js';
+import type {
+  BlobsyConfig,
+  DoctorIssue,
+  FileStateSymbol,
+  GlobalOptions,
+  TransferResult,
+} from './types.js';
+import { ValidationError, BREF_EXTENSION, BREF_FORMAT, FILE_STATE_SYMBOLS } from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -78,6 +111,72 @@ export function resolveTrackedFiles(
   return files;
 }
 
+export interface FileStateResult {
+  path: string;
+  symbol: string;
+  state: string;
+  details: string;
+  size?: number | undefined;
+}
+
+async function getFileState(
+  absPath: string,
+  refPath: string,
+): Promise<{ symbol: string; state: string; details: string; size?: number | undefined }> {
+  if (!existsSync(refPath)) {
+    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
+  }
+
+  let ref;
+  try {
+    ref = await readBref(refPath);
+  } catch {
+    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'corrupt_bref', details: 'invalid .bref' };
+  }
+
+  if (!existsSync(absPath)) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.missing,
+      state: 'missing_file',
+      details: 'file missing',
+      size: ref.size,
+    };
+  }
+
+  const currentHash = await computeHash(absPath);
+
+  if (currentHash !== ref.hash) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.modified,
+      state: 'modified',
+      details: 'modified',
+      size: ref.size,
+    };
+  }
+
+  if (ref.remote_key) {
+    return {
+      symbol: FILE_STATE_SYMBOLS.synced,
+      state: 'synced',
+      details: 'synced',
+      size: ref.size,
+    };
+  }
+
+  return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed', size: ref.size };
+}
+
+export async function computeFileStates(
+  files: { absPath: string; refPath: string; relPath: string }[],
+): Promise<FileStateResult[]> {
+  const results: FileStateResult[] = [];
+  for (const file of files) {
+    const { symbol, state, details, size } = await getFileState(file.absPath, file.refPath);
+    results.push({ path: file.relPath, symbol, state, details, size });
+  }
+  return results;
+}
+
 export async function handlePush(
   paths: string[],
   opts: Record<string, unknown>,
@@ -113,9 +212,7 @@ export async function handlePush(
       for (const a of needsPush) {
         console.log(formatDryRun(a));
       }
-      console.log(
-        `${formatDryRun(`push ${needsPush.length} file${needsPush.length === 1 ? '' : 's'}`)}`,
-      );
+      console.log(formatDryRun(`push ${formatCount(needsPush.length, 'file')}`));
     }
     return;
   }
@@ -166,11 +263,10 @@ export async function handlePush(
     );
   } else if (!globalOpts.quiet) {
     for (const r of succeeded) {
-      const sizeStr = r.bytesTransferred != null ? ` (${formatSize(r.bytesTransferred)})` : '';
-      console.log(`  ${r.path}${sizeStr} - pushed`);
+      console.log(formatPushResult(r.path, r.bytesTransferred));
     }
     for (const r of failed) {
-      console.error(`  ${r.path} - FAILED: ${r.error}`);
+      console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
     console.log(
       `Done: ${succeeded.length} pushed${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
@@ -217,9 +313,7 @@ export async function handlePull(
       for (const a of needsPull) {
         console.log(formatDryRun(a));
       }
-      console.log(
-        formatDryRun(`pull ${needsPull.length} file${needsPull.length === 1 ? '' : 's'}`),
-      );
+      console.log(formatDryRun(`pull ${formatCount(needsPull.length, 'file')}`));
     }
     return;
   }
@@ -268,11 +362,10 @@ export async function handlePull(
     );
   } else if (!globalOpts.quiet) {
     for (const r of succeeded) {
-      const sizeStr = r.bytesTransferred != null ? ` (${formatSize(r.bytesTransferred)})` : '';
-      console.log(`  ${r.path}${sizeStr} - pulled`);
+      console.log(formatPullResult(r.path, r.bytesTransferred));
     }
     for (const r of failed) {
-      console.error(`  ${r.path} - FAILED: ${r.error}`);
+      console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
     console.log(
       `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
@@ -351,12 +444,12 @@ export async function handleSync(
         }
         pushed++;
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  \u2191 ${file.relPath} - pushed`);
+          console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
         }
       } else {
         errors++;
         if (!globalOpts.quiet) {
-          console.error(`  \u2717 ${file.relPath} - push failed: ${result.error}`);
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
         }
       }
     } else if (!existsSync(file.absPath)) {
@@ -366,12 +459,12 @@ export async function handleSync(
         await writeCacheEntry(cacheDir, entry);
         pulled++;
         if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  \u2193 ${file.relPath} - pulled`);
+          console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled`);
         }
       } else {
         errors++;
         if (!globalOpts.quiet) {
-          console.error(`  \u2717 ${file.relPath} - pull failed: ${result.error}`);
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`);
         }
       }
     } else {
@@ -391,13 +484,13 @@ export async function handleSync(
           await writeCacheEntry(cacheDir, entry);
           pushed++;
           if (!globalOpts.quiet && !globalOpts.json) {
-            console.log(`  \u2191 ${file.relPath} - pushed (modified)`);
+            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
           }
         } else {
           errors++;
         }
       } else if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(`  \u2713 ${file.relPath} - up to date`);
+        console.log(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`);
       }
     }
   }
@@ -439,6 +532,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   const globalOpts = getGlobalOpts(cmd);
   const useJson = Boolean(opts.json) || globalOpts.json;
   const fix = Boolean(opts.fix);
+  const verbose = globalOpts.verbose;
   const repoRoot = findRepoRoot();
 
   if (globalOpts.dryRun && fix) {
@@ -449,115 +543,843 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
     }
     return;
   }
-  const config = await resolveConfig(repoRoot, repoRoot);
 
-  const issues: { type: string; message: string; fixed: boolean }[] = [];
+  const issues: DoctorIssue[] = [];
 
-  const configPath = getConfigPath(repoRoot);
-  if (!existsSync(configPath)) {
-    issues.push({ type: 'config', message: 'No .blobsy.yml found', fixed: false });
+  // --- Resolve config (may fail) ---
+  let config: Awaited<ReturnType<typeof resolveConfig>> | null = null;
+  try {
+    config = await resolveConfig(repoRoot, repoRoot);
+  } catch (err) {
+    issues.push({
+      type: 'config',
+      severity: 'error',
+      message: `Config error: ${err instanceof Error ? err.message : String(err)}`,
+      fixed: false,
+      fixable: false,
+    });
   }
 
-  const blobsyDir = join(repoRoot, '.blobsy');
-  if (!existsSync(blobsyDir)) {
-    if (fix) {
-      await ensureDir(blobsyDir);
-      issues.push({ type: 'directory', message: 'Created .blobsy/ directory', fixed: true });
+  // --- STATUS section ---
+  const files = resolveTrackedFiles([], repoRoot);
+  const fileStates = await computeFileStates(files);
+
+  if (!useJson) {
+    if (fileStates.length > 0) {
+      for (const r of fileStates) {
+        console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details, r.size));
+      }
+      console.log('');
+      const stateCounts: Record<string, number> = {};
+      for (const r of fileStates) {
+        stateCounts[r.state] = (stateCounts[r.state] ?? 0) + 1;
+      }
+      const stateParts = Object.entries(stateCounts)
+        .filter(([, v]) => v > 0)
+        .map(([state, count]) => `${count} ${state}`);
+      console.log(`${formatCount(fileStates.length, 'tracked file')}: ${stateParts.join(', ')}`);
+      console.log('');
     } else {
-      issues.push({ type: 'directory', message: '.blobsy/ directory missing', fixed: false });
+      console.log('No tracked files found.');
+      console.log('');
     }
   }
 
-  const allBrefs = findBrefFiles(repoRoot, repoRoot);
-  for (const relPath of allBrefs) {
-    const absPath = join(repoRoot, relPath);
-    const refPath = join(repoRoot, brefPath(relPath));
+  // --- CONFIGURATION section ---
+  const configIssues = checkConfig(config, repoRoot, verbose);
+  renderSection('CONFIGURATION', configIssues, verbose, useJson);
+  issues.push(...configIssues);
 
-    if (!existsSync(absPath) && existsSync(refPath)) {
-      const ref = await readBref(refPath);
-      if (!ref.remote_key) {
-        issues.push({
-          type: 'orphan',
-          message: `${relPath}: .bref exists but local file missing and no remote_key`,
+  // --- GIT HOOKS section ---
+  const hookIssues = await checkHooks(repoRoot, fix, verbose);
+  renderSection('GIT HOOKS', hookIssues, verbose, useJson);
+  issues.push(...hookIssues);
+
+  // --- INTEGRITY section ---
+  const integrityIssues: DoctorIssue[] = [];
+  try {
+    const blobsyDir = join(repoRoot, '.blobsy');
+    if (!existsSync(blobsyDir)) {
+      if (fix) {
+        await ensureDir(blobsyDir);
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: 'Created .blobsy/ directory',
+          fixed: true,
+          fixable: true,
+        });
+      } else {
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: '.blobsy/ directory missing',
           fixed: false,
+          fixable: true,
+        });
+      }
+    } else {
+      // Writability check
+      const testFile = join(blobsyDir, '.doctor-write-test');
+      try {
+        writeFileSync(testFile, '');
+        unlinkSync(testFile);
+      } catch {
+        integrityIssues.push({
+          type: 'directory',
+          severity: 'error',
+          message: '.blobsy/ is not writable',
+          fixed: false,
+          fixable: false,
         });
       }
     }
-  }
 
-  for (const relPath of allBrefs) {
-    const absPath = join(repoRoot, relPath);
-    const fileName = basename(absPath);
-    const fileDir = dirname(absPath);
-    const gitignorePath = join(fileDir, '.gitignore');
-
-    if (existsSync(join(repoRoot, brefPath(relPath)))) {
-      const { readBlobsyBlock } = await import('./gitignore.js');
-      const entries = await readBlobsyBlock(gitignorePath);
-      if (!entries.includes(fileName)) {
+    // .blobsy/ gitignore check
+    const rootGitignore = join(repoRoot, '.gitignore');
+    if (existsSync(rootGitignore)) {
+      const content = readFileSync(rootGitignore, 'utf-8');
+      const hasBlobsyEntry = content.split('\n').some((line) => {
+        const trimmed = line.trim();
+        return trimmed === '.blobsy' || trimmed === '.blobsy/';
+      });
+      if (!hasBlobsyEntry) {
         if (fix) {
-          await addGitignoreEntry(fileDir, fileName);
-          issues.push({
+          await appendFile(rootGitignore, '\n.blobsy/\n');
+          integrityIssues.push({
             type: 'gitignore',
-            message: `${relPath}: added missing .gitignore entry`,
+            severity: 'error',
+            message: 'Added .blobsy/ to root .gitignore',
             fixed: true,
+            fixable: true,
           });
         } else {
-          issues.push({
+          integrityIssues.push({
             type: 'gitignore',
-            message: `${relPath}: missing from .gitignore`,
+            severity: 'error',
+            message: '.blobsy/ not in root .gitignore',
             fixed: false,
+            fixable: true,
+          });
+        }
+      }
+    } else if (fix) {
+      await appendFile(rootGitignore, '.blobsy/\n');
+      integrityIssues.push({
+        type: 'gitignore',
+        severity: 'error',
+        message: 'Created root .gitignore with .blobsy/ entry',
+        fixed: true,
+        fixable: true,
+      });
+    } else {
+      integrityIssues.push({
+        type: 'gitignore',
+        severity: 'error',
+        message: '.blobsy/ not in root .gitignore (no .gitignore found)',
+        fixed: false,
+        fixable: true,
+      });
+    }
+
+    const allBrefs = findBrefFiles(repoRoot, repoRoot);
+
+    // .bref validation and orphan checks
+    for (const relPath of allBrefs) {
+      const absPath = join(repoRoot, relPath);
+      const refPath = join(repoRoot, brefPath(relPath));
+
+      if (existsSync(refPath)) {
+        try {
+          const ref = await readBref(refPath);
+
+          // Format version check
+          if (ref.format !== BREF_FORMAT) {
+            integrityIssues.push({
+              type: 'bref',
+              severity: 'warning',
+              message: `${relPath}: unexpected .bref format "${ref.format}" (expected "${BREF_FORMAT}")`,
+              fixed: false,
+              fixable: false,
+            });
+          }
+
+          // Orphan check
+          if (!existsSync(absPath) && !ref.remote_key) {
+            integrityIssues.push({
+              type: 'orphan',
+              severity: 'error',
+              message: `${relPath}: .bref exists but local file missing and no remote_key`,
+              fixed: false,
+              fixable: false,
+            });
+          }
+        } catch (err) {
+          integrityIssues.push({
+            type: 'bref',
+            severity: 'error',
+            message: `${relPath}: invalid .bref file: ${err instanceof Error ? err.message : String(err)}`,
+            fixed: false,
+            fixable: false,
           });
         }
       }
     }
-  }
 
-  try {
-    await runHealthCheck(config, repoRoot);
+    // Check for missing .gitignore entries
+    for (const relPath of allBrefs) {
+      const absPath = join(repoRoot, relPath);
+      const fileName = basename(absPath);
+      const fileDir = dirname(absPath);
+      const gitignorePath = join(fileDir, '.gitignore');
+
+      if (existsSync(join(repoRoot, brefPath(relPath)))) {
+        const entries = await readBlobsyBlock(gitignorePath);
+        if (!entries.includes(fileName)) {
+          if (fix) {
+            await addGitignoreEntry(fileDir, fileName);
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'error',
+              message: `${relPath}: added missing .gitignore entry`,
+              fixed: true,
+              fixable: true,
+            });
+          } else {
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'error',
+              message: `${relPath}: missing from .gitignore`,
+              fixed: false,
+              fixable: true,
+            });
+          }
+        }
+      }
+    }
+
+    // Dangling .gitignore entry check
+    const checkedDirs = new Set<string>();
+    for (const relPath of allBrefs) {
+      const fileDir = dirname(join(repoRoot, relPath));
+      if (checkedDirs.has(fileDir)) {
+        continue;
+      }
+      checkedDirs.add(fileDir);
+
+      const entries = await readBlobsyBlock(join(fileDir, '.gitignore'));
+      for (const entry of entries) {
+        const entryBref = join(fileDir, entry + BREF_EXTENSION);
+        if (!existsSync(entryBref)) {
+          if (fix) {
+            await removeGitignoreEntry(fileDir, entry);
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'warning',
+              message: `${entry}: removed dangling .gitignore entry`,
+              fixed: true,
+              fixable: true,
+            });
+          } else {
+            integrityIssues.push({
+              type: 'gitignore',
+              severity: 'warning',
+              message: `${entry}: dangling .gitignore entry (no .bref found)`,
+              fixed: false,
+              fixable: true,
+            });
+          }
+        }
+      }
+    }
+
+    // Stat cache checks
+    const cacheDir = getStatCacheDir(repoRoot);
+    if (existsSync(cacheDir)) {
+      try {
+        const cacheFiles = await readdir(cacheDir);
+        for (const file of cacheFiles) {
+          if (!file.endsWith('.json')) {
+            continue;
+          }
+          const cachePath = join(cacheDir, file);
+          try {
+            const raw = readFileSync(cachePath, 'utf-8');
+            const entry = JSON.parse(raw) as { path?: string };
+            if (entry.path) {
+              const entryBref = join(repoRoot, brefPath(entry.path));
+              if (!existsSync(entryBref)) {
+                if (fix) {
+                  await unlink(cachePath);
+                  integrityIssues.push({
+                    type: 'cache',
+                    severity: 'info',
+                    message: `Removed stale cache entry for ${entry.path}`,
+                    fixed: true,
+                    fixable: true,
+                  });
+                } else if (verbose) {
+                  integrityIssues.push({
+                    type: 'cache',
+                    severity: 'info',
+                    message: `Stale cache entry for ${entry.path}`,
+                    fixed: false,
+                    fixable: true,
+                  });
+                }
+              }
+            }
+          } catch {
+            if (fix) {
+              await unlink(cachePath);
+              integrityIssues.push({
+                type: 'cache',
+                severity: 'warning',
+                message: `Removed corrupt cache file: ${file}`,
+                fixed: true,
+                fixable: true,
+              });
+            } else {
+              integrityIssues.push({
+                type: 'cache',
+                severity: 'warning',
+                message: `Corrupt cache file: ${file}`,
+                fixed: false,
+                fixable: true,
+              });
+            }
+          }
+        }
+      } catch {
+        // readdir failure -- skip cache checks
+      }
+    }
   } catch (err) {
-    issues.push({
-      type: 'backend',
-      message: `Backend health check failed: ${err instanceof Error ? err.message : String(err)}`,
+    integrityIssues.push({
+      type: 'integrity',
+      severity: 'error',
+      message: `Integrity check error: ${err instanceof Error ? err.message : String(err)}`,
       fixed: false,
+      fixable: false,
     });
   }
+  renderSection('INTEGRITY', integrityIssues, verbose, useJson);
+  issues.push(...integrityIssues);
 
+  // --- BACKEND section ---
+  const backendIssues: DoctorIssue[] = [];
+  if (config) {
+    // Tool availability checks
+    try {
+      const resolved = resolveBackend(config);
+      if (resolved.type === 's3') {
+        if (!isAwsCliAvailable()) {
+          backendIssues.push({
+            type: 'backend',
+            severity: 'info',
+            message: 'AWS CLI not found; using built-in S3 SDK',
+            fixed: false,
+            fixable: false,
+          });
+        } else if (verbose) {
+          backendIssues.push({
+            type: 'backend',
+            severity: 'info',
+            message: 'AWS CLI available',
+            fixed: false,
+            fixable: false,
+          });
+        }
+      } else if (resolved.type === 'command') {
+        for (const field of ['push_command', 'pull_command', 'exists_command'] as const) {
+          const cmd = resolved[field];
+          if (cmd) {
+            const binary = cmd.split(/\s+/)[0];
+            if (binary) {
+              try {
+                execFileSync('which', [binary], { stdio: 'pipe' });
+                if (verbose) {
+                  backendIssues.push({
+                    type: 'backend',
+                    severity: 'info',
+                    message: `${field} binary found: ${binary}`,
+                    fixed: false,
+                    fixable: false,
+                  });
+                }
+              } catch {
+                backendIssues.push({
+                  type: 'backend',
+                  severity: 'error',
+                  message: `${field} binary not found: ${binary}`,
+                  fixed: false,
+                  fixable: false,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // resolveBackend may fail -- already reported in config section
+    }
+
+    // Health check
+    try {
+      await runHealthCheck(config, repoRoot);
+      if (verbose) {
+        backendIssues.push({
+          type: 'backend',
+          severity: 'info',
+          message: 'Backend reachable and writable',
+          fixed: false,
+          fixable: false,
+        });
+      }
+    } catch (err) {
+      backendIssues.push({
+        type: 'backend',
+        severity: 'error',
+        message: `Health check failed: ${err instanceof Error ? err.message : String(err)}`,
+        fixed: false,
+        fixable: false,
+      });
+    }
+  }
+  renderSection('BACKEND', backendIssues, verbose, useJson);
+  issues.push(...backendIssues);
+
+  // --- Output ---
   if (useJson) {
+    const severityCounts = { errors: 0, warnings: 0, info: 0 };
+    for (const i of issues) {
+      if (i.severity === 'error') {
+        severityCounts.errors++;
+      } else if (i.severity === 'warning') {
+        severityCounts.warnings++;
+      } else {
+        severityCounts.info++;
+      }
+    }
     console.log(
       formatJson({
-        issues,
+        status: {
+          files: fileStates.map((r) => ({
+            path: r.path,
+            state: r.state,
+            details: r.details,
+            ...(r.size != null ? { size: r.size } : {}),
+          })),
+        },
+        issues: issues.map((i) => ({
+          type: i.type,
+          severity: i.severity,
+          message: i.message,
+          fixed: i.fixed,
+          fixable: i.fixable,
+        })),
         summary: {
           total: issues.length,
+          ...severityCounts,
           fixed: issues.filter((i) => i.fixed).length,
           unfixed: issues.filter((i) => !i.fixed).length,
         },
       }),
     );
   } else {
-    if (issues.length === 0) {
+    const actionableIssues = issues.filter((i) => i.severity !== 'info' || i.fixed);
+    if (actionableIssues.length === 0) {
       console.log('No issues found.');
     } else {
-      for (const issue of issues) {
-        const prefix = issue.fixed ? '\u2713 Fixed' : '\u2717';
-        console.log(`  ${prefix}  ${issue.message}`);
-      }
-      console.log('');
-      const unfixed = issues.filter((i) => !i.fixed).length;
+      const unfixed = issues.filter((i) => !i.fixed && i.severity !== 'info').length;
       if (unfixed > 0) {
         console.log(
-          `${unfixed} issue${unfixed === 1 ? '' : 's'} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
+          `${formatCount(unfixed, 'issue')} found.${!fix ? ' Run with --fix to attempt repairs.' : ''}`,
         );
-      } else {
+      } else if (issues.some((i) => i.fixed)) {
         console.log('All issues fixed.');
       }
     }
   }
 
-  if (issues.some((i) => !i.fixed)) {
+  if (issues.some((i) => !i.fixed && i.severity === 'error')) {
     process.exitCode = 1;
   }
 }
+
+/** Render a doctor section with heading (non-JSON only). */
+function renderSection(
+  name: string,
+  sectionIssues: DoctorIssue[],
+  verbose: boolean,
+  useJson: boolean,
+): void {
+  if (useJson) {
+    return;
+  }
+
+  // In non-verbose mode, skip sections with no failures/warnings
+  const hasProblems = sectionIssues.some((i) => i.severity !== 'info' || i.fixed);
+  if (!verbose && !hasProblems) {
+    return;
+  }
+
+  console.log(formatHeading(name));
+  for (const issue of sectionIssues) {
+    if (issue.fixed) {
+      console.log(formatCheckFixed(issue.message));
+    } else if (issue.severity === 'error') {
+      console.log(formatCheckFail(issue.message));
+    } else if (issue.severity === 'warning') {
+      console.log(formatCheckWarn(issue.message));
+    } else if (verbose) {
+      console.log(formatCheckPass(issue.message));
+    }
+  }
+  console.log('');
+}
+
+const KNOWN_CONFIG_KEYS = new Set([
+  'backend',
+  'backends',
+  'externalize',
+  'compress',
+  'ignore',
+  'remote',
+  'sync',
+  'checksum',
+]);
+
+const VALID_COMPRESS_ALGORITHMS = new Set(['zstd', 'gzip', 'brotli', 'none']);
+
+/** Compute Levenshtein edit distance between two strings. */
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array.from<number>({ length: n + 1 }).fill(0),
+  );
+  for (let i = 0; i <= m; i++) {
+    dp[i]![0] = i;
+  }
+  for (let j = 0; j <= n; j++) {
+    dp[0]![j] = j;
+  }
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[m]![n]!;
+}
+
+/** Find the closest match from a set of candidates within edit distance 2. */
+function findClosestMatch(input: string, candidates: Set<string>): string | undefined {
+  let best: string | undefined;
+  let bestDist = 3; // max distance threshold
+  for (const candidate of candidates) {
+    const dist = levenshtein(input, candidate);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/** Run configuration validation checks for doctor. */
+function checkConfig(
+  config: BlobsyConfig | null,
+  repoRoot: string,
+  verbose: boolean,
+): DoctorIssue[] {
+  const issues: DoctorIssue[] = [];
+
+  // 1. Config file exists
+  const configPath = getConfigPath(repoRoot);
+  if (!existsSync(configPath)) {
+    issues.push({
+      type: 'config',
+      severity: 'error',
+      message: 'No .blobsy.yml found',
+      fixed: false,
+      fixable: false,
+    });
+    return issues; // Can't check further without config file
+  } else if (verbose) {
+    issues.push({
+      type: 'config',
+      severity: 'info',
+      message: '.blobsy.yml valid',
+      fixed: false,
+      fixable: false,
+    });
+  }
+
+  // 2. Config loaded successfully (already handled by resolveConfig wrapping)
+  if (!config) {
+    return issues;
+  }
+
+  // 3. Global config valid (if present)
+  try {
+    const globalPath = getGlobalConfigPath();
+    if (existsSync(globalPath)) {
+      try {
+        // loadConfigFile is async but we only need to validate YAML parsing
+        void loadConfigFile(globalPath);
+        if (verbose) {
+          issues.push({
+            type: 'config',
+            severity: 'info',
+            message: `Global config valid (${globalPath})`,
+            fixed: false,
+            fixable: false,
+          });
+        }
+      } catch (err) {
+        issues.push({
+          type: 'config',
+          severity: 'warning',
+          message: `Global config invalid: ${err instanceof Error ? err.message : String(err)}`,
+          fixed: false,
+          fixable: false,
+        });
+      }
+    } else if (verbose) {
+      issues.push({
+        type: 'config',
+        severity: 'info',
+        message: 'Global config: not present',
+        fixed: false,
+        fixable: false,
+      });
+    }
+  } catch {
+    // getGlobalConfigPath may fail if HOME is not set; ignore
+  }
+
+  // 4. Backend resolves
+  try {
+    const resolved = resolveBackend(config);
+    if (verbose) {
+      issues.push({
+        type: 'config',
+        severity: 'info',
+        message: `Backend: ${resolved.url ?? resolved.path ?? resolved.type} (${resolved.type})`,
+        fixed: false,
+        fixable: false,
+      });
+    }
+
+    // 5. Backend URL parseable
+    if (resolved.url) {
+      try {
+        parseBackendUrl(resolved.url);
+      } catch (err) {
+        issues.push({
+          type: 'config',
+          severity: 'error',
+          message: `Backend URL invalid: ${err instanceof Error ? err.message : String(err)}`,
+          fixed: false,
+          fixable: false,
+        });
+      }
+    }
+  } catch (err) {
+    issues.push({
+      type: 'config',
+      severity: 'error',
+      message: `Backend resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+      fixed: false,
+      fixable: false,
+    });
+  }
+
+  // 6. externalize.min_size parseable
+  if (config.externalize?.min_size != null) {
+    try {
+      parseSize(config.externalize.min_size);
+    } catch (err) {
+      issues.push({
+        type: 'config',
+        severity: 'warning',
+        message: `externalize.min_size invalid: ${err instanceof Error ? err.message : String(err)}`,
+        fixed: false,
+        fixable: false,
+      });
+    }
+  }
+
+  // 7. compress.min_size parseable
+  if (config.compress?.min_size != null) {
+    try {
+      parseSize(config.compress.min_size);
+    } catch (err) {
+      issues.push({
+        type: 'config',
+        severity: 'warning',
+        message: `compress.min_size invalid: ${err instanceof Error ? err.message : String(err)}`,
+        fixed: false,
+        fixable: false,
+      });
+    }
+  }
+
+  // 8. compress.algorithm valid
+  if (config.compress?.algorithm && !VALID_COMPRESS_ALGORITHMS.has(config.compress.algorithm)) {
+    issues.push({
+      type: 'config',
+      severity: 'warning',
+      message: `Unknown compression algorithm: ${config.compress.algorithm}`,
+      fixed: false,
+      fixable: false,
+    });
+  }
+
+  // 9. Unknown top-level config keys with did-you-mean suggestions
+  const rawKeys = Object.keys(config);
+  for (const key of rawKeys) {
+    if (!KNOWN_CONFIG_KEYS.has(key)) {
+      let message = `Unknown config key: ${key}`;
+      const suggestion = findClosestMatch(key, KNOWN_CONFIG_KEYS);
+      if (suggestion) {
+        message += ` (did you mean "${suggestion}"?)`;
+      }
+      issues.push({
+        type: 'config',
+        severity: 'info',
+        message,
+        fixed: false,
+        fixable: false,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/** Run git hook checks for doctor. */
+/** Detect path to the blobsy executable. */
+function detectBlobsyPath(): string {
+  const execPath = process.argv[1];
+  if (execPath && isAbsolute(execPath)) {
+    return execPath;
+  }
+  try {
+    return execFileSync('which', ['blobsy'], { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'blobsy';
+  }
+}
+
+/** Install a single git hook. */
+async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<void> {
+  const hookDir = join(repoRoot, '.git', 'hooks');
+  await ensureDir(hookDir);
+  const blobsyPath = detectBlobsyPath();
+  const hookPath = join(hookDir, hook.name);
+  const hookContent = `#!/bin/sh
+# Installed by: blobsy hooks install
+# To bypass: ${hook.bypassCmd}
+exec "${blobsyPath}" hook ${hook.gitEvent}
+`;
+  const { writeFile: writeFs } = await import('node:fs/promises');
+  await writeFs(hookPath, hookContent);
+  await chmod(hookPath, 0o755);
+}
+
+async function checkHooks(
+  repoRoot: string,
+  fix: boolean,
+  verbose: boolean,
+): Promise<DoctorIssue[]> {
+  const issues: DoctorIssue[] = [];
+  const hookDir = join(repoRoot, '.git', 'hooks');
+
+  for (const hook of HOOK_TYPES) {
+    const hookPath = join(hookDir, hook.name);
+
+    if (!existsSync(hookPath)) {
+      if (fix) {
+        await installHook(repoRoot, hook);
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `Installed ${hook.name} hook`,
+          fixed: true,
+          fixable: true,
+        });
+      } else {
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not installed`,
+          fixed: false,
+          fixable: true,
+        });
+      }
+      continue;
+    }
+
+    // Hook exists — check content
+    const content = readFileSync(hookPath, 'utf-8');
+    if (!content.includes('blobsy hook')) {
+      issues.push({
+        type: 'hooks',
+        severity: 'warning',
+        message: `${hook.name} hook exists but is not a blobsy hook`,
+        fixed: false,
+        fixable: false,
+      });
+      continue;
+    }
+
+    // Blobsy-managed hook — check executable
+    try {
+      accessSync(hookPath, constants.X_OK);
+      if (verbose) {
+        issues.push({
+          type: 'hooks',
+          severity: 'info',
+          message: `${hook.name} hook installed`,
+          fixed: false,
+          fixable: false,
+        });
+      }
+    } catch {
+      if (fix) {
+        void chmod(hookPath, 0o755);
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook made executable`,
+          fixed: true,
+          fixable: true,
+        });
+      } else {
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not executable`,
+          fixed: false,
+          fixable: true,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+const HOOK_TYPES = [
+  { name: 'pre-commit', gitEvent: 'pre-commit', bypassCmd: 'git commit --no-verify' },
+  { name: 'pre-push', gitEvent: 'pre-push', bypassCmd: 'git push --no-verify' },
+] as const;
 
 export async function handleHooks(
   action: string,
@@ -566,76 +1388,58 @@ export async function handleHooks(
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
-  const hookPath = join(repoRoot, '.git', 'hooks', 'pre-commit');
 
   if (globalOpts.dryRun) {
+    const actions = HOOK_TYPES.map((h) => `${action} ${h.name} hook`);
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([`${action} pre-commit hook`]));
+      console.log(formatJsonDryRun(actions));
     } else {
-      console.log(formatDryRun(`${action} pre-commit hook`));
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
     }
     return;
   }
 
   if (action === 'install') {
-    const hookDir = join(repoRoot, '.git', 'hooks');
-    await ensureDir(hookDir);
-    const { writeFile: writeFs, chmod } = await import('node:fs/promises');
+    const blobsyPath = detectBlobsyPath();
 
-    // Detect absolute path to blobsy executable
-    let blobsyPath: string;
+    if (blobsyPath === 'blobsy' && !globalOpts.quiet) {
+      console.warn(
+        formatWarning('Could not detect absolute path to blobsy executable.') +
+          '\n   Hook will use "blobsy" from PATH.' +
+          '\n   To ensure hooks work, install blobsy globally: pnpm link --global',
+      );
+    }
 
-    // Option 1: Use process.argv[1] (current executable)
-    const execPath = process.argv[1];
-
-    if (execPath && isAbsolute(execPath)) {
-      blobsyPath = execPath;
-    } else {
-      // Option 2: Try to find blobsy in PATH
-      try {
-        const result = execFileSync('which', ['blobsy'], { encoding: 'utf-8' });
-        blobsyPath = result.trim();
-      } catch {
-        // Fallback: use 'blobsy' and warn user
-        blobsyPath = 'blobsy';
-
-        if (!globalOpts.quiet) {
-          console.warn(
-            '⚠️  Warning: Could not detect absolute path to blobsy executable.\n' +
-              '   Hook will use "blobsy" from PATH.\n' +
-              '   To ensure hooks work, install blobsy globally: pnpm link --global',
-          );
-        }
+    for (const hook of HOOK_TYPES) {
+      await installHook(repoRoot, hook);
+      if (!globalOpts.quiet) {
+        console.log(`Installed ${hook.name} hook.`);
       }
     }
 
-    const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
-# To bypass: git commit --no-verify
-exec "${blobsyPath}" hook pre-commit
-`;
-    await writeFs(hookPath, hookContent);
-    await chmod(hookPath, 0o755);
-
-    if (!globalOpts.quiet) {
-      console.log('Installed pre-commit hook.');
-      if (blobsyPath !== 'blobsy') {
-        console.log(`  Using executable: ${blobsyPath}`);
-      }
+    if (!globalOpts.quiet && blobsyPath !== 'blobsy') {
+      console.log(`  Using executable: ${blobsyPath}`);
     }
   } else if (action === 'uninstall') {
-    if (existsSync(hookPath)) {
-      const content = await readFile(hookPath, 'utf-8');
-      if (content.includes('blobsy')) {
-        await unlink(hookPath);
-        if (!globalOpts.quiet) {
-          console.log('Uninstalled pre-commit hook.');
+    for (const hook of HOOK_TYPES) {
+      const hookPath = join(repoRoot, '.git', 'hooks', hook.name);
+      if (existsSync(hookPath)) {
+        const content = await readFile(hookPath, 'utf-8');
+        if (content.includes('blobsy')) {
+          await unlink(hookPath);
+          if (!globalOpts.quiet) {
+            console.log(`Uninstalled ${hook.name} hook.`);
+          }
+        } else if (!globalOpts.quiet) {
+          console.log(
+            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy.`,
+          );
         }
       } else if (!globalOpts.quiet) {
-        console.log('Pre-commit hook not managed by blobsy.');
+        console.log(`No ${hook.name} hook found.`);
       }
-    } else if (!globalOpts.quiet) {
-      console.log('No pre-commit hook found.');
     }
   } else {
     throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
@@ -669,7 +1473,7 @@ export async function handleCheckUnpushed(
       for (const path of unpushed) {
         console.log(`  ${path}`);
       }
-      console.log(`\n${unpushed.length} file${unpushed.length === 1 ? '' : 's'} not pushed.`);
+      console.log(`\n${formatCount(unpushed.length, 'file')} not pushed.`);
     }
   }
 
@@ -713,9 +1517,7 @@ export async function handlePrePushCheck(
       for (const path of missing) {
         console.log(`  ${path}  missing remote blob`);
       }
-      console.log(
-        `\n${missing.length} file${missing.length === 1 ? '' : 's'} missing remote blobs.`,
-      );
+      console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
       console.log('Run blobsy push first.');
     }
   }
@@ -725,14 +1527,100 @@ export async function handlePrePushCheck(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
+async function handlePreCommitHook(repoRoot: string): Promise<void> {
+  // Find staged .bref files
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  })
+    .trim()
+    .split('\n')
+    .filter((f) => f.endsWith(BREF_EXTENSION));
+
+  if (staged.length === 0) return;
+
+  const failures: string[] = [];
+  for (const brefRelPath of staged) {
+    const brefAbsPath = join(repoRoot, brefRelPath);
+    const ref = await readBref(brefAbsPath);
+    const dataPath = stripBrefExtension(brefAbsPath);
+
+    if (!existsSync(dataPath)) {
+      // Data file missing is OK — it may have been gitignored and deleted
+      continue;
+    }
+
+    const actualHash = await computeHash(dataPath);
+    if (actualHash !== ref.hash) {
+      failures.push(stripBrefExtension(brefRelPath));
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error('blobsy pre-commit: hash mismatch detected.');
+    console.error('The following files were modified after tracking:\n');
+    for (const f of failures) {
+      console.error(`  ${f}`);
+    }
+    console.error('\nRe-run `blobsy track` (or `blobsy add`) to update the .bref files.');
+    console.error('To bypass: git commit --no-verify');
+    process.exitCode = 1;
+  }
+}
+
+async function handlePrePushHook(repoRoot: string): Promise<void> {
+  const config = await resolveConfig(repoRoot, repoRoot);
+  const allBrefs = findBrefFiles(repoRoot, repoRoot);
+  const unpushed: string[] = [];
+
+  for (const relPath of allBrefs) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
+    if (!ref.remote_key) {
+      unpushed.push(relPath);
+    }
+  }
+
+  if (unpushed.length === 0) return;
+
+  console.log(`blobsy pre-push: uploading ${formatCount(unpushed.length, 'blob')}...`);
+
+  // Push each unpushed blob
+  const cacheDir = getStatCacheDir(repoRoot);
+  for (const relPath of unpushed) {
+    const refPath = join(repoRoot, brefPath(relPath));
+    const ref = await readBref(refPath);
+    const absPath = join(repoRoot, relPath);
+
+    const result = await pushFile(absPath, relPath, ref, config, repoRoot);
+
+    if (result.success && result.refUpdates) {
+      const updatedRef = { ...ref, ...result.refUpdates };
+      await writeBref(refPath, updatedRef);
+      if (existsSync(absPath)) {
+        const entry = await createCacheEntry(absPath, relPath, updatedRef.hash);
+        await writeCacheEntry(cacheDir, entry);
+      }
+    }
+  }
+
+  console.log('blobsy pre-push: all blobs uploaded.');
+}
+
 export async function handleHook(
   type: string,
   _opts: Record<string, unknown>,
   _cmd: Command,
 ): Promise<void> {
+  if (process.env.BLOBSY_NO_HOOKS) return;
+
+  const repoRoot = findRepoRoot();
+
   if (type === 'pre-commit') {
-    return;
+    await handlePreCommitHook(repoRoot);
+  } else if (type === 'pre-push') {
+    await handlePrePushHook(repoRoot);
+  } else {
+    throw new ValidationError(`Unknown hook type: ${type}`);
   }
-  throw new ValidationError(`Unknown hook type: ${type}`);
 }

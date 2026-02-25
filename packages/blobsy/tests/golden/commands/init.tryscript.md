@@ -40,6 +40,7 @@ Config already exists at .blobsy.yml. Skipping config creation.
 ```console
 $ blobsy init 2>&1
 error: missing required argument 'url'
+(use --help for usage, or blobsy docs for full guide)
 ? 1
 ```
 

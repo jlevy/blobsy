@@ -47,7 +47,7 @@ export function resolveBackend(config: BlobsyConfig): ResolvedBackendConfig {
   const backends = config.backends;
 
   if (!backends) {
-    throw new ValidationError('No backends configured. Run blobsy init first.');
+    throw new ValidationError('No backends configured. Run: blobsy setup --auto <url>');
   }
 
   const backend = backends[backendName];

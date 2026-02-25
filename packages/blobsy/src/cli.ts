@@ -7,24 +7,45 @@
  * dual-mode output (human-readable + JSON).
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { readFile, rename, unlink } from 'node:fs/promises';
-import { basename, dirname, join, relative } from 'node:path';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import type { Help } from 'commander';
 import { Command, Option } from 'commander';
+import colors from 'picocolors';
 
 import { parseBackendUrl, validateBackendUrl, resolveLocalPath } from './backend-url.js';
-import { getConfigPath, getExternalizeConfig, resolveConfig, writeConfigFile } from './config.js';
+import {
+  getConfigPath,
+  getExternalizeConfig,
+  getGlobalConfigPath,
+  resolveConfig,
+  resolveConfigWithOrigins,
+  unsetNestedValue,
+  writeConfigFile,
+} from './config.js';
 import { shouldExternalize } from './externalize.js';
 import {
+  isInteractive,
+  renderMarkdown,
+  paginateOutput,
+  extractSections,
+  findSection,
+} from './markdown-output.js';
+import {
+  formatCount,
   formatDryRun,
   formatError,
+  formatFileState,
   formatJson,
   formatJsonDryRun,
   formatJsonError,
   formatJsonMessage,
   formatSize,
+  OUTPUT_SYMBOLS,
 } from './format.js';
 import { ensureDir } from './fs-utils.js';
 import { addGitignoreEntry, removeGitignoreEntry } from './gitignore.js';
@@ -53,17 +74,12 @@ import {
   handlePrePushCheck,
   handleHook,
   resolveTrackedFiles,
+  computeFileStates,
 } from './commands-stage2.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
-import { PRIME_TEXT, SKILL_BRIEF, SKILL_FULL } from './skill-text.js';
-import type { BlobsyConfig, GlobalOptions, Bref } from './types.js';
-import {
-  BlobsyError,
-  FILE_STATE_SYMBOLS,
-  BREF_FORMAT,
-  ValidationError,
-  UserError,
-} from './types.js';
+import { SKILL_TEXT } from './skill-text.js';
+import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
+import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -84,94 +100,53 @@ function createProgram(): Command {
         .preset(true),
     )
     .configureHelp({
-      helpWidth: 80,
-      showGlobalOptions: false,
-      formatHelp: (cmd: Command, helper: Help) => {
-        const termWidth = 25;
-        const lines: string[] = [];
+      helpWidth: Math.min(88, process.stdout.columns ?? 80),
+      showGlobalOptions: true,
+      styleTitle: (str: string) => colors.bold(colors.cyan(str)),
+      styleCommandText: (str: string) => colors.green(str),
+      styleOptionText: (str: string) => colors.yellow(str),
+    })
+    .showHelpAfterError('(use --help for usage, or blobsy docs for full guide)');
 
-        // Usage
-        lines.push(`Usage: ${helper.commandUsage(cmd)}`);
-        lines.push('');
-
-        // Description
-        const desc = helper.commandDescription(cmd);
-        if (desc) {
-          lines.push(desc);
-          lines.push('');
-        }
-
-        // Arguments
-        const args = helper.visibleArguments(cmd);
-        if (args.length > 0) {
-          lines.push('Arguments:');
-          for (const arg of args) {
-            const term = `  ${arg.name()}`;
-            const desc = arg.description;
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Options
-        const opts = helper.visibleOptions(cmd);
-        if (opts.length > 0) {
-          lines.push('Options:');
-          for (const opt of opts) {
-            const flags = opt.flags;
-            const desc = opt.description;
-            const term = `  ${flags}`;
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Commands
-        const cmds = helper.visibleCommands(cmd);
-        if (cmds.length > 0) {
-          lines.push('Commands:');
-          for (const sub of cmds) {
-            const name = sub.name();
-            const argParts = sub.registeredArguments.map((a) => {
-              const suffix = a.variadic ? '...' : '';
-              return a.required ? `<${a.name()}${suffix}>` : `[${a.name()}${suffix}]`;
-            });
-            const argsStr = argParts.join(' ');
-            const term = `  ${name}${argsStr ? ' ' + argsStr : ''}`;
-            const desc = name === 'help' ? 'Display help for command' : sub.description();
-            lines.push(term.padEnd(termWidth) + desc);
-          }
-          lines.push('');
-        }
-
-        // Epilog
-        if (cmd.name() === 'blobsy') {
-          lines.push('Get started:');
-          lines.push('  blobsy init s3://bucket/prefix/');
-          lines.push('  blobsy track <file>');
-          lines.push('  blobsy push');
-          lines.push('');
-          lines.push('Docs: https://github.com/jlevy/blobsy');
-          lines.push('');
-        }
-
-        return lines.join('\n');
-      },
-    });
+  program
+    .command('setup')
+    .description('Set up blobsy in a git repo (wraps init + agent integration)')
+    .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
+    .option('--auto', 'Non-interactive setup (recommended)')
+    .option('--region <region>', 'AWS region (for S3 backends)')
+    .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
+    .option('--no-hooks', 'Skip git hook installation')
+    .action(wrapAction(handleSetup));
 
   program
     .command('init')
-    .description('Initialize blobsy in a git repo with a backend URL')
+    .description('Initialize blobsy config (low-level; prefer setup --auto)')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
     .option('--endpoint <endpoint>', 'Custom S3-compatible endpoint URL')
+    .option('--no-hooks', 'Skip git hook installation')
     .action(wrapAction(handleInit));
+
+  program
+    .command('add')
+    .description('Track files and stage changes to git (recommended)')
+    .argument('<path...>', 'Files or directories to add')
+    .option('--force', 'Skip confirmation for destructive operations')
+    .option(
+      '--min-size <size>',
+      'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
+    )
+    .action(wrapAction(handleAdd));
 
   program
     .command('track')
     .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option('--force', 'Skip confirmation for destructive operations')
+    .option(
+      '--min-size <size>',
+      'Override minimum file size for directory tracking (e.g. "100kb", "5mb")',
+    )
     .action(wrapAction(handleTrack));
 
   program
@@ -239,6 +214,9 @@ function createProgram(): Command {
     .description('Show, get, or set .blobsy.yml values')
     .argument('[key]', 'Config key (dot-separated, e.g. compress.algorithm)')
     .argument('[value]', 'Value to set')
+    .option('--global', 'Use global config (~/.blobsy.yml)')
+    .option('--show-origin', 'Show which config file each value comes from')
+    .option('--unset', 'Remove the specified config key')
     .action(wrapAction(handleConfig));
 
   program
@@ -256,7 +234,7 @@ function createProgram(): Command {
 
   program
     .command('hooks')
-    .description('Install or uninstall the blobsy pre-commit hook')
+    .description('Install or uninstall blobsy git hooks (pre-commit, pre-push)')
     .argument('<action>', 'install or uninstall')
     .action(wrapAction(handleHooks));
 
@@ -273,36 +251,123 @@ function createProgram(): Command {
   program
     .command('hook', { hidden: true })
     .description('Internal hook commands')
-    .argument('<type>', 'Hook type (pre-commit)')
+    .argument('<type>', 'Hook type (pre-commit, pre-push)')
     .action(wrapAction(handleHook));
+
+  program
+    .command('readme')
+    .description('Display the blobsy README')
+    .action(
+      wrapAction(async (opts: Record<string, unknown>) => {
+        const content = await loadBundledDoc('README.md');
+        const interactive = isInteractive(opts);
+        const rendered = renderMarkdown(content, interactive);
+        await paginateOutput(rendered, interactive);
+      }),
+    );
+
+  program
+    .command('docs')
+    .description('Display blobsy user documentation')
+    .argument('[topic]', 'Section to display (e.g. "compression", "backends")')
+    .option('--list', 'List available sections')
+    .option('--brief', 'Condensed version')
+    .action(
+      wrapAction(async (topic: string | undefined, opts: Record<string, unknown>) => {
+        const interactive = isInteractive(opts);
+
+        if (opts.brief) {
+          const brief = await loadBundledDoc('blobsy-docs-brief.md');
+          const rendered = renderMarkdown(brief, interactive);
+          await paginateOutput(rendered, interactive);
+          return;
+        }
+
+        let content = await loadBundledDoc('blobsy-docs.md');
+        const sections = extractSections(content);
+
+        if (opts.list) {
+          console.log('Available documentation sections:\n');
+          for (const s of sections) {
+            console.log(`  ${s.slug.padEnd(28)} ${s.title}`);
+          }
+          console.log(`\nUse: blobsy docs <topic>`);
+          return;
+        }
+
+        if (topic) {
+          const section = findSection(content, sections, topic);
+          if (!section) {
+            console.error(`Section "${topic}" not found. Use --list to see available sections.`);
+            process.exitCode = 1;
+            return;
+          }
+          content = section;
+        }
+
+        const rendered = renderMarkdown(content, interactive);
+        await paginateOutput(rendered, interactive);
+      }),
+    );
 
   program
     .command('skill')
     .description('Output blobsy skill documentation (for AI agents)')
-    .option('--brief', 'Short summary only')
     .action(
       // eslint-disable-next-line @typescript-eslint/require-await
-      wrapAction(async (opts: Record<string, unknown>) => {
-        console.log(opts.brief ? SKILL_BRIEF : SKILL_FULL);
+      wrapAction(async () => {
+        console.log(SKILL_TEXT);
       }),
     );
 
-  program
-    .command('prime')
-    .description('Output context primer for AI agents working in this repo')
-    .option('--brief', 'Short summary only')
-    .action(
-      // eslint-disable-next-line @typescript-eslint/require-await
-      wrapAction(async (opts: Record<string, unknown>) => {
-        console.log(opts.brief ? SKILL_BRIEF : PRIME_TEXT);
-      }),
-    );
+  program.addHelpText('after', () => {
+    return [
+      '',
+      colors.bold('Get started:'),
+      `  ${colors.green('blobsy setup --auto')} s3://bucket/prefix/`,
+      `  ${colors.green('blobsy add')} <file-or-dir>`,
+      `  ${colors.green('blobsy push')}`,
+      '',
+      colors.bold('Learn more:'),
+      `  ${colors.green('blobsy readme')}              Overview and quick start`,
+      `  ${colors.green('blobsy docs')}                Full user guide`,
+      `  ${colors.green('blobsy docs')} ${colors.yellow('<topic>')}        Specific topic (try ${colors.yellow('"backends"')}, ${colors.yellow('"compression"')})`,
+      `  ${colors.green('blobsy docs --list')}          List all topics`,
+      `  ${colors.green('blobsy skill')}               Quick reference for AI agents`,
+      '',
+      `${colors.dim('https://github.com/jlevy/blobsy')}`,
+    ].join('\n');
+  });
 
   return program;
 }
 
 function getVersion(): string {
   return '0.1.0';
+}
+
+/**
+ * Load a bundled documentation file from dist/docs/ with dev fallback.
+ */
+async function loadBundledDoc(filename: string): Promise<string> {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+
+  // Production: dist/docs/<filename>
+  try {
+    return await readFile(join(__dirname, 'docs', filename), 'utf-8');
+  } catch {
+    // Dev fallback: packages/blobsy/docs/<filename>
+    try {
+      return await readFile(join(__dirname, '..', 'docs', filename), 'utf-8');
+    } catch {
+      // Last fallback for README: repo root
+      if (filename === 'README.md') {
+        return await readFile(join(__dirname, '..', '..', '..', 'README.md'), 'utf-8');
+      }
+      throw new Error(`Documentation file not found: ${filename}`);
+    }
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -358,6 +423,128 @@ function wrapAction(handler: ActionHandler): ActionHandler {
 
 // --- Command Handlers ---
 
+async function handleSetup(
+  url: string,
+  opts: Record<string, unknown>,
+  cmd: Command,
+): Promise<void> {
+  const globalOpts = getGlobalOpts(cmd);
+
+  if (!opts.auto) {
+    throw new UserError('--auto flag is required (interactive setup is not yet supported)');
+  }
+
+  // Delegate to init
+  await handleInit(url, opts, cmd);
+
+  // Install agent integration files
+  const repoRoot = findRepoRoot();
+  if (!globalOpts.dryRun) {
+    await installAgentFiles(repoRoot, globalOpts);
+  }
+
+  // Show next steps (unless quiet/json/dry-run)
+  if (!globalOpts.quiet && !globalOpts.json && !globalOpts.dryRun) {
+    console.log('');
+    console.log('Setup complete! Next steps:');
+    console.log('  blobsy track <file>    Track files with .bref pointers');
+    console.log('  blobsy push            Upload to backend');
+    console.log('  blobsy status          Check sync state');
+    console.log('  blobsy skill           Quick reference for AI agents');
+  }
+}
+
+// --- Agent Integration ---
+
+const BLOBSY_SKILL_REL = '.claude/skills/blobsy/SKILL.md';
+const AGENTS_MD_REL = 'AGENTS.md';
+const AGENTS_MD_BEGIN = '<!-- BEGIN BLOBSY INTEGRATION -->';
+const AGENTS_MD_END = '<!-- END BLOBSY INTEGRATION -->';
+
+/**
+ * Install agent integration files if agent tooling is detected.
+ * - .claude/skills/blobsy/SKILL.md (if Claude Code detected)
+ * - AGENTS.md section (if AGENTS.md exists)
+ */
+async function installAgentFiles(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  await installClaudeSkill(repoRoot, globalOpts);
+  await installAgentsMdSection(repoRoot, globalOpts);
+}
+
+/**
+ * Install .claude/skills/blobsy/SKILL.md if Claude Code is detected.
+ * Detection: ~/.claude/ exists, or .claude/ exists in project, or CLAUDE_* env vars.
+ */
+async function installClaudeSkill(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  const globalClaudeDir = join(homedir(), '.claude');
+  const projectClaudeDir = join(repoRoot, '.claude');
+  const hasClaudeGlobal = existsSync(globalClaudeDir);
+  const hasClaudeProject = existsSync(projectClaudeDir);
+  const hasClaudeEnv = Object.keys(process.env).some((k) => k.startsWith('CLAUDE_'));
+
+  if (!hasClaudeGlobal && !hasClaudeProject && !hasClaudeEnv) {
+    return;
+  }
+
+  const skillPath = join(repoRoot, BLOBSY_SKILL_REL);
+  const skillDir = dirname(skillPath);
+
+  // Always write (idempotent update to latest content)
+  await ensureDir(skillDir);
+  await writeFile(skillPath, SKILL_TEXT);
+
+  if (!globalOpts.quiet && !globalOpts.json) {
+    console.log(`Installed ${BLOBSY_SKILL_REL}`);
+  }
+}
+
+/**
+ * Add or update blobsy section in AGENTS.md if it exists.
+ * Uses markers to allow idempotent updates.
+ */
+async function installAgentsMdSection(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  const agentsPath = join(repoRoot, AGENTS_MD_REL);
+
+  if (!existsSync(agentsPath)) {
+    return;
+  }
+
+  const section = [
+    AGENTS_MD_BEGIN,
+    '## Blobsy',
+    '',
+    'Git-native large file storage CLI.',
+    '',
+    '**Installation:** `npm install -g blobsy@latest`',
+    '**Setup:** `blobsy setup --auto s3://bucket/prefix/`',
+    '**Orientation:** Run `blobsy skill` for quick reference',
+    AGENTS_MD_END,
+  ].join('\n');
+
+  let content = await readFile(agentsPath, 'utf-8');
+
+  if (content.includes(AGENTS_MD_BEGIN)) {
+    // Replace existing section
+    const beginIdx = content.indexOf(AGENTS_MD_BEGIN);
+    const endIdx = content.indexOf(AGENTS_MD_END);
+    if (endIdx > beginIdx) {
+      content = content.slice(0, beginIdx) + section + content.slice(endIdx + AGENTS_MD_END.length);
+      await writeFile(agentsPath, content);
+      if (!globalOpts.quiet && !globalOpts.json) {
+        console.log(`Updated blobsy section in ${AGENTS_MD_REL}`);
+      }
+    }
+  } else {
+    // Append section
+    const separator = content.endsWith('\n') ? '\n' : '\n\n';
+    content += separator + section + '\n';
+    await writeFile(agentsPath, content);
+    if (!globalOpts.quiet && !globalOpts.json) {
+      console.log(`Added blobsy section to ${AGENTS_MD_REL}`);
+    }
+  }
+}
+
 async function handleInit(url: string, opts: Record<string, unknown>, cmd: Command): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
@@ -366,13 +553,28 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
   const parsed = parseBackendUrl(url);
   validateBackendUrl(parsed, repoRoot);
 
+  if (globalOpts.dryRun) {
+    const actions = [];
+    if (!existsSync(configPath)) {
+      actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
+    }
+    actions.push('install pre-commit hook');
+    if (globalOpts.json) {
+      console.log(formatJsonDryRun(actions));
+    } else {
+      for (const a of actions) {
+        console.log(formatDryRun(a));
+      }
+    }
+    return;
+  }
+
   // Auto-create local backend directory if it doesn't exist
   if (parsed.type === 'local' && parsed.path) {
     const absPath = resolveLocalPath(parsed.path, repoRoot);
 
     if (!existsSync(absPath)) {
       try {
-        // Create backend directory (with all parent directories if needed)
         await ensureDir(absPath);
 
         if (!globalOpts.quiet && !globalOpts.json) {
@@ -385,7 +587,6 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
         const parentDir = dirname(absPath);
 
         if (error.code === 'ENOENT') {
-          // This shouldn't happen with recursive: true, but just in case
           throw new ValidationError(
             `Cannot create backend directory: ${absPath}\n` +
               `  Parent directory does not exist: ${parentDir}\n` +
@@ -403,22 +604,6 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
         throw error; // Re-throw unexpected errors
       }
     }
-  }
-
-  if (globalOpts.dryRun) {
-    const actions = [];
-    if (!existsSync(configPath)) {
-      actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
-    }
-    actions.push('install pre-commit hook');
-    if (globalOpts.json) {
-      console.log(formatJsonDryRun(actions));
-    } else {
-      for (const a of actions) {
-        console.log(formatDryRun(a));
-      }
-    }
-    return;
   }
 
   if (existsSync(configPath)) {
@@ -454,49 +639,57 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     }
   }
 
-  // Install stub pre-commit hook
-  await installStubHook(repoRoot, globalOpts);
+  // Install git hooks (pre-commit and pre-push)
+  if (!opts.noHooks) {
+    await installHooks(repoRoot, globalOpts);
+  }
 }
 
-async function installStubHook(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
-  const hookDir = join(repoRoot, '.git', 'hooks');
-  const hookPath = join(hookDir, 'pre-commit');
+const HOOKS = [
+  { name: 'pre-commit', gitEvent: 'pre-commit' },
+  { name: 'pre-push', gitEvent: 'pre-push' },
+] as const;
 
-  // Skip if BLOBSY_NO_HOOKS is set (for testing)
-  if (process.env.BLOBSY_NO_HOOKS) {
-    return;
-  }
+async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
+  if (process.env.BLOBSY_NO_HOOKS) return;
+
+  const hookDir = join(repoRoot, '.git', 'hooks');
 
   // Check for hook managers
   if (existsSync(join(repoRoot, 'lefthook.yml')) || existsSync(join(repoRoot, '.husky'))) {
     if (!globalOpts.quiet && !globalOpts.json) {
-      console.log('Hook manager detected. Add blobsy to your hook configuration.');
+      console.log('Hook manager detected. Add blobsy hooks to your hook configuration:');
+      console.log('  pre-commit: blobsy hook pre-commit');
+      console.log('  pre-push:   blobsy hook pre-push');
     }
     return;
   }
 
-  if (existsSync(hookPath)) {
-    const content = await readFile(hookPath, 'utf-8');
-    if (!content.includes('blobsy')) {
-      if (!globalOpts.quiet && !globalOpts.json) {
-        console.log('Existing pre-commit hook found. Add blobsy manually.');
-      }
-      return;
-    }
-  }
-
   await ensureDir(hookDir);
   const { writeFile: writeFs, chmod } = await import('node:fs/promises');
-  const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
-# To bypass: git commit --no-verify
-exec blobsy hook pre-commit
-`;
-  await writeFs(hookPath, hookContent);
-  await chmod(hookPath, 0o755);
 
-  if (!globalOpts.quiet && !globalOpts.json) {
-    console.log('Installed pre-commit hook.');
+  for (const hook of HOOKS) {
+    const hookPath = join(hookDir, hook.name);
+
+    if (existsSync(hookPath)) {
+      const content = await readFile(hookPath, 'utf-8');
+      if (!content.includes('blobsy')) {
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(
+            `Existing ${hook.name} hook found. Add manually: blobsy hook ${hook.gitEvent}`,
+          );
+        }
+        continue;
+      }
+    }
+
+    const hookContent = `#!/bin/sh\n# Installed by: blobsy hooks install\n# To bypass: git ${hook.name === 'pre-commit' ? 'commit' : 'push'} --no-verify\nexec blobsy hook ${hook.gitEvent}\n`;
+    await writeFs(hookPath, hookContent);
+    await chmod(hookPath, 0o755);
+
+    if (!globalOpts.quiet && !globalOpts.json) {
+      console.log(`Installed ${hook.name} hook.`);
+    }
   }
 }
 
@@ -509,16 +702,95 @@ async function handleTrack(
   const repoRoot = findRepoRoot();
   const cacheDir = getStatCacheDir(repoRoot);
   const config = await resolveConfig(repoRoot, repoRoot);
+  const minSizeOverride = opts.minSize as string | undefined;
 
   for (const inputPath of paths) {
     const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
     if (isDirectory(absPath)) {
-      await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts);
+      await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts, minSizeOverride);
     } else {
       await trackSingleFile(absPath, repoRoot, cacheDir, globalOpts);
     }
   }
+}
+
+async function handleAdd(
+  paths: string[],
+  opts: Record<string, unknown>,
+  cmd: Command,
+): Promise<void> {
+  const globalOpts = getGlobalOpts(cmd);
+  const repoRoot = findRepoRoot();
+  const cacheDir = getStatCacheDir(repoRoot);
+  const config = await resolveConfig(repoRoot, repoRoot);
+  const minSizeOverride = opts.minSize as string | undefined;
+
+  const allFilesToStage: string[] = [];
+
+  for (const inputPath of paths) {
+    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    let result: TrackResult;
+    if (isDirectory(absPath)) {
+      result = await trackDirectory(
+        absPath,
+        repoRoot,
+        cacheDir,
+        config,
+        globalOpts,
+        minSizeOverride,
+      );
+    } else {
+      result = await trackSingleFile(absPath, repoRoot, cacheDir, globalOpts);
+    }
+    allFilesToStage.push(...result.filesToStage);
+  }
+
+  // Deduplicate
+  const uniqueFiles = [...new Set(allFilesToStage)];
+
+  // Stage to git
+  if (!globalOpts.dryRun && uniqueFiles.length > 0) {
+    execFileSync('git', ['add', '--', ...uniqueFiles], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+
+    if (!globalOpts.quiet && !globalOpts.json) {
+      const brefCount = uniqueFiles.filter((f) => f.endsWith('.bref')).length;
+      const gitignoreCount = uniqueFiles.filter((f) => basename(f) === '.gitignore').length;
+      const keptCount = uniqueFiles.length - brefCount - gitignoreCount;
+      const parts = [];
+      if (brefCount > 0) {
+        parts.push(`${brefCount} .bref`);
+      }
+      if (gitignoreCount > 0) {
+        parts.push(`${gitignoreCount} .gitignore`);
+      }
+      if (keptCount > 0) {
+        parts.push(`${keptCount} kept in git`);
+      }
+      console.log(`Staged ${uniqueFiles.length} files (${parts.join(', ')}).`);
+      console.log(
+        'Changes have been staged to git: run `git status` to review and `git commit` to commit.',
+      );
+    }
+  }
+}
+
+interface TrackResult {
+  /** Absolute paths of files to git-add */
+  filesToStage: string[];
+  /** Count of files externalized (got .bref) */
+  externalized: number;
+  /** Count of files unchanged (already tracked, same hash) */
+  unchanged: number;
+  /** Count of non-externalized files found during directory walk */
+  keptInGit: number;
+}
+
+function emptyTrackResult(): TrackResult {
+  return { filesToStage: [], externalized: 0, unchanged: 0, keptInGit: 0 };
 }
 
 async function trackSingleFile(
@@ -526,7 +798,8 @@ async function trackSingleFile(
   repoRoot: string,
   cacheDir: string,
   globalOpts: GlobalOptions,
-): Promise<void> {
+): Promise<TrackResult> {
+  const result = emptyTrackResult();
   const relPath = toRepoRelative(absPath, repoRoot);
   const refPath = brefPath(absPath);
   const refRelPath = toRepoRelative(refPath, repoRoot);
@@ -544,7 +817,7 @@ async function trackSingleFile(
     } else {
       console.log(formatDryRun(action));
     }
-    return;
+    return result;
   }
 
   const hash = await computeHash(absPath);
@@ -562,7 +835,8 @@ async function trackSingleFile(
           console.log(`${relPath} already tracked (unchanged)`);
         }
       }
-      return;
+      result.unchanged++;
+      return result;
     }
 
     // Hash changed, update. Clear remote_key since old key points to old content.
@@ -587,7 +861,10 @@ async function trackSingleFile(
         console.log(`Updated ${refRelPath} (hash changed)`);
       }
     }
-    return;
+    result.externalized++;
+    const gitignorePath = join(fileDir, '.gitignore');
+    result.filesToStage.push(refPath, gitignorePath);
+    return result;
   }
 
   // New tracking
@@ -614,6 +891,11 @@ async function trackSingleFile(
       console.log(`Added ${relPath} to .gitignore`);
     }
   }
+
+  result.externalized++;
+  const gitignorePath = join(fileDir, '.gitignore');
+  result.filesToStage.push(refPath, gitignorePath);
+  return result;
 }
 
 async function trackDirectory(
@@ -622,10 +904,15 @@ async function trackDirectory(
   cacheDir: string,
   config: BlobsyConfig,
   globalOpts: GlobalOptions,
-): Promise<void> {
+  minSizeOverride?: string,
+): Promise<TrackResult> {
+  const result = emptyTrackResult();
   const relDir = toRepoRelative(absDir, repoRoot);
-  const files = findTrackableFiles(absDir);
-  const extConfig = getExternalizeConfig(config);
+  const files = findTrackableFiles(absDir, config.ignore);
+  const baseExtConfig = getExternalizeConfig(config);
+  const extConfig = minSizeOverride
+    ? { ...baseExtConfig, min_size: minSizeOverride }
+    : baseExtConfig;
 
   if (globalOpts.dryRun) {
     const trackable = files.filter((f) => {
@@ -636,21 +923,14 @@ async function trackDirectory(
     if (globalOpts.json) {
       console.log(formatJsonDryRun(trackable.map((f) => `track ${toRepoRelative(f, repoRoot)}`)));
     } else {
-      console.log(
-        formatDryRun(
-          `track ${trackable.length} file${trackable.length === 1 ? '' : 's'} in ${relDir}/`,
-        ),
-      );
+      console.log(formatDryRun(`track ${formatCount(trackable.length, 'file')} in ${relDir}/`));
     }
-    return;
+    return result;
   }
 
   if (!globalOpts.quiet && !globalOpts.json) {
     console.log(`Scanning ${relDir}/...`);
   }
-
-  let tracked = 0;
-  let unchanged = 0;
 
   for (const absFilePath of files) {
     const relFilePath = toRepoRelative(absFilePath, repoRoot);
@@ -658,6 +938,8 @@ async function trackDirectory(
     const fileSize = fileStat.size;
 
     if (!shouldExternalize(relFilePath, fileSize, extConfig)) {
+      result.keptInGit++;
+      result.filesToStage.push(absFilePath);
       continue;
     }
 
@@ -675,49 +957,57 @@ async function trackDirectory(
             `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> already tracked (unchanged)`,
           );
         }
-        unchanged++;
+        result.unchanged++;
         continue;
       }
 
       const newRef: Bref = { ...existingRef, hash, size: fileSize };
       await writeBref(refPath, newRef);
-      const entry = await createCacheEntry(absFilePath, relFilePath, hash);
-      await writeCacheEntry(cacheDir, entry);
+      const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
+      await writeCacheEntry(cacheDir, cacheEntry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
         console.log(
           `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> updated (hash changed)`,
         );
       }
-      tracked++;
+      result.externalized++;
+      const gitignorePath = join(fileDir, '.gitignore');
+      result.filesToStage.push(refPath, gitignorePath);
     } else {
       const ref: Bref = { format: BREF_FORMAT, hash, size: fileSize };
       await writeBref(refPath, ref);
       await addGitignoreEntry(fileDir, fileName);
-      const entry = await createCacheEntry(absFilePath, relFilePath, hash);
-      await writeCacheEntry(cacheDir, entry);
+      const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
+      await writeCacheEntry(cacheDir, cacheEntry);
 
       if (!globalOpts.quiet && !globalOpts.json) {
         console.log(
           `  ${relFilePath}${' '.repeat(Math.max(1, 22 - relFilePath.length))}(${sizeStr})  -> tracked`,
         );
       }
-      tracked++;
+      result.externalized++;
+      const gitignorePath = join(fileDir, '.gitignore');
+      result.filesToStage.push(refPath, gitignorePath);
     }
   }
 
   if (!globalOpts.quiet && !globalOpts.json) {
     const parts: string[] = [];
-    if (tracked > 0) {
-      parts.push(`${tracked} file${tracked === 1 ? '' : 's'} tracked`);
+    if (result.externalized > 0) {
+      parts.push(`${formatCount(result.externalized, 'file')} tracked`);
     } else {
       parts.push('0 files tracked');
     }
-    if (unchanged > 0) {
-      parts.push(`${unchanged} unchanged`);
+    if (result.unchanged > 0) {
+      parts.push(`${result.unchanged} unchanged`);
     }
     console.log(`${parts.join(', ')}.`);
   }
+
+  // Deduplicate filesToStage (multiple files in same dir -> same .gitignore)
+  result.filesToStage = [...new Set(result.filesToStage)];
+  return result;
 }
 
 async function handleStatus(
@@ -740,16 +1030,12 @@ async function handleStatus(
     return;
   }
 
-  const results: {
-    path: string;
-    symbol: string;
-    state: string;
-    details: string;
-  }[] = [];
+  const results = await computeFileStates(files);
 
-  for (const file of files) {
-    const { symbol, state, details } = await getFileState(file.absPath, file.refPath, file.relPath);
-    results.push({ path: file.relPath, symbol, state, details });
+  // Compute per-state counts
+  const stateCounts: Record<string, number> = {};
+  for (const r of results) {
+    stateCounts[r.state] = (stateCounts[r.state] ?? 0) + 1;
   }
 
   if (useJson) {
@@ -759,50 +1045,24 @@ async function handleStatus(
           path: r.path,
           state: r.state,
           details: r.details,
+          ...(r.size != null ? { size: r.size } : {}),
         })),
         summary: {
           total: results.length,
+          ...Object.fromEntries(Object.entries(stateCounts).filter(([, v]) => v > 0)),
         },
       }),
     );
   } else {
     for (const r of results) {
-      console.log(`  ${r.symbol}  ${r.path}  ${r.details}`);
+      console.log(formatFileState(r.symbol as FileStateSymbol, r.path, r.details, r.size));
     }
     console.log('');
-    console.log(`${results.length} tracked file${results.length === 1 ? '' : 's'}`);
+    const stateParts = Object.entries(stateCounts)
+      .filter(([, v]) => v > 0)
+      .map(([state, count]) => `${count} ${state}`);
+    console.log(`${formatCount(results.length, 'tracked file')}: ${stateParts.join(', ')}`);
   }
-}
-
-async function getFileState(
-  absPath: string,
-  refPath: string,
-  _relPath: string,
-): Promise<{ symbol: string; state: string; details: string }> {
-  if (!existsSync(refPath)) {
-    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_ref', details: '.bref not found' };
-  }
-
-  const ref = await readBref(refPath);
-
-  if (!existsSync(absPath)) {
-    return { symbol: FILE_STATE_SYMBOLS.missing, state: 'missing_file', details: 'file missing' };
-  }
-
-  const currentHash = await computeHash(absPath);
-
-  if (currentHash !== ref.hash) {
-    return { symbol: FILE_STATE_SYMBOLS.modified, state: 'modified', details: 'modified' };
-  }
-
-  if (ref.remote_key) {
-    // Check if .bref is committed (simplified: check if in git)
-    return { symbol: FILE_STATE_SYMBOLS.synced, state: 'synced', details: 'synced' };
-  }
-
-  // No remote_key: not pushed yet
-  // Simplified check: if .bref is committed
-  return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed' };
 }
 
 async function handleVerify(
@@ -853,7 +1113,9 @@ async function handleVerify(
   } else {
     for (const r of results) {
       const statusStr = r.status === 'ok' ? 'ok' : r.status;
-      console.log(`  ${r.status === 'ok' ? '\u2713' : '\u2717'}  ${r.path}  ${statusStr}`);
+      console.log(
+        `  ${r.status === 'ok' ? OUTPUT_SYMBOLS.pass : OUTPUT_SYMBOLS.fail}  ${r.path}  ${statusStr}`,
+      );
     }
     if (hasIssues) {
       console.log('');
@@ -1242,24 +1504,186 @@ async function handleConfig(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const repoRoot = findRepoRoot();
-  const configPath = getConfigPath(repoRoot);
+  const useGlobal = opts.global === true;
+  const showOrigin = opts.showOrigin === true;
+  const unset = opts.unset === true;
 
+  // Determine config file path
+  let configPath: string;
+  let repoRoot: string | undefined;
+
+  if (useGlobal) {
+    // Global config works outside git repo
+    configPath = getGlobalConfigPath();
+  } else {
+    // Repo config requires git repo
+    repoRoot = findRepoRoot();
+    configPath = getConfigPath(repoRoot);
+  }
+
+  // Handle --show-origin
+  if (showOrigin) {
+    if (useGlobal) {
+      throw new ValidationError(
+        '--show-origin requires a git repository (incompatible with --global)',
+      );
+    }
+    if (!repoRoot) {
+      throw new ValidationError('--show-origin requires a git repository');
+    }
+
+    const origins = await resolveConfigWithOrigins(repoRoot, repoRoot);
+
+    if (!key) {
+      // List all config values with origins
+      if (globalOpts.json) {
+        const result = Array.from(origins.entries()).map(([k, v]) => ({
+          key: k,
+          value: v.value,
+          origin: v.origin,
+          file: v.file ? formatConfigPath(v.file, repoRoot) : undefined,
+        }));
+        console.log(formatJson({ config: result }));
+      } else {
+        // Tab-separated output: origin\t[file]\tkey=value
+        const sortedKeys = Array.from(origins.keys()).sort();
+        for (const k of sortedKeys) {
+          const { value: val, origin, file } = origins.get(k)!;
+          const fileDisplay = file ? `\t${formatConfigPath(file, repoRoot)}` : '';
+          const valueDisplay =
+            typeof val === 'object' && val !== null
+              ? JSON.stringify(val)
+              : `${val as string | number | boolean}`;
+          console.log(`${origin}${fileDisplay}\t${k}=${valueDisplay}`);
+        }
+      }
+    } else {
+      // Show origin for specific key
+      const originInfo = origins.get(key);
+      if (globalOpts.json) {
+        if (originInfo) {
+          console.log(
+            formatJson({
+              key,
+              value: originInfo.value,
+              origin: originInfo.origin,
+              file: originInfo.file ? formatConfigPath(originInfo.file, repoRoot) : undefined,
+            }),
+          );
+        } else {
+          console.log(formatJson({ key, value: undefined, origin: null }));
+        }
+      } else {
+        if (originInfo) {
+          const fileDisplay = originInfo.file ? formatConfigPath(originInfo.file, repoRoot) : '';
+          const valueDisplay =
+            typeof originInfo.value === 'object' && originInfo.value !== null
+              ? JSON.stringify(originInfo.value)
+              : `${originInfo.value as string | number | boolean}`;
+          console.log(`${originInfo.origin}\t${fileDisplay}\t${valueDisplay}`);
+        } else {
+          console.log('(not set)');
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle --unset
+  if (unset) {
+    if (!key) {
+      throw new ValidationError('--unset requires a config key');
+    }
+    if (value) {
+      throw new ValidationError('--unset cannot be used with a value argument');
+    }
+
+    if (!existsSync(configPath)) {
+      if (useGlobal) {
+        // Global config doesn't exist, nothing to unset
+        if (!globalOpts.quiet) {
+          if (globalOpts.json) {
+            console.log(formatJsonMessage(`Global config does not exist, nothing to unset`));
+          } else {
+            console.log('Global config does not exist, nothing to unset');
+          }
+        }
+        return;
+      } else {
+        throw new ValidationError('No .blobsy.yml found. Run: blobsy setup --auto <url>');
+      }
+    }
+
+    if (globalOpts.dryRun) {
+      if (globalOpts.json) {
+        console.log(formatJsonDryRun([`unset ${key}`]));
+      } else {
+        console.log(formatDryRun(`unset ${key}`));
+      }
+      return;
+    }
+
+    const { parse: parseYaml } = await import('yaml');
+    const content = await readFile(configPath, 'utf-8');
+    const config = (parseYaml(content) as Record<string, unknown>) ?? {};
+
+    const removed = unsetNestedValue(config, key);
+
+    await writeConfigFile(configPath, config);
+
+    if (!globalOpts.quiet) {
+      if (globalOpts.json) {
+        const msg = removed ? `Unset ${key}` : `Key ${key} was not set`;
+        console.log(formatJsonMessage(msg));
+      } else {
+        if (removed) {
+          console.log(`Unset ${key}`);
+          // Show effective value after unset (may fall back to other scope)
+          if (!useGlobal && repoRoot) {
+            const resolvedConfig = await resolveConfig(repoRoot, repoRoot);
+            const effectiveValue = getNestedValue(resolvedConfig, key);
+            if (effectiveValue !== undefined) {
+              const displayValue =
+                typeof effectiveValue === 'object' && effectiveValue !== null
+                  ? JSON.stringify(effectiveValue)
+                  : `${effectiveValue as string | number | boolean}`;
+              console.log(`Effective value (from other scope): ${displayValue}`);
+            }
+          }
+        } else {
+          console.log(`Key ${key} was not set`);
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle normal get/set operations
   if (!key) {
     // Show all config
     if (!existsSync(configPath)) {
       if (globalOpts.json) {
         console.log(formatJson({ config: {} }));
       } else {
-        console.log('No .blobsy.yml found. Run blobsy init first.');
+        if (useGlobal) {
+          console.log('No global .blobsy.yml found.');
+        } else {
+          console.log('No .blobsy.yml found. Run: blobsy setup --auto <url>');
+        }
       }
       return;
     }
 
     const content = await readFile(configPath, 'utf-8');
     if (globalOpts.json) {
-      const config = await resolveConfig(repoRoot, repoRoot);
-      console.log(formatJson({ config: config as unknown as Record<string, unknown> }));
+      if (useGlobal) {
+        const { parse: parseYaml } = await import('yaml');
+        const config = parseYaml(content) as Record<string, unknown>;
+        console.log(formatJson({ config }));
+      } else if (repoRoot) {
+        const config = await resolveConfig(repoRoot, repoRoot);
+        console.log(formatJson({ config: config as unknown as Record<string, unknown> }));
+      }
     } else {
       console.log(content.trimEnd());
     }
@@ -1268,8 +1692,21 @@ async function handleConfig(
 
   if (!value) {
     // Get a specific key
-    const config = await resolveConfig(repoRoot, repoRoot);
-    const val = getNestedValue(config, key);
+    let val: unknown;
+    if (useGlobal) {
+      if (!existsSync(configPath)) {
+        val = undefined;
+      } else {
+        const { parse: parseYaml } = await import('yaml');
+        const content = await readFile(configPath, 'utf-8');
+        const config = parseYaml(content) as Record<string, unknown>;
+        val = getNestedValue(config, key);
+      }
+    } else if (repoRoot) {
+      const config = await resolveConfig(repoRoot, repoRoot);
+      val = getNestedValue(config, key);
+    }
+
     if (globalOpts.json) {
       console.log(formatJson({ key, value: val }));
     } else {
@@ -1285,9 +1722,14 @@ async function handleConfig(
     return;
   }
 
-  // Set a value -- simple key=value at the top level of the config
+  // Set a value
   if (!existsSync(configPath)) {
-    throw new ValidationError('No .blobsy.yml found. Run blobsy init first.');
+    if (useGlobal) {
+      // Create global config if it doesn't exist
+      await writeConfigFile(configPath, {});
+    } else {
+      throw new ValidationError('No .blobsy.yml found. Run: blobsy setup --auto <url>');
+    }
   }
 
   if (globalOpts.dryRun) {
@@ -1299,12 +1741,11 @@ async function handleConfig(
     return;
   }
 
-  const { parse: parseYaml, stringify: stringifyYaml } = await import('yaml');
+  const { parse: parseYaml } = await import('yaml');
   const content = await readFile(configPath, 'utf-8');
   const config = (parseYaml(content) as Record<string, unknown>) ?? {};
   setNestedValue(config, key, value);
-  const { writeFile: writeFs } = await import('node:fs/promises');
-  await writeFs(configPath, stringifyYaml(config, { lineWidth: 0 }));
+  await writeConfigFile(configPath, config);
 
   if (!globalOpts.quiet) {
     if (globalOpts.json) {
@@ -1313,6 +1754,34 @@ async function handleConfig(
       console.log(`Set ${key} = ${value}`);
     }
   }
+}
+
+/**
+ * Format a file path for display: use ~ for home directory and relative paths for repo files.
+ */
+function formatConfigPath(filePath: string, repoRoot?: string): string {
+  // Check BLOBSY_HOME first (for testing)
+  const blobsyHome = process.env.BLOBSY_HOME;
+  if (blobsyHome) {
+    const resolvedBlobsyHome = resolve(blobsyHome);
+    const resolvedFilePath = resolve(filePath);
+    if (resolvedFilePath.startsWith(resolvedBlobsyHome)) {
+      return resolvedFilePath.replace(resolvedBlobsyHome, '~');
+    }
+  }
+
+  // Check actual home directory
+  const home = homedir();
+  if (filePath.startsWith(home)) {
+    return filePath.replace(home, '~');
+  }
+
+  // Check repo root for relative paths
+  if (repoRoot && filePath.startsWith(repoRoot)) {
+    return relative(repoRoot, filePath) || '.';
+  }
+
+  return filePath;
 }
 
 function getNestedValue(obj: object, path: string): unknown {

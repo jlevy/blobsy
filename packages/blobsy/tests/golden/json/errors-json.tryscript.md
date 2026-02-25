@@ -41,8 +41,8 @@ $ echo "content" > data/untracked.bin
 $ blobsy push --json data/untracked.bin 2>&1
 {
   "schema_version": "0.1",
-  "error": "Cannot read .bref file: [LOCAL_PATH]/data/untracked.bin.bref: ENOENT: no such file or directory, open '[LOCAL_PATH]/data/untracked.bin.bref'",
-  "type": "validation"
+  "error": "File not tracked: untracked.bin",
+  "type": "unknown"
 }
 ? 1
 ```
@@ -81,11 +81,13 @@ $ blobsy status --json
     {
       "path": "data/model.bin",
       "state": "modified",
-      "details": "modified"
+      "details": "modified",
+      "size": 13
     }
   ],
   "summary": {
-    "total": 1
+    "total": 1,
+    "modified": 1
   }
 }
 ? 0

@@ -8,6 +8,7 @@ before: |
   git init -q -b main
   git config user.name "Blobsy Test"
   git config user.email "blobsy-test@example.com"
+  echo ".blobsy/" >> .gitignore
   git add -A && git commit -q -m "init"
   mkdir -p remote
   mkdir -p data
@@ -21,7 +22,15 @@ before: |
 
 ```console
 $ blobsy doctor
-No issues found.
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+2 issues found. Run with --fix to attempt repairs.
 ? 0
 ```
 
@@ -36,9 +45,18 @@ $ echo "" > data/.gitignore
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+=== INTEGRITY ===
   ✗  data/model.bin: missing from .gitignore
 
-1 issue found. Run with --fix to attempt repairs.
+3 issues found. Run with --fix to attempt repairs.
 ? 1
 ```
 
@@ -46,6 +64,15 @@ $ blobsy doctor
 
 ```console
 $ blobsy doctor --fix
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
+=== GIT HOOKS ===
+  ✓ Fixed  Installed pre-commit hook
+  ✓ Fixed  Installed pre-push hook
+
+=== INTEGRITY ===
   ✓ Fixed  data/model.bin: added missing .gitignore entry
 
 All issues fixed.
@@ -64,6 +91,10 @@ model.bin
 
 ```console
 $ blobsy doctor
+  ✓  data/model.bin  synced (13 B)
+
+1 tracked file: 1 synced
+
 No issues found.
 ? 0
 ```

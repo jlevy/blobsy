@@ -13,7 +13,15 @@ before: |
   for i in 1 2 3; do echo "model $i" > data/models/model-$i.bin; done
   for i in 1 2 3; do echo "dataset $i" > data/datasets/data-$i.bin; done
 ---
-# Track multiple files across directories (using .bin extension to match externalize patterns)
+# Set min size low so small test files get externalized
+
+```console
+$ blobsy config externalize.min_size 5
+Set externalize.min_size = 5
+? 0
+```
+
+# Track multiple files across directories
 
 ```console
 $ blobsy track data/models/
@@ -44,12 +52,12 @@ $ git add -A && git commit -q -m "track files"
 
 ```console
 $ blobsy push
-  data/datasets/data-1.bin (10 B) - pushed
-  data/datasets/data-2.bin (10 B) - pushed
-  data/datasets/data-3.bin (10 B) - pushed
-  data/models/model-1.bin (8 B) - pushed
-  data/models/model-2.bin (8 B) - pushed
-  data/models/model-3.bin (8 B) - pushed
+  ↑  data/datasets/data-1.bin (10 B)
+  ↑  data/datasets/data-2.bin (10 B)
+  ↑  data/datasets/data-3.bin (10 B)
+  ↑  data/models/model-1.bin (8 B)
+  ↑  data/models/model-2.bin (8 B)
+  ↑  data/models/model-3.bin (8 B)
 Done: 6 pushed.
 ? 0
 ```

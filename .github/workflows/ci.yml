@@ -37,6 +37,10 @@ jobs:
 
       - run: pnpm publint
 
+      - name: Link blobsy CLI for tests
+        working-directory: packages/blobsy
+        run: pnpm link --global
+
       - run: pnpm test:coverage
 
       - name: Coverage Report

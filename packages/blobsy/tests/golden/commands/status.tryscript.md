@@ -34,9 +34,9 @@ Added data/model.bin to .gitignore
 
 ```console
 $ blobsy status
-  ○  data/model.bin  not pushed
+  ○  data/model.bin  not pushed (13 B)
 
-1 tracked file
+1 tracked file: 1 new
 ? 0
 ```
 
@@ -49,9 +49,9 @@ $ echo "modified content" > data/model.bin
 
 ```console
 $ blobsy status
-  ~  data/model.bin  modified
+  ~  data/model.bin  modified (13 B)
 
-1 tracked file
+1 tracked file: 1 modified
 ? 0
 ```
 
@@ -64,9 +64,9 @@ $ rm data/model.bin
 
 ```console
 $ blobsy status
-  ?  data/model.bin  file missing
+  ?  data/model.bin  file missing (13 B)
 
-1 tracked file
+1 tracked file: 1 missing_file
 ? 0
 ```
 
@@ -87,10 +87,10 @@ Added data/dataset.csv to .gitignore
 
 ```console
 $ blobsy status
-  ○  data/dataset.csv  not pushed
-  ○  data/model.bin  not pushed
+  ○  data/dataset.csv  not pushed (12 B)
+  ○  data/model.bin  not pushed (13 B)
 
-2 tracked files
+2 tracked files: 2 new
 ? 0
 ```
 
@@ -98,8 +98,8 @@ $ blobsy status
 
 ```console
 $ blobsy push
-  data/dataset.csv (21 B) - pushed
-  data/model.bin (13 B) - pushed
+  ↑  data/dataset.csv (32 B)
+  ↑  data/model.bin (13 B)
 Done: 2 pushed.
 ? 0
 ```
@@ -111,10 +111,10 @@ $ git add -A && git commit -q -m "push"
 
 ```console
 $ blobsy status
-  ✓  data/dataset.csv  synced
-  ✓  data/model.bin  synced
+  ✓  data/dataset.csv  synced (12 B)
+  ✓  data/model.bin  synced (13 B)
 
-2 tracked files
+2 tracked files: 2 synced
 ? 0
 ```
 
@@ -122,8 +122,8 @@ $ blobsy status
 
 ```console
 $ blobsy status data/dataset.csv
-  ✓  data/dataset.csv  synced
+  ✓  data/dataset.csv  synced (12 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```

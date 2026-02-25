@@ -21,9 +21,9 @@ before: |
 
 ```console
 $ blobsy status
-  ✓  data/model.bin  synced
+  ✓  data/model.bin  synced (13 B)
 
-1 tracked file
+1 tracked file: 1 synced
 ? 0
 ```
 
@@ -52,7 +52,7 @@ Added data/results.csv to .gitignore
 
 ```console
 $ blobsy push data/results.csv
-  data/results.csv (21 B) - pushed
+  ↑  data/results.csv (32 B)
 Done: 1 pushed.
 ? 0
 ```
@@ -74,10 +74,10 @@ $ git add -A && git commit -q -m "add results"
 
 ```console
 $ blobsy status
-  ✓  data/model.bin  synced
-  ✓  data/results.csv  synced
+  ✓  data/model.bin  synced (13 B)
+  ✓  data/results.csv  synced (12 B)
 
-2 tracked files
+2 tracked files: 2 synced
 ? 0
 ```
 
@@ -98,10 +98,10 @@ $ git merge feature/new-data -q
 
 ```console
 $ blobsy status
-  ✓  data/model.bin  synced
-  ✓  data/results.csv  synced
+  ✓  data/model.bin  synced (13 B)
+  ✓  data/results.csv  synced (12 B)
 
-2 tracked files
+2 tracked files: 2 synced
 ? 0
 ```
 

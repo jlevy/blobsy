@@ -138,6 +138,14 @@ $ cp another-file.txt data/research/data.bin
 ? 0
 ```
 
+Set min size low so small test files get externalized:
+
+```console
+$ blobsy config externalize.min_size 5
+Set externalize.min_size = 5
+? 0
+```
+
 ```console
 $ blobsy track data/research/
 Scanning data/research/...
