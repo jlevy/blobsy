@@ -6,7 +6,7 @@ fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/another-file.txt
 before: |
-  if ! command -v rclone &>/dev/null; then
+  if ! command -v rclone >/dev/null 2>&1; then
     echo "SKIP: rclone not installed" >&2
     exit 1
   fi
