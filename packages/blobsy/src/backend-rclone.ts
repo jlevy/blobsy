@@ -135,7 +135,8 @@ export class RcloneBackend implements Backend {
     const remotePrefix = this.prefix
       ? `${this.remote}:${this.bucket}/${this.prefix}`
       : `${this.remote}:${this.bucket}/`;
-    this.exec(['lsf', remotePrefix, '--max-depth', '1', '--max-count', '1'], 'health check');
+    // `rclone lsf` supports `--max-depth`, but not `--max-count` across versions.
+    this.exec(['lsf', remotePrefix, '--max-depth', '1'], 'health check');
     return Promise.resolve();
   }
 

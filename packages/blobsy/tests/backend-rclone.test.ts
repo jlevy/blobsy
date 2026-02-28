@@ -165,7 +165,7 @@ describe('RcloneBackend', () => {
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
-        ['lsf', 'my-gcs:my-bucket/data/', '--max-depth', '1', '--max-count', '1'],
+        ['lsf', 'my-gcs:my-bucket/data/', '--max-depth', '1'],
         expect.objectContaining({ timeout: 60000 }),
       );
     });
@@ -179,7 +179,7 @@ describe('RcloneBackend', () => {
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
-        ['lsf', 'my-gcs:my-bucket/', '--max-depth', '1', '--max-count', '1'],
+        ['lsf', 'my-gcs:my-bucket/', '--max-depth', '1'],
         expect.objectContaining({ timeout: 60000 }),
       );
     });

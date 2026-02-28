@@ -75,7 +75,7 @@ $ git add -A && git commit -q -m "Track data files"
 
 ```console
 $ RCLONE_CONFIG="$(pwd)/rclone.conf" blobsy push
-  ↑  data/dataset.csv (32 B)
+  ↑  data/dataset.csv (12 B)
   ↑  data/model.bin (13 B)
 Done: 2 pushed.
 ? 0
@@ -84,7 +84,7 @@ Done: 2 pushed.
 ## Verify blobs landed in the rclone-remote directory
 
 ```console
-$ find rclone-remote -type f | wc -l
+$ find rclone-remote -type f | wc -l | awk '{print $1}'
 2
 ? 0
 ```
@@ -167,7 +167,7 @@ $ echo "updated content" > data/model.bin
 ```console
 $ RCLONE_CONFIG="$(pwd)/rclone.conf" blobsy sync --skip-health-check
   ✓ data/dataset.csv - up to date
-  ↑ data/model.bin - pushed
+  ↑ data/model.bin - pushed (modified)
 Sync complete: 1 pushed, 0 pulled, 0 errors.
 ? 0
 ```
@@ -175,7 +175,7 @@ Sync complete: 1 pushed, 0 pulled, 0 errors.
 ## Verify 3 blobs now in remote (2 original + 1 updated)
 
 ```console
-$ find rclone-remote -type f | wc -l
+$ find rclone-remote -type f | wc -l | awk '{print $1}'
 3
 ? 0
 ```
@@ -184,7 +184,15 @@ $ find rclone-remote -type f | wc -l
 
 ```console
 $ RCLONE_CONFIG="$(pwd)/rclone.conf" blobsy doctor
-...
-No issues found.
+  ✓  data/dataset.csv  synced (12 B)
+  ✓  data/model.bin  synced (16 B)
+
+2 tracked files: 2 synced
+
+=== GIT HOOKS ===
+  ⚠  pre-commit hook not installed
+  ⚠  pre-push hook not installed
+
+2 issues found. Run with --fix to attempt repairs.
 ? 0
 ```
