@@ -33,6 +33,46 @@ pnpm test
 | `pnpm publint` | Validate package.json for publishing |
 | `pnpm ci` | Run full CI pipeline locally |
 
+## QA Workflow (Simple)
+
+Use this flow as the default.
+Keep it simple:
+
+1. Build current code:
+
+   ```bash
+   pnpm install
+   pnpm build
+   ```
+
+2. Link the current dev CLI globally (so `blobsy` works outside this repo):
+
+   ```bash
+   cd packages/blobsy
+   npm link
+   ```
+
+3. Run automated QA:
+
+   ```bash
+   pnpm test
+   pnpm --filter blobsy test:e2e
+   cd packages/blobsy
+   npx tryscript run "tests/golden/**/*.tryscript.md"
+   ./scripts/check-golden-coverage.sh
+   ```
+
+4. Run manual end-to-end QA:
+
+   - Playbook:
+     [`testing/qa/blobsy-end-to-end.qa.md`](../testing/qa/blobsy-end-to-end.qa.md)
+
+5. Keep docs accurate during QA:
+
+   - If we follow the playbook, do the steps exactly.
+   - If real behavior differs, update the playbook in the same branch before moving on.
+   - Avoid undocumented ad-hoc steps.
+
 ## Dependency Management
 
 | Command | Description |

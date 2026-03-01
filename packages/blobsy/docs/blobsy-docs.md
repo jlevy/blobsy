@@ -49,7 +49,7 @@ in repo-level config (committed to git), not user-global config.
 
 ```yaml
 externalize:
-  min_size: 1mb
+  min_size: 200kb
   always: []
   never: []
 compress:
@@ -84,7 +84,7 @@ Rules checked in order:
 
 1. `never` patterns (highest priority) — matching files stay in git
 2. `always` patterns — matching files externalized regardless of size
-3. `min_size` threshold (default: 1mb) — files at or above this size externalized
+3. `min_size` threshold (default: 200kb) — files at or above this size externalized
 
 When tracking a specific file by name, it is always externalized (rules bypassed).
 

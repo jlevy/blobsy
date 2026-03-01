@@ -171,7 +171,7 @@ $ blobsy doctor
   ✓  .blobsy.yml valid
   ✓  Backend: local:../remote (local)
   ✓  Compression: zstd (threshold: 100 KB)
-  ✓  Externalization threshold: 1 MB
+  ✓  Externalization threshold: 200 KB
 
 === GIT HOOKS ===
   ✓  pre-commit hook installed
@@ -227,7 +227,7 @@ plus additional detail:
   ✓  Backend: local:../remote (local)
   ✓  Backend resolved via: config (backends.default)
   ✓  Compression: zstd (threshold: 100 KB)
-  ✓  Externalization threshold: 1 MB
+  ✓  Externalization threshold: 200 KB
   ✓  Checksum algorithm: sha256
 
 === GIT HOOKS ===

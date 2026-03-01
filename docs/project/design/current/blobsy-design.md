@@ -274,7 +274,7 @@ When multiple rules could apply to a file, blobsy uses the following precedence 
 
 3. **`externalize.min_size` threshold** (lowest priority)
    - If file size ≥ min_size (and no pattern match) → **Externalized**
-   - Example: 5MB file with min_size=1mb → externalized
+   - Example: 5MB file with min_size=200kb → externalized
 
 **Implementation Reference:** `packages/blobsy/src/compress.ts:30-46` (same logic
 applies to compression)
@@ -2154,7 +2154,7 @@ Any `.blobsy.yml` at any level can override any part of this:
 # blobsy built-in defaults (not a file -- hardcoded in blobsy)
 
 externalize:
-  min_size: 1mb
+  min_size: 200kb
   always:
     - "*.parquet"
     - "*.bin"
@@ -2226,7 +2226,7 @@ The decision is based on **size** and **file type**:
 ```yaml
 # .blobsy.yml
 externalize:
-  min_size: 1mb                    # files below this stay in git (default: 1mb)
+  min_size: 200kb                  # files below this stay in git (default: 200kb)
   always:                          # always externalize these, regardless of size
     - "*.parquet"
     - "*.bin"
@@ -2314,7 +2314,7 @@ remote:
   key_template: "{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"  # default (timestamp+hash)
 
 externalize:
-  min_size: 1mb
+  min_size: 200kb
 
 compress:
   algorithm: zstd

@@ -297,7 +297,7 @@ interface BlobsyConfig {
 }
 
 interface ExternalizeConfig {
-  min_size: string | number   // "1mb" or bytes
+  min_size: string | number   // "200kb" or bytes
   always: string[]
   never: string[]
 }
@@ -393,7 +393,7 @@ subdirectory. Bottom-up resolution.
 - Settings affecting remote storage (compression, checksum, `key_template`) must be in
   git-tracked config, not user-global.
 - Hardcoded defaults (compiled into blobsy):
-  - `externalize.min_size`: `"1mb"`
+  - `externalize.min_size`: `"200kb"`
   - `externalize.always`:
     `["*.parquet", "*.bin", "*.weights", "*.onnx", "*.safetensors", "*.pkl", "*.pt", "*.h5", "*.arrow", "*.sqlite", "*.db"]`
   - `compress.algorithm`: `"zstd"`, `compress.min_size`: `"100kb"`
@@ -423,7 +423,7 @@ The size format for `min_size` settings follows the pattern: `<number><unit>`
 **Examples:**
 ```yaml
 externalize:
-  min_size: "1mb"      # 1,048,576 bytes
+  min_size: "200kb"    # 204,800 bytes
   min_size: "100kb"    # 102,400 bytes
   min_size: "1.5gb"    # 1,610,612,736 bytes
   min_size: "500 MB"   # 524,288,000 bytes (with space)

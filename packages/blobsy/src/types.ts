@@ -88,7 +88,7 @@ export type ResolvedBackendConfig = BackendConfig & { type: BackendType };
 
 /** Externalization rules: decide which files to externalize from git. */
 export interface ExternalizeConfig {
-  /** Minimum file size for externalization (e.g. "1mb" or bytes) */
+  /** Minimum file size for externalization (e.g. "200kb" or bytes) */
   min_size: string | number;
   /** Glob patterns to always externalize regardless of size */
   always: string[];

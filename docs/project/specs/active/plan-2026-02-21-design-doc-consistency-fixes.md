@@ -638,7 +638,7 @@ When multiple rules could apply to a file, blobsy uses the following precedence 
 
 3. **`externalize.min_size` threshold** (lowest priority)
    - If file size ≥ min_size (and no pattern match) → **Externalized**
-   - Example: 5MB file with min_size=1mb → externalized
+   - Example: 5MB file with min_size=200kb → externalized
 
 **Implementation Reference:** `packages/blobsy/src/compress.ts:30-46` (same logic applies to compression)
 
@@ -877,7 +877,7 @@ Covered in Issue #1 solution above (lines 440-452 modification).
 **Affected files:**
 - [plan-2026-02-21-blobsy-phase1-implementation.md:328-329](plan-2026-02-21-blobsy-phase1-implementation.md)
 
-**Problem:** Defaults include `"externalize.min_size": "1mb"` and
+**Problem:** Defaults include `"externalize.min_size": "200kb"` and
 `"compress.min_size": "100kb"`. The format is a string with unit suffix.
 However:
 - What units are supported?
@@ -921,7 +921,7 @@ The size format for `min_size` settings follows the pattern: `<number><unit>`
 **Examples:**
 ```yaml
 externalize:
-  min_size: "1mb"      # 1,048,576 bytes
+  min_size: "200kb"    # 204,800 bytes
   min_size: "100kb"    # 102,400 bytes
   min_size: "1.5gb"    # 1,610,612,736 bytes
   min_size: "500 MB"   # 524,288,000 bytes (with space)

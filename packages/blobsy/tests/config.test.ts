@@ -37,7 +37,7 @@ afterEach(() => {
 describe('config', () => {
   it('returns built-in defaults', () => {
     const defaults = getBuiltinDefaults();
-    expect(defaults.externalize?.min_size).toBe('1mb');
+    expect(defaults.externalize?.min_size).toBe('200kb');
     expect(defaults.compress?.algorithm).toBe('zstd');
     expect(defaults.sync?.parallel).toBe(8);
     expect(defaults.checksum?.algorithm).toBe('sha256');
@@ -182,7 +182,7 @@ describe('resolveConfigWithOrigins', () => {
       file: undefined,
     });
     expect(origins.get('externalize.min_size')).toMatchObject({
-      value: '1mb',
+      value: '200kb',
       origin: 'builtin',
       file: undefined,
     });
@@ -207,7 +207,7 @@ describe('resolveConfigWithOrigins', () => {
     });
     // Other values should still be builtin
     expect(origins.get('externalize.min_size')).toMatchObject({
-      value: '1mb',
+      value: '200kb',
       origin: 'builtin',
       file: undefined,
     });

@@ -4,7 +4,7 @@ import { shouldExternalize, filterFilesForExternalization } from '../src/externa
 import type { ExternalizeConfig } from '../src/types.js';
 
 const defaultConfig: ExternalizeConfig = {
-  min_size: '1mb',
+  min_size: '200kb',
   always: ['*.parquet', '*.bin'],
   never: ['*.md'],
 };

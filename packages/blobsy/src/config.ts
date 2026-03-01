@@ -23,7 +23,7 @@ const CONFIG_FILENAME = '.blobsy.yml';
 export function getBuiltinDefaults(): BlobsyConfig {
   return {
     externalize: {
-      min_size: '1mb',
+      min_size: '200kb',
       always: [],
       never: [],
     },
@@ -342,7 +342,7 @@ const BYTES_PER_MB = BYTES_PER_KB * 1024;
 const BYTES_PER_GB = BYTES_PER_MB * 1024;
 const BYTES_PER_TB = BYTES_PER_GB * 1024;
 
-/** Parse a human-readable size string (e.g. "1mb", "100kb") to bytes. */
+/** Parse a human-readable size string (e.g. "200kb", "100kb") to bytes. */
 export function parseSize(size: string | number): number {
   if (typeof size === 'number') {
     return size;
@@ -350,7 +350,7 @@ export function parseSize(size: string | number): number {
 
   const match = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)$/i.exec(size.trim());
   if (!match) {
-    throw new ValidationError(`Invalid size format: ${size} (expected e.g. "1mb", "100kb")`);
+    throw new ValidationError(`Invalid size format: ${size} (expected e.g. "200kb", "100kb")`);
   }
 
   const value = parseFloat(match[1]!);

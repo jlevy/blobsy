@@ -12,6 +12,15 @@ comprehensive workflows with real backing stores.
 tracking, compression, push/pull/sync, error handling, and Git integration with both
 local and cloud backends.
 
+## Process Rule: Follow or Update
+
+Treat this file as the source of truth for manual QA.
+
+- If you run the steps as written, follow them exactly.
+- If real CLI behavior differs from this document, update this playbook in the same
+  branch/session before continuing.
+- Do not rely on undocumented one-off steps.
+
 **Estimated Time**: ~60-90 minutes (depending on network speeds for cloud testing)
 
 > This is a “manual test” playbook designed to:
@@ -77,6 +86,7 @@ local and cloud backends.
    mkdir -p ../blobsy-remote
    blobsy init local:../blobsy-remote
    ```
+
    The init command doesn’t auto-create local backend directories.
 
 2. **Git Hooks Requirement**: Pre-commit hooks require `blobsy` in PATH (globally
@@ -142,32 +152,38 @@ local and cloud backends.
 
 ## Phase 1: Installation & Local Backend Setup
 
-### 1.1 Build and Install Blobsy
+### 1.1 Build and Link the Dev CLI
 
 ```bash
 # From blobsy repo root
 pnpm install
 pnpm build
-pnpm link --global
+cd packages/blobsy
+npm link
+cd ../..
 ```
 
 **Expected output**:
 
 ```
 ✓ Built packages/blobsy
-✓ Linked blobsy@x.x.x → global
+✓ Linked blobsy@x.x.x (dev build) globally
 ```
 
 **Verify**:
 
-- [ ] `blobsy --version` shows correct version number
+- [ ] `blobsy --version` shows the expected dev version
 - [ ] `blobsy --help` displays help text with all commands
-- [ ] No error messages during build
+- [ ] `which blobsy` resolves to this checkout’s linked package
+- [ ] No error messages during build/link
 
 **Troubleshooting**:
 
-- **Issue**: `command not found: blobsy` **Fix**: Check `pnpm bin -g` is in PATH, or use
-  `pnpm exec blobsy`
+- **Issue**: `command not found: blobsy` **Fix**: ensure your npm global bin is in PATH
+  (`$(npm prefix -g)/bin`), then open a new shell and re-run
+  `cd packages/blobsy && npm link`
+- **Issue**: `blobsy` points to an older install **Fix**: run `npm uninstall -g blobsy`,
+  then re-run `cd packages/blobsy && npm link`
 - **Issue**: Build errors **Fix**: Run `pnpm install` again, check Node version >= 24
 
 ### 1.2 Create Fresh Test Repository
@@ -1152,10 +1168,10 @@ blobsy sync sync-test.bin
 
 ### 5.4 Test Git Hooks
 
-**Prerequisites**: For hooks to function, `blobsy` command must be in PATH (installed
-globally via `pnpm link --global` or npm).
-If testing with `dist/cli.mjs` directly, hooks will install/uninstall correctly but
-won’t execute (hook calls `exec blobsy` which requires global install).
+**Prerequisites**: For hooks to function, `blobsy` command must be in PATH (recommended:
+link dev CLI via `cd packages/blobsy && npm link`). If testing with `dist/cli.mjs`
+directly, hooks will install/uninstall correctly but won’t execute (hook calls
+`exec blobsy` which requires global install).
 
 **Install pre-commit hook**:
 
@@ -1782,7 +1798,7 @@ workflows validated.
 Key findings:
 
 **✅ What Worked Well:**
-- Installation and setup straightforward (build via pnpm, use dist/cli.mjs directly)
+- Installation and setup straightforward (build via pnpm, then `npm link` dev CLI once)
 - Basic workflow (track → push → pull → verify) works flawlessly
 - All compression algorithms (zstd, gzip, brotli) round-trip correctly
 - S3 backend integration fully functional with real AWS bucket
@@ -1808,7 +1824,7 @@ Key findings:
 2. **Git Hooks Requirement**: Pre-commit hooks require `blobsy` command in PATH
    - Hook calls `exec blobsy hook pre-commit` which fails if not globally installed
    - For testing with dist/cli.mjs, hooks won’t function (expected limitation)
-   - For production use: install globally via `pnpm link --global` or npm install
+   - For QA/dev use: run `cd packages/blobsy && npm link` so `blobsy` is in PATH
 
 3. **Error Messages**: Some error messages show technical details (ENOENT, full paths)
    instead of user-friendly messages

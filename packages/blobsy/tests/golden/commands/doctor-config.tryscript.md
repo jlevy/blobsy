@@ -74,7 +74,7 @@ $ blobsy doctor
 No tracked files found.
 
 === CONFIGURATION ===
-  ⚠  externalize.min_size invalid: Invalid size format: invalid (expected e.g. "1mb", "100kb")
+  ⚠  externalize.min_size invalid: Invalid size format: invalid (expected e.g. "200kb", "100kb")
   ⚠  Unknown compression algorithm: lz4
 
 === GIT HOOKS ===

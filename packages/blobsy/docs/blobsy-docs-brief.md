@@ -26,7 +26,7 @@ blobsy verify               Check file integrity
 
 1. `never` patterns → stays in git (highest priority)
 2. `always` patterns → externalized regardless of size
-3. `min_size` (default: 1mb) → files >= threshold externalized
+3. `min_size` (default: 200kb) → files >= threshold externalized
 
 Override threshold: `blobsy track --min-size 100kb data/`
 
@@ -38,7 +38,7 @@ backends:
   default:
     url: s3://my-bucket/blobs/
 externalize:
-  min_size: 1mb
+  min_size: 200kb
   always: ["*.parquet"]
 compress:
   algorithm: zstd

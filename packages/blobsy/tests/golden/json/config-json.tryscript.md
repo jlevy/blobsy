@@ -23,7 +23,7 @@ $ blobsy config --json
   "schema_version": "0.1",
   "config": {
     "externalize": {
-      "min_size": "1mb",
+      "min_size": "200kb",
       "always": [],
       "never": []
     },

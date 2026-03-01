@@ -81,7 +81,7 @@ Various polish items before initial release:
 
 - Changing the externalization rule precedence (never > always > min_size)
 - Adding CLI flags for `--always` or `--never` patterns (config-only is fine)
-- Changing the default `min_size` value (stays at `1mb`)
+- Changing the default `min_size` value (stays at `200kb`)
 - Full `.gitignore` parsing (use `config.ignore` patterns with picomatch; defer actual
   `.gitignore` file reading to a future version if needed)
 - A `blobsy unstage` command (use `git restore --staged` directly; revisit if users
@@ -258,7 +258,7 @@ files).
 
 - [ ] **`README.md`** — Update the Externalization Rules example to show `always` as a
   user-configured option (not as if it ships with defaults).
-  Note the default is `min_size: 1mb` only
+  Note the default is `min_size: 200kb` only
 - [ ] **`packages/blobsy/SKILL.md`** — Update externalization description if it
   references default patterns
 - [ ] **`CHANGELOG.md`** — Add “Changed” entry: default `always` list is now empty
@@ -806,7 +806,7 @@ per-file whether to externalize. Rules checked in order:
 
 1. `never` patterns (highest priority) — matching files stay in git
 2. `always` patterns — matching files externalized regardless of size
-3. `min_size` threshold (default: 1mb) — files at or above this size externalized
+3. `min_size` threshold (default: 200kb) — files at or above this size externalized
 
 When tracking a specific file by name, it is always externalized (rules bypassed).
 
@@ -1784,7 +1784,7 @@ repo-root remains the default.
   {
     "schema_version": "0.1",
     "entries": [
-      { "key": "externalize.min_size", "value": "1mb", "scope": "builtin", "file": null },
+      { "key": "externalize.min_size", "value": "200kb", "scope": "builtin", "file": null },
       { "key": "backends.default.url", "value": "local:remote", "scope": "repo", "file": ".blobsy.yml" }
     ]
   }
@@ -1867,7 +1867,7 @@ repo-root remains the default.
 
   ```
   $ blobsy config --show-origin
-  builtin	externalize.min_size=1mb
+  builtin	externalize.min_size=200kb
   builtin	externalize.always=[]
   builtin	compress.algorithm=zstd
   builtin	compress.min_size=100kb

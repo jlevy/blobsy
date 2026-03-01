@@ -578,7 +578,7 @@ These are the ones I would file as “doc correctness” tickets:
 
 6. ✅ **Directory tracking example appears inconsistent with default externalize rules**
    The example keeps a 2MB `.json` “in git (never list)” but the shown defaults would
-   externalize by `min_size: 1mb` unless `.json` is in `externalize.never`. Either
+   externalize by `min_size: 200kb` unless `.json` is in `externalize.never`. Either
    update defaults, or update the example to match.
 
 7. ✅ **Command list includes `export/import` but later says export/import is deferred**

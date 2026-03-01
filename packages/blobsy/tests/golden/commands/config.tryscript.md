@@ -36,7 +36,7 @@ $ blobsy config backend
 
 ```console
 $ blobsy config externalize
-min_size: 1mb
+min_size: 200kb
 always: []
 never: []
 ? 0
