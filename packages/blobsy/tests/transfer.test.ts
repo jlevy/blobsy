@@ -3,10 +3,20 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
-import { resolveBackend, pushFile, pullFile, blobExists, runHealthCheck } from '../src/transfer.js';
+import {
+  resolveBackend,
+  createBackend,
+  pushFile,
+  pullFile,
+  blobExists,
+  runHealthCheck,
+} from '../src/transfer.js';
+import { AwsCliBackend } from '../src/backend-aws-cli.js';
+import { BuiltinS3Backend } from '../src/backend-s3.js';
+import { RcloneBackend } from '../src/backend-rclone.js';
 import { computeHash } from '../src/hash.js';
-import type { BlobsyConfig, Bref } from '../src/types.js';
-import { BREF_FORMAT } from '../src/types.js';
+import type { BlobsyConfig, Bref, ResolvedBackendConfig } from '../src/types.js';
+import { BREF_FORMAT, BlobsyError } from '../src/types.js';
 
 describe('resolveBackend', () => {
   it('resolves the default backend', () => {
@@ -129,5 +139,121 @@ describe('push/pull integration with local backend', () => {
 
   it('runHealthCheck succeeds for valid local backend', async () => {
     await expect(runHealthCheck(config, repoRoot)).resolves.toBeUndefined();
+  });
+});
+
+describe('createBackend tool selection and failure modes', () => {
+  const s3Config: ResolvedBackendConfig = {
+    type: 's3',
+    url: 's3://my-bucket/prefix/',
+  };
+
+  const s3WithRcloneConfig: ResolvedBackendConfig = {
+    type: 's3',
+    url: 's3://my-bucket/prefix/',
+    rclone_remote: 'my-s3-remote',
+  };
+
+  const gcsConfig: ResolvedBackendConfig = {
+    type: 'gcs',
+    url: 'gs://my-bucket/prefix/',
+  };
+
+  const gcsWithRemoteConfig: ResolvedBackendConfig = {
+    type: 'gcs',
+    url: 'gs://my-bucket/prefix/',
+    rclone_remote: 'my-gcs-remote',
+  };
+
+  const azureConfig: ResolvedBackendConfig = {
+    type: 'azure',
+    url: 'azure://my-container/prefix/',
+  };
+
+  it('uses aws-cli backend for s3 when aws-cli is available', () => {
+    const backend = createBackend(s3Config, '/tmp', undefined, { awsCli: true, rclone: false });
+    expect(backend).toBeInstanceOf(AwsCliBackend);
+  });
+
+  it('falls back to rclone backend for s3 when aws-cli is unavailable', () => {
+    const backend = createBackend(s3WithRcloneConfig, '/tmp', undefined, {
+      awsCli: false,
+      rclone: true,
+    });
+    expect(backend).toBeInstanceOf(RcloneBackend);
+  });
+
+  it('falls back to built-in s3 backend when no external tools are available', () => {
+    const backend = createBackend(s3Config, '/tmp', undefined, { awsCli: false, rclone: false });
+    expect(backend).toBeInstanceOf(BuiltinS3Backend);
+  });
+
+  it('uses built-in s3 backend when rclone is available but rclone_remote is missing', () => {
+    const backend = createBackend(s3Config, '/tmp', undefined, { awsCli: false, rclone: true });
+    expect(backend).toBeInstanceOf(BuiltinS3Backend);
+  });
+
+  it('throws not_found for gcs when rclone is not installed', () => {
+    expect(() =>
+      createBackend(gcsConfig, '/tmp', undefined, { awsCli: false, rclone: false }),
+    ).toThrow(BlobsyError);
+    try {
+      createBackend(gcsConfig, '/tmp', undefined, { awsCli: false, rclone: false });
+    } catch (err) {
+      expect((err as BlobsyError).category).toBe('not_found');
+      expect((err as BlobsyError).message).toContain('not installed');
+    }
+  });
+
+  it('throws validation for gcs when rclone_remote is missing', () => {
+    expect(() =>
+      createBackend(gcsConfig, '/tmp', undefined, { awsCli: false, rclone: true }),
+    ).toThrow(BlobsyError);
+    try {
+      createBackend(gcsConfig, '/tmp', undefined, { awsCli: false, rclone: true });
+    } catch (err) {
+      expect((err as BlobsyError).category).toBe('validation');
+      expect((err as BlobsyError).message).toContain('rclone_remote');
+    }
+  });
+
+  it('creates rclone backend for gcs when rclone is available and configured', () => {
+    const backend = createBackend(gcsWithRemoteConfig, '/tmp', undefined, {
+      awsCli: false,
+      rclone: true,
+    });
+    expect(backend).toBeInstanceOf(RcloneBackend);
+  });
+
+  it('throws validation for azure when rclone_remote is missing', () => {
+    expect(() =>
+      createBackend(azureConfig, '/tmp', undefined, { awsCli: false, rclone: true }),
+    ).toThrow(BlobsyError);
+    try {
+      createBackend(azureConfig, '/tmp', undefined, { awsCli: false, rclone: true });
+    } catch (err) {
+      expect((err as BlobsyError).category).toBe('validation');
+      expect((err as BlobsyError).message).toContain('rclone_remote');
+    }
+  });
+
+  it('resolves gcs URL type correctly', () => {
+    const config: BlobsyConfig = {
+      backends: {
+        default: { url: 'gs://my-bucket/prefix/' },
+      },
+    };
+    const resolved = resolveBackend(config);
+    expect(resolved.type).toBe('gcs');
+  });
+
+  it('resolves azure URL type correctly', () => {
+    const config: BlobsyConfig = {
+      backends: {
+        default: { url: 'azure://my-container/prefix/' },
+      },
+    };
+    const resolved = resolveBackend(config);
+    expect(resolved.type).toBe('azure');
   });
 });

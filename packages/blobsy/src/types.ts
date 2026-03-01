@@ -79,6 +79,8 @@ export interface BackendConfig {
   pull_command?: string | undefined;
   /** Shell command template for exists check (command backend) */
   exists_command?: string | undefined;
+  /** rclone remote name for transfer delegation (rclone backend) */
+  rclone_remote?: string | undefined;
 }
 
 /** BackendConfig with type resolved (always set after resolveBackend). */

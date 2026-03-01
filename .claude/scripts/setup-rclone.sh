@@ -59,36 +59,9 @@ fi
 
 # ----- Find or install rclone -----
 
-export PATH="${RCLONE_INSTALL_DIR}:$PATH"
-
-if command -v rclone &> /dev/null; then
-    RCLONE_VERSION=$(rclone --version 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-    echo "[rclone] Found at $(which rclone) (${RCLONE_VERSION})"
-elif [ "$(uname -s)" = "Linux" ]; then
-    echo "[rclone] Installing to ${RCLONE_INSTALL_DIR}..."
-
-    mkdir -p "$RCLONE_INSTALL_DIR"
-    ARCH="amd64"
-    [ "$(uname -m)" = "aarch64" ] && ARCH="arm64"
-
-    TMPDIR_RCLONE=$(mktemp -d)
-    curl -sSL "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" \
-        -o "${TMPDIR_RCLONE}/rclone.zip"
-    unzip -q "${TMPDIR_RCLONE}/rclone.zip" -d "${TMPDIR_RCLONE}"
-    cp "${TMPDIR_RCLONE}"/rclone-*-linux-*/rclone "${RCLONE_INSTALL_DIR}/rclone"
-    chmod 755 "${RCLONE_INSTALL_DIR}/rclone"
-    rm -rf "$TMPDIR_RCLONE"
-
-    if ! command -v rclone &> /dev/null; then
-        echo "[rclone] ERROR: Installation failed"
-        exit 1
-    fi
-
-    echo "[rclone] Installed $(rclone --version 2>/dev/null | head -1)"
-else
-    echo "[rclone] NOTE: rclone not found. Install with: brew install rclone"
-    exit 0
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export RCLONE_INSTALL_DIR
+source "${SCRIPT_DIR}/install-rclone.sh" || exit 0
 
 # ----- Configure remotes via env vars -----
 

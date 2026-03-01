@@ -29,7 +29,7 @@ etc.) can be dropped in later with minimal changes.
 ## Non-Goals
 
 - Cloud backends (S3, R2, GCS, Azure) -- deferred; local backend exercises all code
-  paths
+  paths (GCS and Azure now work via RcloneBackend, implemented in V1.1)
 - Garbage collection (`blobsy gc`) -- deferred to V2
 - Branch-isolated storage (`{git_branch}` template variable) -- deferred
 - `blobsy stats` aggregate command -- deferred
@@ -399,7 +399,8 @@ subdirectory. Bottom-up resolution.
   - `compress.algorithm`: `"zstd"`, `compress.min_size`: `"100kb"`
   - `remote.key_template`:
     `"{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}"`
-  - `sync.tools`: `["aws-cli", "rclone"]`, `sync.parallel`: `8`
+  - `sync.tools`: `["aws-cli", "rclone"]`, `sync.parallel`: `8` (rclone delegation now
+    functional via RcloneBackend, implemented in V1.1)
   - `checksum.algorithm`: `"sha256"`
   - Full ignore and compress pattern lists as specified in the design doc.
 

@@ -41,6 +41,7 @@ import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
 import { isAwsCliAvailable } from './backend-aws-cli.js';
+import { isRcloneAvailable } from './backend-rclone.js';
 import { parseBackendUrl } from './backend-url.js';
 import {
   c,
@@ -890,6 +891,72 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
             fixed: false,
             fixable: false,
           });
+        }
+      } else if (resolved.type === 'gcs' || resolved.type === 'azure') {
+        if (!isRcloneAvailable()) {
+          backendIssues.push({
+            type: 'backend',
+            severity: 'error',
+            message: `rclone not found; required for ${resolved.type} backend`,
+            fixed: false,
+            fixable: false,
+          });
+        } else {
+          if (verbose) {
+            backendIssues.push({
+              type: 'backend',
+              severity: 'info',
+              message: 'rclone available',
+              fixed: false,
+              fixable: false,
+            });
+          }
+          if (!resolved.rclone_remote) {
+            backendIssues.push({
+              type: 'backend',
+              severity: 'error',
+              message: `rclone_remote not set for ${resolved.type} backend`,
+              fixed: false,
+              fixable: false,
+            });
+          } else {
+            // Verify the remote exists
+            try {
+              const output = execFileSync('rclone', ['listremotes'], {
+                stdio: 'pipe',
+                timeout: 5000,
+              }).toString();
+              const remotes = output
+                .split('\n')
+                .map((r) => r.replace(/:$/, '').trim())
+                .filter(Boolean);
+              if (!remotes.includes(resolved.rclone_remote)) {
+                backendIssues.push({
+                  type: 'backend',
+                  severity: 'error',
+                  message: `rclone remote "${resolved.rclone_remote}" not found in rclone config`,
+                  fixed: false,
+                  fixable: false,
+                });
+              } else if (verbose) {
+                backendIssues.push({
+                  type: 'backend',
+                  severity: 'info',
+                  message: `rclone remote "${resolved.rclone_remote}" found`,
+                  fixed: false,
+                  fixable: false,
+                });
+              }
+            } catch {
+              backendIssues.push({
+                type: 'backend',
+                severity: 'warning',
+                message: 'Could not list rclone remotes to verify configuration',
+                fixed: false,
+                fixable: false,
+              });
+            }
+          }
         }
       } else if (resolved.type === 'command') {
         for (const field of ['push_command', 'pull_command', 'exists_command'] as const) {

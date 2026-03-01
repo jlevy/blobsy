@@ -34,8 +34,7 @@ backends, polished UX, agent-friendly documentation, and a publishable npm packa
 - `blobsy stats` aggregate command -- deferred
 - Transfer engine abstraction / batch transfers -- deferred
 - Export/import (`blobsy export` / `blobsy import`) -- deferred
-- Azure backend (`azure://`) -- deferred (S3-compatible covers most cases via
-  `--endpoint`)
+- Azure backend (`azure://`) -- now implemented via RcloneBackend in V1.1
 - Dictionary compression -- deferred
 - Sub-file delta sync -- deferred
 - Remote staleness detection via provider hashes -- deferred
@@ -175,16 +174,16 @@ rclone) is deferred to V1.1.
   `authentication`, `NoSuchBucket` -> `not_found`, etc.)
 - [ ] Multipart upload for files > 100 MB (configurable threshold)
 
-#### Transfer Tool Delegation (Deferred to V1.1)
+#### Transfer Tool Delegation (Implemented in V1.1)
 
 V1 uses `@aws-sdk/client-s3` directly for all S3 transfers.
-External tool delegation (aws-cli, rclone) is deferred to V1.1 to simplify V1 testing
-and reduce the surface area.
+External tool delegation via rclone is now implemented via RcloneBackend in V1.1,
+enabling GCS, Azure, and other rclone-supported backends.
 
-#### GCS Backend (Deferred to V1.1)
+#### GCS Backend (Implemented in V1.1)
 
-GCS support is deferred to V1.1 to reduce V1 scope and dependencies.
-URL parsing for `gs://` is already implemented in `backend-url.ts`.
+GCS support is now implemented via RcloneBackend in V1.1. URL parsing for `gs://` is
+already implemented in `backend-url.ts`.
 
 #### Unit Tests
 
@@ -432,9 +431,9 @@ deferred to V1.1+.
 
 **V1.1+ (deferred):**
 
-- GCS backend (`@google-cloud/storage`) -- deferred to reduce V1 scope and dependencies
-- Azure backend
-- Transfer tool delegation (aws-cli, rclone, gsutil) -- ship V1 with SDK-only transfer
+- GCS backend -- now implemented via RcloneBackend in V1.1
+- Azure backend -- now implemented via RcloneBackend in V1.1
+- Transfer tool delegation (rclone) -- now implemented via RcloneBackend in V1.1
 - Real-cloud S3/GCS e2e tests (nightly CI with credentials)
 - `blobsy stats` command (aggregate statistics)
 - Enhanced `blobsy doctor` (deeper diagnostics)

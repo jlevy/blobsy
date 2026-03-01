@@ -25,11 +25,24 @@ import { LocalBackend } from './backend-local.js';
 import { CommandBackend } from './backend-command.js';
 import { BuiltinS3Backend } from './backend-s3.js';
 import { AwsCliBackend, isAwsCliAvailable } from './backend-aws-cli.js';
+import { RcloneBackend, buildRcloneConfig, isRcloneAvailable } from './backend-rclone.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
 import { getCompressConfig } from './config.js';
 import { normalizePath, toRepoRelative } from './paths.js';
 import { ensureDir } from './fs-utils.js';
+
+export interface BackendToolAvailability {
+  awsCli: boolean;
+  rclone: boolean;
+}
+
+function detectBackendToolAvailability(): BackendToolAvailability {
+  return {
+    awsCli: isAwsCliAvailable(),
+    rclone: isRcloneAvailable(),
+  };
+}
 
 /**
  * Resolve the effective backend config.
@@ -96,6 +109,7 @@ export function createBackend(
   config: ResolvedBackendConfig,
   repoRoot: string,
   tools?: string[],
+  toolAvailability: BackendToolAvailability = detectBackendToolAvailability(),
 ): Backend {
   switch (config.type) {
     case 'local': {
@@ -123,15 +137,46 @@ export function createBackend(
         return new BuiltinS3Backend(s3Config);
       }
 
-      if (isAwsCliAvailable()) {
+      if (toolAvailability.awsCli) {
         return new AwsCliBackend(s3Config);
+      }
+
+      // rclone as S3 fallback when aws CLI is unavailable
+      if (config.rclone_remote && toolAvailability.rclone) {
+        return new RcloneBackend(buildRcloneConfig(config));
       }
 
       return new BuiltinS3Backend(s3Config);
     }
     case 'gcs':
-    case 'azure':
-      throw new BlobsyError(`Cloud backend not yet implemented: ${config.type}`, 'unknown');
+    case 'azure': {
+      if (!toolAvailability.rclone) {
+        throw new BlobsyError(
+          `${config.type} backend requires rclone, but it is not installed.`,
+          'not_found',
+          1,
+          [
+            'Install: https://rclone.org/install/',
+            'Configure: rclone config',
+            'Then set rclone_remote in .blobsy.yml',
+          ],
+        );
+      }
+
+      if (!config.rclone_remote) {
+        throw new BlobsyError(
+          `${config.type} backend requires rclone_remote to be set in .blobsy.yml.`,
+          'validation',
+          1,
+          [
+            'Set rclone_remote: <remote-name> under the backend in .blobsy.yml',
+            'Check configured remotes: rclone listremotes',
+          ],
+        );
+      }
+
+      return new RcloneBackend(buildRcloneConfig(config));
+    }
     default: {
       const _exhaustive: never = config.type;
       throw new BlobsyError(

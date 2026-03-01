@@ -11,14 +11,14 @@
 - S3 backend via built-in `@aws-sdk/client-s3` (native TypeScript implementation)
 - Local filesystem backend
 
-⏸️ **Deferred to V1.1+:**
-- Transfer tool delegation (aws-cli, rclone, s5cmd) - fully designed but not implemented
-- GCS backend (`gs://`)
-- Azure Blob Storage backend (`az://`)
+✅ **Implemented in V1.1 via RcloneBackend:**
+- Transfer tool delegation (rclone) - implemented in V1.1
+- GCS backend (`gs://`) - implemented in V1.1 via rclone
+- Azure Blob Storage backend (`az://`) - implemented in V1.1 via rclone
 
-V1.0 ships with robust S3 and local support.
-Tool delegation and additional cloud providers are planned for V1.1. See
-[issues-history.md](issues-history.md) for implementation rationale.
+V1.0 shipped with robust S3 and local support.
+Tool delegation and additional cloud providers were implemented in V1.1 via
+RcloneBackend. See [issues-history.md](issues-history.md) for implementation rationale.
 
 * * *
 
@@ -357,11 +357,11 @@ Spaces, and others. R2 and other S3-compatible stores use `s3://` URLs with a se
 `--endpoint` flag.
 
 **`gcs`:** Google Cloud Storage.
-Uses `gs://` URLs. Deferred to a future version (after Phase 1).
+Uses `gs://` URLs. Implemented in V1.1 via RcloneBackend.
 
 **`azure`:** Azure Blob Storage.
 Uses `azure://` URLs following DVC’s convention.
-Deferred to a future version.
+Implemented in V1.1 via RcloneBackend.
 
 **`local`:** Directory-to-directory copy.
 For development and testing.
@@ -475,14 +475,14 @@ backends:
 The AWS CLI and rclone support `--endpoint-url` for S3-compatible stores.
 `@aws-sdk/client-s3` supports custom endpoints via its client configuration object.
 
-> **🚧 V1.1 Feature - Not Implemented in V1.0**
+> **✅ Implemented in V1.1 via RcloneBackend**
 > 
-> The transfer tool delegation system described in this section is fully designed but
-> deferred to V1.1. V1.0 uses built-in `@aws-sdk/client-s3` for all S3 operations.
+> The transfer tool delegation system described in this section is now implemented.
+> V1.0 used built-in `@aws-sdk/client-s3` for all S3 operations.
+> V1.1 added rclone delegation via RcloneBackend, enabling GCS and Azure backends.
 > 
-> Reason for deferral: Built-in SDK provides better error handling, progress reporting,
-> and cross-platform consistency.
-> External tools add complexity without significant benefit for V1 use cases.
+> The built-in SDK remains the default for S3 operations.
+> Rclone is used for GCS (`gs://`) and Azure (`azure://`) backends.
 
 ## Transfer Delegation
 
@@ -527,16 +527,14 @@ This means blobsy supports three transfer modes in the initial release:
 3. **Built-in SDK** (`@aws-sdk/client-s3`) -- fallback when no external tool is
    available. Slower, but zero external dependencies.
 
-**V1 Implementation Note:**
+**V1.0/V1.1 Implementation Note:**
 
-In V1, all S3 transfers use the built-in SDK (`@aws-sdk/client-s3`). The `sync.tools`
-config option is accepted but ignored.
-Setting it to `["aws-cli"]` or `["rclone"]` will log a warning:
-
-```
-Warning: sync.tools is set to ["aws-cli"] but tool delegation is not implemented in V1.0.
-Using built-in S3 SDK. Tool delegation will be available in V1.1.
-```
+In V1.0, all S3 transfers used the built-in SDK (`@aws-sdk/client-s3`) and the
+`sync.tools` config option was accepted but ignored.
+As of V1.1, rclone delegation is implemented via RcloneBackend.
+The `sync.tools` config option is now functional for rclone.
+S3 transfers continue to use the built-in SDK by default; GCS and Azure backends use
+rclone.
 
 ## Compression and Transfer Interaction
 
@@ -569,7 +567,8 @@ Uses the standard credential chain for the backend:
 - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 - Shared credentials file (`~/.aws/credentials`)
 - Instance profiles / IAM roles
-- rclone config (when rclone is selected from `sync.tools`)
+- rclone config (used by RcloneBackend for GCS and Azure backends; functional as of
+  V1.1)
 
 ## Atomic Operations
 

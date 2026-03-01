@@ -3299,15 +3299,15 @@ From the original design, the following concepts are no longer needed:
 
 This section consolidates all features designed but deferred to future versions.
 
-### V1.1 Planned Features
+### V1.1 Features
 
-| Feature | Rationale for Deferral | Estimated Scope |
+| Feature | Status | Scope |
 | --- | --- | --- |
-| **Transfer tool delegation** (aws-cli, rclone) | Built-in SDK sufficient for V1; external tools add complexity | ~2 weeks |
-| **GCS backend** (`gs://`) | URL parsing ready; backend impl deferred pending user demand | ~1 week |
-| **Azure Blob backend** (`az://`) | URL parsing ready; backend impl deferred pending user demand | ~1 week |
-| **Command backend health checks** (user-defined) | Optional; unclear if users need it | ~3 days |
-| **blobsy clean command** | Automatic temp file cleanup on startup sufficient for V1 | ~2 days |
+| **Transfer tool delegation** (rclone) | ✅ Implemented via RcloneBackend | ~2 weeks |
+| **GCS backend** (`gs://`) | ✅ Implemented via RcloneBackend | ~1 week |
+| **Azure Blob backend** (`az://`) | ✅ Implemented via RcloneBackend | ~1 week |
+| **Command backend health checks** (user-defined) | Deferred; optional | ~3 days |
+| **blobsy clean command** | Deferred; auto cleanup sufficient | ~2 days |
 
 ### V2 Features (No Timeline)
 

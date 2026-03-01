@@ -263,12 +263,18 @@ No new commands or CLI flags are needed.
 
 ### Phase 3: Doctor and testing
 
-- [ ] Add rclone availability check to doctor
-- [ ] Add rclone remote validation to doctor (when `rclone_remote` configured)
-- [ ] Unit tests for `RcloneBackend` (mock `execFileSync`)
-- [ ] Unit tests for rclone path construction
-- [ ] Integration test with local rclone remote (rclone supports `local` remote type)
-- [ ] Golden tests for doctor output with rclone checks
+- [x] Add rclone availability check to doctor
+- [x] Add rclone remote validation to doctor (when `rclone_remote` configured)
+- [x] Unit tests for `RcloneBackend` (mock `execFileSync`) — 19 tests
+- [x] Unit tests for rclone path construction
+- [ ] Golden test: rclone lifecycle via local remote (`rclone-lifecycle.tryscript.md`)
+  - [ ] Create rclone fixture (rclone.conf with local remote, .blobsy.yml)
+  - [ ] Track + push files through rclone, verify remote directory
+  - [ ] Pull files back, verify content
+  - [ ] Sync cycle (push + pull)
+  - [ ] Verify hash integrity
+  - [ ] Doctor output with rclone health checks
+- [ ] Install rclone in CI workflow for golden test execution
 
 ### Phase 4: Documentation updates
 
@@ -283,35 +289,110 @@ See the detailed audit below.
 
 ## Testing Strategy
 
-**Unit tests:**
+### Unit tests (Phase 1-2 — complete)
 
 - `RcloneBackend` with mocked `execFileSync` — verify correct rclone commands are
-  constructed for each operation
+  constructed for each operation (19 tests in `backend-rclone.test.ts`)
 - Path construction: URL → rclone remote path mapping
 - Error categorization: rclone stderr → `ErrorCategory`
 - `isRcloneAvailable()` with mocked binary detection
+- `buildRcloneConfig()` from `ResolvedBackendConfig`
 
-**Integration tests:**
+### Golden tests with rclone local remote (Phase 3)
 
-- rclone supports a `local` remote type (filesystem-to-filesystem).
-  This enables full integration testing without any cloud credentials:
+#### Approach
 
-  ```bash
-  # Create a local rclone remote for testing
-  rclone config create test-local local root /tmp/rclone-test
-  ```
+rclone supports a `local` remote type that operates on the local filesystem but goes
+through the full rclone command pipeline.
+This tests the **real rclone binary** — command construction, argument passing, exit
+codes, atomic file operations — without needing cloud credentials.
 
-  This exercises the full path: blobsy → rclone → filesystem, verifying command
-  construction, temp file handling, hash verification, and atomic rename.
+Each golden test creates an isolated rclone config using the `RCLONE_CONFIG` env var,
+pointing a named remote to a local directory.
+This is fully self-contained: no global rclone config is touched, no network access is
+needed.
 
-- Alternatively, if rclone is not available in CI, tests can be skipped with a clear
-  message (same pattern as the aws-cli tests).
+#### Fixture setup pattern
 
-**Golden tests:**
+```bash
+# Create temporary rclone config with a local remote
+RCLONE_DIR="$(pwd)/rclone-remote"
+mkdir -p "$RCLONE_DIR"
+cat > rclone.conf << CONF
+[test-local]
+type = local
+nounc = true
+CONF
+export RCLONE_CONFIG="$(pwd)/rclone.conf"
 
-- Doctor output showing rclone status (available/not available)
-- Error messages for missing rclone, misconfigured remote
-- Push/pull output with rclone backend
+# Configure blobsy to use the rclone backend
+cat > .blobsy.yml << YAML
+backends:
+  default:
+    type: gcs
+    rclone_remote: test-local
+    bucket: rclone-remote
+    prefix: ""
+compress:
+  algorithm: none
+YAML
+```
+
+This results in rclone paths like `test-local:rclone-remote/key` which maps to
+`./rclone-remote/key` on the local filesystem — fully verifiable in golden test
+assertions using `find` and `cat`.
+
+#### Test file: `tests/golden/rclone-backend/rclone-lifecycle.tryscript.md`
+
+Single comprehensive golden test covering the full rclone backend lifecycle:
+
+1. **Track**: Track two files, commit brefs
+2. **Push**: `blobsy push` — verify files land in `rclone-remote/` directory
+3. **Status**: `blobsy status` — verify synced state
+4. **Pull**: Delete local files, `blobsy pull` — verify content restored via rclone
+5. **Sync**: Modify a file, `blobsy sync` — verify push+pull cycle
+6. **Verify**: `blobsy verify` — confirm hash integrity after round-trip
+7. **Doctor**: `blobsy doctor` — verify rclone health checks pass (remote reachable)
+
+This mirrors the coverage of `echo-backend/push-commands.tryscript.md` +
+`sync-commands.tryscript.md` + `workflows/fresh-setup.tryscript.md` but through the real
+rclone binary.
+
+#### CI integration
+
+The golden test requires `rclone` to be installed.
+Add to `.github/workflows/ci.yml`:
+
+```yaml
+- name: Install rclone for golden tests
+  run: |
+    curl -fsSL https://rclone.org/install.sh | sudo bash
+```
+
+The tryscript `before:` script should guard against missing rclone:
+
+```bash
+if ! command -v rclone &>/dev/null; then
+  echo "SKIP: rclone not installed" >&2
+  exit 1
+fi
+```
+
+If rclone is absent, this test file fails explicitly rather than silently passing — CI
+must have rclone installed.
+
+#### What golden tests add beyond unit tests
+
+| Aspect | Unit tests (mocked) | Golden tests (real rclone) |
+| --- | --- | --- |
+| Command construction | Mock-verified args | Real rclone execution |
+| File transfer | Never happens | Real `rclone copyto` moves bytes |
+| Atomic pull (temp → rename) | Mocked filesystem | Real temp file + rename |
+| Hash verification on pull | Mocked | Real SHA-256 computation |
+| CLI output formatting | Not tested | Exact output verified |
+| Doctor rclone checks | Not tested | Full doctor output with rclone |
+| Error messages | Partial (categories) | Complete user-facing text |
+| `RCLONE_CONFIG` env var | Not tested | Verifies config isolation |
 
 ## Documentation and Code Audit
 
