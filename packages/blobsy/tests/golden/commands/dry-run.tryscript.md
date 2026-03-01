@@ -51,6 +51,15 @@ Would untrack data/model.bin
 ? 0
 ```
 
+# Dry-run untrack --all previews repo-wide untrack
+
+```console
+$ blobsy --dry-run untrack --all
+Would untrack data/model.bin
+Untracked 1 file across repository
+? 0
+```
+
 # File is still tracked (.bref still exists)
 
 ```console

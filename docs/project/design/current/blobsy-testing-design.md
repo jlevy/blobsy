@@ -270,7 +270,7 @@ tests/
       doctor.tryscript.md                  # blobsy doctor (diagnostics, --fix)
       rm.tryscript.md                      # blobsy rm (file, --local, --recursive)
       mv.tryscript.md                      # blobsy mv
-      untrack.tryscript.md                 # blobsy untrack
+      untrack.tryscript.md                 # blobsy untrack (single, recursive, and --all repo-wide)
       config.tryscript.md                  # blobsy config
       hooks.tryscript.md                   # Pre-commit hook behavior
       help.tryscript.md                    # --help for all commands
@@ -1975,6 +1975,7 @@ See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for design.
 
 - `blobsy track` adds file to correct `.gitignore` (same directory)
 - `blobsy untrack` removes file from `.gitignore`
+- `blobsy untrack --all` removes tracked-file entries from `.gitignore` across repo
 - Duplicate entries not created on repeated track
 - Nested `.gitignore` entries work correctly
 - `.gitignore` created if it doesn’t exist

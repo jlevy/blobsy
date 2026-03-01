@@ -129,3 +129,62 @@ $ blobsy untrack data/nonexistent.bin 2>&1
 Error: Not tracked: data/nonexistent.bin (no .bref file found)
 ? 1
 ```
+
+# Missing path without --all fails
+
+```console
+$ blobsy untrack 2>&1
+Error: Specify at least one path, or use --all to untrack all files
+? 1
+```
+
+# Re-track files for --all tests
+
+```console
+$ blobsy track data/model.bin data/research/data.bin
+Tracking data/model.bin
+Created data/model.bin.bref
+Added data/model.bin to .gitignore
+Tracking data/research/data.bin
+Created data/research/data.bin.bref
+Added data/research/data.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
+? 0
+```
+
+# Untrack all from a nested directory (repo-wide behavior)
+
+```console
+$ (cd data/research && blobsy untrack --all)
+Untracked data/model.bin
+Moved data/model.bin.bref to trash
+Untracked data/research/data.bin
+Moved data/research/data.bin.bref to trash
+Untracked 2 files across repository
+? 0
+```
+
+# --all with explicit paths fails
+
+```console
+$ blobsy untrack --all data/model.bin 2>&1
+Error: Cannot use --all with explicit paths
+? 1
+```
+
+# --all with --recursive fails
+
+```console
+$ blobsy untrack --all --recursive 2>&1
+Error: Cannot use --all with --recursive
+? 1
+```
+
+# --all is a no-op when nothing is tracked
+
+```console
+$ blobsy untrack --all
+No tracked files found in repository.
+? 0
+```

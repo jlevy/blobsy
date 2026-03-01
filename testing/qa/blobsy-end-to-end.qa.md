@@ -158,9 +158,18 @@ Treat this file as the source of truth for manual QA.
 # From blobsy repo root
 pnpm install
 pnpm build
+
+# Clean global install for this active Node runtime
+npm ls -g --depth=0 blobsy || true
+npm uninstall -g blobsy || true
+
 cd packages/blobsy
 npm link
 cd ../..
+
+# Verify linked binary/version
+blobsy --version
+which blobsy
 ```
 
 **Expected output**:
@@ -173,6 +182,7 @@ cd ../..
 **Verify**:
 
 - [ ] `blobsy --version` shows the expected dev version
+- [ ] `blobsy --version` hash suffix matches `git rev-parse --short HEAD`
 - [ ] `blobsy --help` displays help text with all commands
 - [ ] `which blobsy` resolves to this checkout’s linked package
 - [ ] No error messages during build/link
@@ -184,6 +194,8 @@ cd ../..
   `cd packages/blobsy && npm link`
 - **Issue**: `blobsy` points to an older install **Fix**: run `npm uninstall -g blobsy`,
   then re-run `cd packages/blobsy && npm link`
+- **Issue**: `blobsy --version` hash doesn’t match current commit **Fix**: run
+  `pnpm build`, then `cd packages/blobsy && npm link` again
 - **Issue**: Build errors **Fix**: Run `pnpm install` again, check Node version >= 24
 
 ### 1.2 Create Fresh Test Repository
@@ -1614,7 +1626,7 @@ dd if=/dev/urandom of=subdir/file2.bin bs=1024 count=100
 blobsy track subdir/*.bin
 blobsy push
 
-# Untrack all
+# Untrack only this directory
 blobsy untrack subdir/ --recursive
 ```
 
@@ -1632,6 +1644,33 @@ blobsy untrack subdir/ --recursive
 - [ ] All `.bref` files in subdirectory removed
 - [ ] Local files kept
 - [ ] `.gitignore` cleaned up
+
+**Repo-wide reset with `--all`**:
+
+```bash
+mkdir -p batch/a batch/b
+dd if=/dev/urandom of=batch/a/a.bin bs=1024 count=100
+dd if=/dev/urandom of=batch/b/b.bin bs=1024 count=100
+blobsy track batch/a/a.bin batch/b/b.bin
+
+# Run from nested path to prove repo-wide behavior
+(cd batch/a && blobsy untrack --all)
+```
+
+**Expected output**:
+
+```
+✓ Untracked batch/a/a.bin
+✓ Untracked batch/b/b.bin
+✓ Untracked 2 files across repository
+```
+
+**Verify**:
+
+- [ ] `batch/a/a.bin.bref` removed
+- [ ] `batch/b/b.bin.bref` removed
+- [ ] Local files `batch/a/a.bin` and `batch/b/b.bin` still exist
+- [ ] `.gitignore` entries removed for both files
 
 ### 7.4 Final Repository Validation
 

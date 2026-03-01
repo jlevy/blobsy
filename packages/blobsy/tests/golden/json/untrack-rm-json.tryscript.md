@@ -40,3 +40,30 @@ $ blobsy rm --json data/backup.bin
 }
 ? 0
 ```
+
+# track one file again, then untrack --all --json
+
+```console
+$ cp small-file.txt data/backup.bin
+? 0
+```
+
+```console
+$ blobsy track data/backup.bin
+Tracking data/backup.bin
+Created data/backup.bin.bref
+Added data/backup.bin to .gitignore
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
+? 0
+```
+
+```console
+$ blobsy untrack --json --all
+{
+  "schema_version": "0.1",
+  "message": "Untracked data/backup.bin",
+  "level": "info"
+}
+? 0
+```

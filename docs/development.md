@@ -45,9 +45,23 @@ Keep it simple:
    pnpm build
    ```
 
-2. Link the current dev CLI globally (so `blobsy` works outside this repo):
+2. Build and link one clean dev CLI globally (so `blobsy` works outside this repo):
 
    ```bash
+   npm ls -g --depth=0 blobsy || true
+   npm uninstall -g blobsy || true
+   cd packages/blobsy
+   npm link
+   cd ../..
+   blobsy --version
+   which blobsy
+   ```
+
+   If the short hash in `blobsy --version` does not match `git rev-parse --short HEAD`,
+   rebuild + relink:
+
+   ```bash
+   pnpm build
    cd packages/blobsy
    npm link
    ```
@@ -66,6 +80,7 @@ Keep it simple:
 
    - Playbook:
      [`testing/qa/blobsy-end-to-end.qa.md`](../testing/qa/blobsy-end-to-end.qa.md)
+   - Quick reset between QA loops: `blobsy untrack --all`
 
 5. Keep docs accurate during QA:
 

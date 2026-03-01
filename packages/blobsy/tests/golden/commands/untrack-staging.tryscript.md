@@ -63,3 +63,35 @@ $ git diff --cached --diff-filter=M --name-only
 data/.gitignore
 ? 0
 ```
+
+# Reset to tracked baseline, then verify untrack --all stages all .bref deletions
+
+```console
+$ git reset --hard -q HEAD
+? 0
+```
+
+```console
+$ (cd data && blobsy untrack --all)
+Untracked data/model.bin
+Moved data/model.bin.bref to trash
+Untracked data/notes.csv
+Moved data/notes.csv.bref to trash
+Untracked 2 files across repository
+? 0
+```
+
+```console
+$ git diff --cached --name-only | sort
+data/.gitignore
+data/model.bin.bref
+data/notes.csv.bref
+? 0
+```
+
+```console
+$ git diff --cached --diff-filter=D --name-only | sort
+data/model.bin.bref
+data/notes.csv.bref
+? 0
+```

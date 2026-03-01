@@ -16,6 +16,7 @@ backends.
 blobsy setup --auto <url>   Set up blobsy (s3://..., local:...)
 blobsy add <path>           Track + stage to git (recommended)
 blobsy track <path>         Track without staging
+blobsy untrack --all        Untrack all tracked files in repo (keep local files)
 blobsy push                 Upload blobs to remote
 blobsy pull                 Download blobs from remote
 blobsy status               Show sync state

@@ -30,7 +30,7 @@ Commands:
                                   (recommended)
   track [options] <path...>       Start tracking files or directories with .bref
                                   pointers
-  untrack [options] <path...>     Stop tracking files (keeps local files, moves
+  untrack [options] [path...]     Stop tracking files (keeps local files, moves
                                   .bref to trash)
   rm [options] <path...>          Remove tracked files: delete local + move
                                   .bref to trash
@@ -316,7 +316,7 @@ Global Options:
 
 ```console
 $ blobsy untrack --help
-Usage: blobsy untrack [options] <path...>
+Usage: blobsy untrack [options] [path...]
 
 Stop tracking files (keeps local files, moves .bref to trash)
 
@@ -324,6 +324,7 @@ Arguments:
   path            Files or directories to untrack
 
 Options:
+  --all           Untrack all tracked files in the repository
   --recursive     Required for directory removal
   -h, --help      Display help for command
 

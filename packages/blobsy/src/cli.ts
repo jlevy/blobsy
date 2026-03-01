@@ -169,7 +169,8 @@ function createProgram(): Command {
   program
     .command('untrack')
     .description('Stop tracking files (keeps local files, moves .bref to trash)')
-    .argument('<path...>', 'Files or directories to untrack')
+    .argument('[path...]', 'Files or directories to untrack')
+    .option('--all', 'Untrack all tracked files in the repository')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleUntrack));
 
@@ -1200,30 +1201,70 @@ async function handleVerify(
 }
 
 async function handleUntrack(
-  paths: string[],
+  paths: string[] | undefined,
   opts: Record<string, unknown>,
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
   const recursive = Boolean(opts.recursive);
+  const untrackAll = Boolean(opts.all);
   const repoRoot = findRepoRoot();
+  const inputPaths = paths ?? [];
 
-  for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+  if (untrackAll && recursive) {
+    throw new ValidationError('Cannot use --all with --recursive');
+  }
+  if (untrackAll && inputPaths.length > 0) {
+    throw new ValidationError('Cannot use --all with explicit paths');
+  }
+  if (!untrackAll && inputPaths.length === 0) {
+    throw new ValidationError('Specify at least one path, or use --all to untrack all files');
+  }
 
-    if (isDirectory(absPath)) {
-      if (!recursive) {
-        throw new ValidationError(
-          `${toRepoRelative(absPath, repoRoot)} is a directory. Use --recursive to untrack all files in it.`,
-        );
+  const filesToUntrack: string[] = [];
+
+  if (untrackAll) {
+    const allBrefFiles = findBrefFiles(repoRoot, repoRoot);
+    if (allBrefFiles.length === 0) {
+      const noFilesMsg = 'No tracked files found in repository.';
+      if (!globalOpts.quiet) {
+        if (globalOpts.json) {
+          console.log(formatJsonMessage(noFilesMsg));
+        } else {
+          console.log(c.muted(noFilesMsg));
+        }
       }
-      const brefFiles = findBrefFiles(absPath, repoRoot);
-      for (const rel of brefFiles) {
-        await untrackFile(join(repoRoot, rel), repoRoot, globalOpts);
-      }
-    } else {
-      await untrackFile(absPath, repoRoot, globalOpts);
+      return;
     }
+    for (const relPath of allBrefFiles) {
+      filesToUntrack.push(join(repoRoot, relPath));
+    }
+  } else {
+    for (const inputPath of inputPaths) {
+      const absPath = resolveFilePath(stripBrefExtension(inputPath));
+
+      if (isDirectory(absPath)) {
+        if (!recursive) {
+          throw new ValidationError(
+            `${toRepoRelative(absPath, repoRoot)} is a directory. Use --recursive to untrack all files in it.`,
+          );
+        }
+        const brefFiles = findBrefFiles(absPath, repoRoot);
+        for (const rel of brefFiles) {
+          filesToUntrack.push(join(repoRoot, rel));
+        }
+      } else {
+        filesToUntrack.push(absPath);
+      }
+    }
+  }
+
+  for (const absPath of filesToUntrack) {
+    await untrackFile(absPath, repoRoot, globalOpts);
+  }
+
+  if (untrackAll && !globalOpts.quiet && !globalOpts.json) {
+    console.log(`Untracked ${formatCount(filesToUntrack.length, 'file')} across repository`);
   }
 }
 

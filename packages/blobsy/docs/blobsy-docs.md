@@ -240,6 +240,18 @@ blobsy pull
 blobsy verify
 ```
 
+### Undo Batch Tracking (Repo-Wide Reset)
+
+```bash
+# Works from any subdirectory in the repo
+blobsy untrack --all
+git status
+```
+
+Use `blobsy untrack --all` when you want to reset tracked state for the entire
+repository quickly. Local files are kept.
+For directory-scoped cleanup, use `blobsy untrack --recursive <dir>`.
+
 ### Diagnostics
 
 ```bash

@@ -1197,13 +1197,18 @@ All blobsy commands that operate on files accept flexible path specifications:
 | Command | Directory Support | Recursive by Default | Notes |
 | --- | --- | --- | --- |
 | `blobsy track` | Yes | Yes | Applies externalization rules per-file |
-| `blobsy untrack` | Yes | Requires `--recursive` | Safety: prevents accidental bulk untrack |
+| `blobsy untrack` | Yes | Requires `--recursive` for directories | Safety: prevents accidental bulk untrack |
 | `blobsy rm` | Yes | Requires `--recursive` | Safety: prevents accidental bulk deletion |
 | `blobsy push` | Yes | Yes | Uploads all tracked files in directory |
 | `blobsy pull` | Yes | Yes | Downloads all tracked files in directory |
 | `blobsy sync` | Yes | Yes | Syncs all tracked files in directory |
 | `blobsy status` | Yes | Yes | Shows status of all tracked files in directory |
 | `blobsy verify` | Yes | Yes | Verifies all tracked files in directory |
+
+`blobsy untrack --all` is a repo-wide operation that untracks all tracked files in the
+repository regardless of current working directory.
+This is intentionally not just a synonym for `blobsy untrack --recursive .`, which is
+scoped to the current directory.
 
 **Examples:**
 
@@ -1217,6 +1222,10 @@ blobsy track data/research/              # Tracks all eligible files (recursive)
 blobsy status data/research/              # Shows status of tracked files in directory
 blobsy untrack --recursive data/old/      # Requires --recursive flag
 blobsy rm --recursive data/experiments/   # Requires --recursive flag
+
+# Repo-wide untrack from any subdirectory
+cd data/research/
+blobsy untrack --all
 
 # Path omitted = operate on entire repo
 blobsy status        # All tracked files in repo
@@ -1400,6 +1409,22 @@ Removed 2 entries from .gitignore
 (Local files preserved)
 ```
 
+**Repo-wide untracking (`--all`):**
+
+```bash
+$ pwd
+/repo/data/research
+
+$ blobsy untrack --all
+Untracked 47 files across repository
+Moved 47 .bref files to .blobsy/trash/
+Updated .gitignore entries as needed
+(Local files preserved)
+```
+
+`--all` always targets the repository root, regardless of current working directory.
+By contrast, `blobsy untrack --recursive .` only affects the current directory tree.
+
 **Path specifications:**
 
 Both the original file path and `.bref` path are accepted:
@@ -1420,6 +1445,7 @@ blobsy untrack data/model.bin.bref   # Also works (same result)
 | Flag | Effect |
 | --- | --- |
 | `--recursive` | Required for directory removal |
+| `--all` | Untrack all tracked files in the repository (ignores current working directory) |
 
 The user then `git add` + `git commit` to finalize.
 The trash gives `blobsy gc` (Deferred) a record of which remote blobs were once
@@ -2062,7 +2088,7 @@ SETUP
 TRACKING
   blobsy add <path>...                 Track files and stage changes to git (recommended)
   blobsy track <path>...               Start tracking a file or directory (creates/updates .bref)
-  blobsy untrack [--recursive] <path>  Stop tracking, keep local file (move .bref to trash)
+  blobsy untrack [--recursive] [--all] [path...]  Stop tracking; path mode or repo-wide --all
   blobsy rm [--local|--recursive] <path>  Remove from tracking and delete local file
   blobsy mv <source> <dest>            Rename/move tracked file (Initial release: files only, preserves remote_key)
 
