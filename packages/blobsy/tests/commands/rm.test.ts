@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execa } from 'execa';
+import { blobsy, CLI_PATH } from '../helpers/cli.js';
 import { spawn } from 'node:child_process';
 import { parse as parseYaml } from 'yaml';
 
@@ -21,7 +22,7 @@ describe('rm command with --remote flag', () => {
     await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
 
     // Initialize blobsy
-    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
+    await blobsy(['init', `local:${backendDir}`], { cwd: testDir });
   });
 
   afterEach(async () => {
@@ -35,10 +36,10 @@ describe('rm command with --remote flag', () => {
     it('should delete remote blob with --remote --force flags', async () => {
       // Setup: create, track, and push a file
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
 
       // Push to ensure remote_key is set
-      const pushResult = await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      const pushResult = await blobsy(['push', 'file.bin'], { cwd: testDir });
       expect(pushResult.exitCode).toBe(0);
 
       // Read the .bref to get remote_key before deletion
@@ -57,7 +58,7 @@ describe('rm command with --remote flag', () => {
       expect(existsSync(backendBlobPath)).toBe(true);
 
       // Delete with --remote --force (skip confirmation)
-      const result = await execa('blobsy', ['rm', 'file.bin', '--remote', '--force'], {
+      const result = await blobsy(['rm', 'file.bin', '--remote', '--force'], {
         cwd: testDir,
       });
 
@@ -77,10 +78,10 @@ describe('rm command with --remote flag', () => {
 
     it('should show success message when deleting from backend', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
 
       // Push and verify remote_key is set
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
       const bref = parseYaml(brefContent) as { remote_key?: string };
 
@@ -90,7 +91,7 @@ describe('rm command with --remote flag', () => {
         return;
       }
 
-      const result = await execa('blobsy', ['rm', 'file.bin', '--remote', '--force'], {
+      const result = await blobsy(['rm', 'file.bin', '--remote', '--force'], {
         cwd: testDir,
         reject: false,
       });
@@ -105,10 +106,10 @@ describe('rm command with --remote flag', () => {
 
     it('should not show deletion message with --quiet flag', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
-      const result = await execa('blobsy', ['rm', 'file.bin', '--remote', '--force', '--quiet'], {
+      const result = await blobsy(['rm', 'file.bin', '--remote', '--force', '--quiet'], {
         cwd: testDir,
       });
 
@@ -119,8 +120,8 @@ describe('rm command with --remote flag', () => {
   describe('confirmation prompt', () => {
     it('should prompt for confirmation without --force', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key before deletion
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
@@ -139,7 +140,7 @@ describe('rm command with --remote flag', () => {
       const blobExistedBefore = existsSync(backendBlobPath);
 
       // Spawn process to handle interactive prompt
-      const child = spawn('blobsy', ['rm', 'file.bin', '--remote'], {
+      const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
         cwd: testDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -185,8 +186,8 @@ describe('rm command with --remote flag', () => {
 
     it('should delete when user confirms with "y"', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key before deletion
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
@@ -195,7 +196,7 @@ describe('rm command with --remote flag', () => {
       const backendBlobPath = join(backendDir, remoteKey);
 
       // Spawn process to handle interactive prompt
-      const child = spawn('blobsy', ['rm', 'file.bin', '--remote'], {
+      const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
         cwd: testDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -221,11 +222,11 @@ describe('rm command with --remote flag', () => {
 
     it('should show file path and remote key in confirmation prompt', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Spawn process
-      const child = spawn('blobsy', ['rm', 'file.bin', '--remote'], {
+      const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
         cwd: testDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -260,7 +261,7 @@ describe('rm command with --remote flag', () => {
 
   describe('flag validation', () => {
     it('should error when using both --local and --remote', async () => {
-      const result = await execa('blobsy', ['rm', 'file.bin', '--local', '--remote'], {
+      const result = await blobsy(['rm', 'file.bin', '--local', '--remote'], {
         cwd: testDir,
         reject: false,
       });
@@ -274,10 +275,10 @@ describe('rm command with --remote flag', () => {
     it('should handle unpushed files gracefully with --remote', async () => {
       // Create and track file but DON'T push
       await writeFile(join(testDir, 'unpushed.bin'), 'test content');
-      await execa('blobsy', ['track', 'unpushed.bin'], { cwd: testDir });
+      await blobsy(['track', 'unpushed.bin'], { cwd: testDir });
 
       // Should complete without error (just note that file wasn't pushed)
-      const result = await execa('blobsy', ['rm', 'unpushed.bin', '--remote', '--force'], {
+      const result = await blobsy(['rm', 'unpushed.bin', '--remote', '--force'], {
         cwd: testDir,
       });
 
@@ -287,7 +288,7 @@ describe('rm command with --remote flag', () => {
 
     it('should not error on unpushed file deletion', async () => {
       await writeFile(join(testDir, 'unpushed.bin'), 'test content');
-      await execa('blobsy', ['track', 'unpushed.bin'], { cwd: testDir });
+      await blobsy(['track', 'unpushed.bin'], { cwd: testDir });
 
       // Verify file has no remote_key
       const brefContent = await readFile(join(testDir, 'unpushed.bin.bref'), 'utf-8');
@@ -295,7 +296,7 @@ describe('rm command with --remote flag', () => {
       expect(bref.remote_key).toBeUndefined();
 
       // Delete with --remote should succeed
-      const result = await execa('blobsy', ['rm', 'unpushed.bin', '--remote', '--force'], {
+      const result = await blobsy(['rm', 'unpushed.bin', '--remote', '--force'], {
         cwd: testDir,
       });
 
@@ -307,8 +308,8 @@ describe('rm command with --remote flag', () => {
   describe('default behavior (without --remote)', () => {
     it('should keep remote blob by default (without --remote flag)', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Get remote_key
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
@@ -319,7 +320,7 @@ describe('rm command with --remote flag', () => {
       expect(existsSync(backendBlobPath)).toBe(true);
 
       // Delete WITHOUT --remote flag
-      await execa('blobsy', ['rm', 'file.bin'], { cwd: testDir });
+      await blobsy(['rm', 'file.bin'], { cwd: testDir });
 
       // Blob should STILL exist in backend
       expect(existsSync(backendBlobPath)).toBe(true);
@@ -334,8 +335,8 @@ describe('rm command with --remote flag', () => {
       // Create and push multiple files
       await writeFile(join(testDir, 'file1.bin'), 'content 1');
       await writeFile(join(testDir, 'file2.bin'), 'content 2');
-      await execa('blobsy', ['track', 'file1.bin', 'file2.bin'], { cwd: testDir });
-      await execa('blobsy', ['push'], { cwd: testDir });
+      await blobsy(['track', 'file1.bin', 'file2.bin'], { cwd: testDir });
+      await blobsy(['push'], { cwd: testDir });
 
       // Get remote keys
       const bref1 = parseYaml(await readFile(join(testDir, 'file1.bin.bref'), 'utf-8')) as {
@@ -352,7 +353,7 @@ describe('rm command with --remote flag', () => {
       expect(existsSync(blob2Path)).toBe(true);
 
       // Delete both with --remote --force
-      await execa('blobsy', ['rm', 'file1.bin', 'file2.bin', '--remote', '--force'], {
+      await blobsy(['rm', 'file1.bin', 'file2.bin', '--remote', '--force'], {
         cwd: testDir,
       });
 
@@ -365,8 +366,8 @@ describe('rm command with --remote flag', () => {
   describe('backend errors', () => {
     it('should warn if backend deletion fails but continue', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Get remote key and manually delete blob to simulate backend error
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
@@ -377,7 +378,7 @@ describe('rm command with --remote flag', () => {
       await rm(backendBlobPath);
 
       // Now try to delete with --remote - backend deletion will fail
-      const result = await execa('blobsy', ['rm', 'file.bin', '--remote', '--force'], {
+      const result = await blobsy(['rm', 'file.bin', '--remote', '--force'], {
         cwd: testDir,
         reject: false,
       });
@@ -397,11 +398,11 @@ describe('rm command with --remote flag', () => {
   describe('--local flag behavior', () => {
     it('should keep .bref with --local flag (for re-pull)', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
-      await execa('blobsy', ['track', 'file.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'file.bin'], { cwd: testDir });
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
 
       // Delete with --local (removes only local file)
-      await execa('blobsy', ['rm', 'file.bin', '--local'], { cwd: testDir });
+      await blobsy(['rm', 'file.bin', '--local'], { cwd: testDir });
 
       // Local file should be removed
       expect(existsSync(join(testDir, 'file.bin'))).toBe(false);

@@ -37,10 +37,6 @@ jobs:
 
       - run: pnpm publint
 
-      - name: Link blobsy CLI for tests
-        working-directory: packages/blobsy
-        run: pnpm link --global
-
       - name: Install rclone
         if: matrix.node-version == 24
         run: sudo apt-get update && sudo apt-get install -y rclone

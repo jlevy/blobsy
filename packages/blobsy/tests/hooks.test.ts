@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execa } from 'execa';
+import { blobsy } from './helpers/cli.js';
 
 describe('hooks command - absolute path', () => {
   let testDir: string;
@@ -20,7 +21,7 @@ describe('hooks command - absolute path', () => {
     await execa('git', ['config', 'commit.gpgsign', 'false'], { cwd: testDir });
 
     // Initialize blobsy
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await blobsy(['init', 'local:../backend'], { cwd: testDir });
   });
 
   afterEach(async () => {
@@ -34,7 +35,7 @@ describe('hooks command - absolute path', () => {
 
   it('should write absolute path to hook file', async () => {
     // Install hooks
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     // Read hook file
     const hookContent = await readFile(hookPath, 'utf-8');
@@ -55,7 +56,7 @@ describe('hooks command - absolute path', () => {
   });
 
   it('should use hashbang and be executable', async () => {
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     const hookContent = await readFile(hookPath, 'utf-8');
 
@@ -76,7 +77,7 @@ describe('hooks command - absolute path', () => {
   });
 
   it('should include installation comments in hook', async () => {
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     const hookContent = await readFile(hookPath, 'utf-8');
 
@@ -87,11 +88,11 @@ describe('hooks command - absolute path', () => {
 
   it('should execute hook successfully with absolute path', async () => {
     // Install hooks
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     // Track a file
     await writeFile(join(testDir, 'test.bin'), 'test content');
-    await execa('blobsy', ['track', 'test.bin'], { cwd: testDir });
+    await blobsy(['track', 'test.bin'], { cwd: testDir });
 
     // Stage the file
     await execa('git', ['add', '.'], { cwd: testDir });
@@ -110,11 +111,11 @@ describe('hooks command - absolute path', () => {
 
   it('should uninstall hook correctly', async () => {
     // Install first
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
     expect(existsSync(hookPath)).toBe(true);
 
     // Uninstall
-    await execa('blobsy', ['hooks', 'uninstall'], { cwd: testDir });
+    await blobsy(['hooks', 'uninstall'], { cwd: testDir });
 
     // Hook should be removed
     expect(existsSync(hookPath)).toBe(false);
@@ -122,13 +123,13 @@ describe('hooks command - absolute path', () => {
 
   it('should error on invalid hook action', async () => {
     // Unknown action should fail
-    await expect(execa('blobsy', ['hooks', 'status'], { cwd: testDir })).rejects.toThrow(
+    await expect(blobsy(['hooks', 'status'], { cwd: testDir })).rejects.toThrow(
       /Unknown hooks action/,
     );
   });
 
   it('should detect blobsy executable path correctly', async () => {
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     const hookContent = await readFile(hookPath, 'utf-8');
 
@@ -153,8 +154,8 @@ describe('hooks command - absolute path', () => {
 
   it('should work even if installed multiple times', async () => {
     // Install twice
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
-    await execa('blobsy', ['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
+    await blobsy(['hooks', 'install'], { cwd: testDir });
 
     // Should still work
     expect(existsSync(hookPath)).toBe(true);
