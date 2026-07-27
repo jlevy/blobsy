@@ -1,0 +1,16 @@
+---
+type: is
+id: is-01kyjxbfvjj7be4455g3appn00
+title: "TEST-01: Wire full golden suite into CI; re-record six stale gzip-era goldens"
+kind: bug
+status: open
+priority: 0
+version: 1
+spec_path: docs/project/design/current/blobsy-design-review-round7-alpha-readiness.md
+labels: []
+dependencies: []
+parent_id: is-01kyjxad4kcjtwg6d00fe9cvcc
+created_at: 2026-07-27T23:07:56.658Z
+updated_at: 2026-07-27T23:07:56.658Z
+---
+Add test:golden script (full tryscript suite); wire into ci.yml both Node lanes (non-root; do NOT add to lefthook pre-push — root envs cannot fail permission scenarios). Re-record check-unpushed, push-pull, status, push-pull-json (gzip->zstd, 32->21), branch-workflow, fresh-setup after confirming zstd default is intended.
