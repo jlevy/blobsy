@@ -273,9 +273,12 @@ export async function fixGitignoreForBlobsy(
   }
 
   // Compute the negation prefix from the glob pattern
-  // data/** -> !data/**/  (allow subdirectories to be traversed)
+  // data/** -> !data/**/  (allow subdirectories at EVERY depth to be
+  // traversed — a single-level !data/*/ leaves deeper directories excluded,
+  // so nested .bref files are invisible to git and collaborators never
+  // receive them; review finding LIB-01)
   const negationBase = globPattern.slice(0, -2); // strip trailing **
-  const negationDir = `!${negationBase}*/`;
+  const negationDir = `!${negationBase}**/`;
 
   const replacementLines = [
     REWRITE_COMMENT,

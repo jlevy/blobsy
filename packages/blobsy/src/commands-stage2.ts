@@ -711,10 +711,6 @@ export async function handleSync(
   } else if (errors > 0) {
     process.exitCode = 1;
   }
-
-  if (errors > 0) {
-    process.exitCode = 1;
-  }
 }
 
 export async function handleHealth(_opts: Record<string, unknown>, cmd: Command): Promise<void> {

@@ -670,8 +670,10 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     }
   }
 
-  // Install git hooks (pre-commit and pre-push)
-  if (!opts.noHooks) {
+  // Install git hooks (pre-commit and pre-push). Commander maps --no-hooks
+  // to opts.hooks === false (NOT opts.noHooks — that key never exists, so
+  // checking it made the flag a no-op; review finding CLI-01).
+  if (opts.hooks !== false) {
     await installHooks(repoRoot, globalOpts);
   }
 }

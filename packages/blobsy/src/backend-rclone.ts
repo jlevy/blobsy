@@ -148,9 +148,11 @@ export class RcloneBackend implements Backend {
 
   private exec(args: string[], operation: string): string {
     try {
+      // No timeout: transfers of large files legitimately run for many
+      // minutes (review finding BE-01); rclone has its own network timeouts
+      // for hung connections.
       const result = execFileSync('rclone', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 60000,
       });
       return result.toString();
     } catch (err) {

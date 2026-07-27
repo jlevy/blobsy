@@ -30,6 +30,12 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm test
+
+      - name: Run golden test suite
+        working-directory: packages/blobsy
+        run: pnpm test:golden
+
       - run: pnpm publint
 
       # Publish with OIDC trusted publishing (no NPM_TOKEN needed)

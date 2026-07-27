@@ -47,7 +47,7 @@ The directory pattern is rewritten from `data/` to glob form with negation rules
 $ cat .gitignore
 # Directory ignore rewritten by blobsy to allow .bref tracking
 data/**
-!data/*/
+!data/**/
 !**/*.bref
 !**/.gitignore
 ? 0

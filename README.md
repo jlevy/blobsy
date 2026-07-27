@@ -19,7 +19,7 @@ npm install -g blobsy
 cd my-project
 blobsy setup --auto s3://my-bucket/my-project/blobs/
 
-# Add files: externalizes large (by default >1MB) files, stages everything to git
+# Add files: externalizes large (by default >200KB) files, stages everything to git
 blobsy add data/
 ```
 
@@ -47,7 +47,8 @@ blobsy pull
 
 `blobsy add` scans a directory (or accepts specific files/subdirectories), creates
 `.bref` pointer files for large files, adds originals to `.gitignore`, and stages
-everything to git. By default, files **1 MB or larger** are externalized; smaller files
+everything to git.
+By default, files **200 KB or larger** are externalized; smaller files
 are staged directly to git.
 See [Externalization Rules](#externalization-rules) for details.
 
@@ -221,14 +222,14 @@ per-file whether to externalize based on these rules (checked in order):
 
 1. **`never` patterns** (highest priority) -- matching files stay in git
 2. **`always` patterns** -- matching files are externalized regardless of size
-3. **`min_size` threshold** (default: `1mb`) -- files at or above this size are
+3. **`min_size` threshold** (default: `200kb`) -- files at or above this size are
    externalized
 
 Configure in `.blobsy.yml` at your repo root:
 
 ```yaml
 externalize:
-  min_size: 1mb           # default; accepts units like 500kb, 2mb, 1gb
+  min_size: 200kb         # default; accepts units like 500kb, 2mb, 1gb
   always:
     - "*.bin"
     - "*.onnx"

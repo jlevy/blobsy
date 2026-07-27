@@ -19,9 +19,6 @@ import { computeHash } from './hash.js';
 /** Timeout for exists check commands (shorter than push/pull) */
 const EXISTS_CHECK_TIMEOUT_MS = 30000;
 
-/** Timeout for push/pull commands */
-const TRANSFER_COMMAND_TIMEOUT_MS = 60000;
-
 export interface CommandTemplateVars {
   local: string;
   remote: string;
@@ -271,9 +268,10 @@ function executeCommandDirect(
     throw new ValidationError('Command template produced no command.');
   }
   try {
+    // No timeout: transfers of large files legitimately run for many minutes
+    // (review finding BE-01). Exists checks keep their short timeout.
     execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: TRANSFER_COMMAND_TIMEOUT_MS,
       env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
     });
   } catch (err) {
