@@ -243,7 +243,8 @@ Arguments:
 
 Options:
   --local         Delete local file only, keep .bref and remote
-  --remote        Also delete blob from backend (requires confirmation)
+  --remote        DANGER: also delete the blob from the backend (breaks git
+                  history; requires --force)
   --force         Skip confirmation prompts
   --recursive     Required for directory removal
   -h, --help      Display help for command

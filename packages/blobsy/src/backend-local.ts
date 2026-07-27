@@ -7,7 +7,7 @@
 
 import { copyFile, access, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type { Backend } from './types.js';
@@ -23,8 +23,30 @@ export class LocalBackend implements Backend {
     this.remoteDir = remoteDir;
   }
 
+  /**
+   * Resolve a remote key inside the backend directory, rejecting escapes.
+   *
+   * `remote_key` comes from `.bref` files, which arrive via git from other
+   * contributors — attacker-influenceable input. A key like `../../x` must
+   * never reach read, write, or delete outside the backend directory
+   * (review finding BE-03).
+   */
+  private resolveKey(remoteKey: string): string {
+    const root = resolve(this.remoteDir);
+    const resolved = resolve(root, remoteKey);
+    if (resolved !== root && !resolved.startsWith(root + sep)) {
+      throw new BlobsyError(
+        `Invalid remote_key escapes the backend directory: ${remoteKey}`,
+        'validation',
+        1,
+        ['The .bref file may be corrupted or malicious. Inspect it before retrying.'],
+      );
+    }
+    return resolved;
+  }
+
   async push(localPath: string, remoteKey: string): Promise<void> {
-    const destPath = join(this.remoteDir, remoteKey);
+    const destPath = this.resolveKey(remoteKey);
     await ensureDir(dirname(destPath));
 
     try {
@@ -51,7 +73,7 @@ export class LocalBackend implements Backend {
   }
 
   async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
-    const srcPath = join(this.remoteDir, remoteKey);
+    const srcPath = this.resolveKey(remoteKey);
 
     if (!existsSync(srcPath)) {
       throw new BlobsyError(`Remote blob not found: ${remoteKey}`, 'not_found', 1, [
@@ -117,12 +139,17 @@ export class LocalBackend implements Backend {
   }
 
   exists(remoteKey: string): Promise<boolean> {
-    const blobPath = join(this.remoteDir, remoteKey);
+    let blobPath: string;
+    try {
+      blobPath = this.resolveKey(remoteKey);
+    } catch {
+      return Promise.resolve(false);
+    }
     return Promise.resolve(existsSync(blobPath));
   }
 
   async delete(remoteKey: string): Promise<void> {
-    const blobPath = join(this.remoteDir, remoteKey);
+    const blobPath = this.resolveKey(remoteKey);
     if (!existsSync(blobPath)) {
       throw new BlobsyError(`Remote blob not found: ${remoteKey}`, 'not_found', 1, [
         'The blob may have already been deleted.',

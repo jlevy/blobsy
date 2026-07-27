@@ -33,20 +33,20 @@ $ echo "local changes" > data/model.bin
 ? 0
 ```
 
-# Pull overwrites (does NOT refuse)
+# Pull refuses to overwrite the modified local file (exit 2)
 
 ```console
 $ blobsy pull data/model.bin
-  ↓  data/model.bin (13 B)
-Done: 1 pulled.
-? 0
+  ✗ data/model.bin - local file modified; use `blobsy pull --force` to overwrite (or `blobsy push` to keep local)
+Done: 0 pulled, 1 refused (locally modified).
+? 2
 ```
 
-# Verify pull restored remote content
+# Verify local modifications survived the refused pull
 
 ```console
 $ cat data/model.bin
-hello blobsy
+local changes
 ? 0
 ```
 

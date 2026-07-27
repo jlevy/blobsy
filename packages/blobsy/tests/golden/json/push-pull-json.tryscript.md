@@ -46,6 +46,7 @@ $ blobsy push --json
       }
     }
   ],
+  "warnings": [],
   "summary": {
     "total": 2,
     "succeeded": 2,
@@ -88,7 +89,8 @@ $ blobsy pull --json
   "summary": {
     "total": 2,
     "succeeded": 2,
-    "failed": 0
+    "failed": 0,
+    "refused": 0
   }
 }
 ? 0
@@ -101,6 +103,7 @@ $ blobsy push --json
 {
   "schema_version": "0.1",
   "pushed": [],
+  "warnings": [],
   "summary": {
     "total": 0,
     "succeeded": 0,

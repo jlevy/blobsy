@@ -38,7 +38,7 @@ import {
   brefPath,
 } from './paths.js';
 import { readBref, writeBref } from './ref.js';
-import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
+import { createCacheEntry, getMergeBase, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
 import { isAwsCliAvailable } from './backend-aws-cli.js';
 import { isRcloneAvailable } from './backend-rclone.js';
@@ -220,22 +220,54 @@ export async function handlePush(
   }
 
   const results: TransferResult[] = [];
+  const warnings: string[] = [];
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
 
     if (ref.remote_key && !opts.force) {
+      // Not silently "already pushed" if the payload changed since the last
+      // push — say so, or the user believes the remote has their edits.
+      let note = 'already pushed';
+      if (existsSync(file.absPath)) {
+        const currentHash = await computeHash(file.absPath);
+        if (currentHash !== ref.hash) {
+          note = 'modified since last push (run `blobsy sync` or `blobsy push --force`)';
+          warnings.push(`${file.relPath}: ${note}`);
+        }
+      }
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${file.relPath}  already pushed`));
+        if (note === 'already pushed') {
+          console.log(c.muted(`  ${file.relPath}  ${note}`));
+        } else {
+          console.error(`  ${OUTPUT_SYMBOLS.warn} ${file.relPath}  ${note}`);
+        }
       }
       continue;
     }
 
-    if (opts.force && existsSync(file.absPath)) {
+    if (existsSync(file.absPath)) {
       const currentHash = await computeHash(file.absPath);
       if (currentHash !== ref.hash) {
-        ref.hash = currentHash;
-        ref.size = statSync(file.absPath).size;
+        if (opts.force) {
+          ref.hash = currentHash;
+          ref.size = statSync(file.absPath).size;
+        } else {
+          // Push sanity check (review finding DS-03): the design forbids
+          // uploading new bytes under the stale hash recorded at track time —
+          // the key would claim a sha256 the content doesn't have, and every
+          // subsequent pull fails verification for everyone.
+          results.push({
+            path: file.relPath,
+            success: false,
+            action: 'push',
+            error:
+              'local file changed since it was tracked (hash mismatch); ' +
+              'run `blobsy track` to re-track, `blobsy pull --force` to restore, ' +
+              'or `blobsy push --force` to push the current content',
+          });
+          continue;
+        }
       }
     }
 
@@ -260,6 +292,7 @@ export async function handlePush(
     console.log(
       formatJson({
         pushed: results,
+        warnings,
         summary: { total: results.length, succeeded: succeeded.length, failed: failed.length },
       }),
     );
@@ -302,12 +335,25 @@ export async function handlePull(
   }
 
   if (globalOpts.dryRun) {
+    // Mirror the real per-file plan (review finding CLI-02): count only files
+    // that would actually transfer, and surface refusals.
     const needsPull = [];
+    let wouldTransfer = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (ref.remote_key) {
-        needsPull.push(`pull ${file.relPath}`);
+      if (!ref.remote_key) {
+        continue;
       }
+      if (existsSync(file.absPath) && !opts.force) {
+        const currentHash = await computeHash(file.absPath);
+        if (currentHash === ref.hash) {
+          continue;
+        }
+        needsPull.push(`refuse ${file.relPath} (locally modified; would need --force)`);
+        continue;
+      }
+      needsPull.push(`pull ${file.relPath}`);
+      wouldTransfer++;
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(needsPull));
@@ -315,12 +361,13 @@ export async function handlePull(
       for (const a of needsPull) {
         console.log(formatDryRun(a));
       }
-      console.log(formatDryRun(`pull ${formatCount(needsPull.length, 'file')}`));
+      console.log(formatDryRun(`pull ${formatCount(wouldTransfer, 'file')}`));
     }
     return;
   }
 
   const results: TransferResult[] = [];
+  let refused = 0;
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
@@ -340,6 +387,16 @@ export async function handlePull(
         }
         continue;
       }
+      // Local file modified: never silently overwrite it (review finding
+      // DS-02 — the design mandates refusal with exit code 2).
+      refused++;
+      if (!globalOpts.quiet) {
+        console.error(
+          `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - local file modified; ` +
+            'use `blobsy pull --force` to overwrite (or `blobsy push` to keep local)',
+        );
+      }
+      continue;
     }
 
     const result = await pullFile(ref, file.absPath, config, repoRoot);
@@ -359,7 +416,12 @@ export async function handlePull(
     console.log(
       formatJson({
         pulled: results,
-        summary: { total: results.length, succeeded: succeeded.length, failed: failed.length },
+        summary: {
+          total: results.length,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          refused,
+        },
       }),
     );
   } else if (!globalOpts.quiet) {
@@ -369,15 +431,73 @@ export async function handlePull(
     for (const r of failed) {
       console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
+    const refusedNote = refused > 0 ? `, ${refused} refused (locally modified)` : '';
     console.log(
-      `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
+      `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}${refusedNote}.`,
     );
   }
 
-  if (failed.length > 0) {
+  if (refused > 0) {
+    process.exitCode = CONFLICT_EXIT_CODE;
+  } else if (failed.length > 0) {
     process.exitCode = 1;
   }
 }
+
+/**
+ * Per-file three-way sync decision (blobsy-stat-cache-design.md decision table).
+ *
+ * The stat cache supplies the merge base — the last hash this machine knew was
+ * in sync. Without consulting it, sync cannot tell "user edited the file" from
+ * ".bref updated by git pull" and destroys one side (review finding DS-01).
+ */
+type SyncDecision =
+  | { action: 'push_new' }
+  | { action: 'pull_missing' }
+  | { action: 'up_to_date'; localHash: string }
+  | { action: 'pull' }
+  | { action: 'push'; localHash: string }
+  | { action: 'conflict'; localHash: string; baseHash: string; refHash: string }
+  | { action: 'ambiguous'; localHash: string };
+
+async function decideSyncAction(
+  file: { relPath: string; absPath: string; refPath: string },
+  ref: { hash: string; remote_key?: string | undefined },
+  cacheDir: string,
+): Promise<SyncDecision> {
+  if (!ref.remote_key) {
+    return { action: 'push_new' };
+  }
+  if (!existsSync(file.absPath)) {
+    return { action: 'pull_missing' };
+  }
+
+  const localHash = await computeHash(file.absPath);
+  if (localHash === ref.hash) {
+    return { action: 'up_to_date', localHash };
+  }
+
+  const baseHash = await getMergeBase(cacheDir, file.relPath);
+  if (!baseHash) {
+    return { action: 'ambiguous', localHash };
+  }
+  if (localHash === baseHash && ref.hash !== baseHash) {
+    return { action: 'pull' };
+  }
+  if (localHash !== baseHash && ref.hash === baseHash) {
+    return { action: 'push', localHash };
+  }
+  return { action: 'conflict', localHash, baseHash, refHash: ref.hash };
+}
+
+/** Exit code for conflict-class outcomes (matches ConflictError). */
+const CONFLICT_EXIT_CODE = 2;
+
+const SYNC_CONFLICT_HELP =
+  'resolve with an explicit choice: `blobsy push --force` (keep local) or `blobsy pull --force` (take remote)';
+
+const SYNC_AMBIGUOUS_HELP =
+  'no merge base to tell a local edit from a git pull; run `blobsy push` or `blobsy pull` explicitly';
 
 export async function handleSync(
   paths: string[],
@@ -406,13 +526,30 @@ export async function handleSync(
   const files = resolveTrackedFiles(paths, repoRoot);
 
   if (globalOpts.dryRun) {
+    // Dry-run must run the same per-file decision logic as the real sync
+    // (review finding CLI-02) — it previously omitted the modified→push and
+    // conflict cases entirely, reporting "Everything up to date".
     const actions = [];
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (!ref.remote_key) {
-        actions.push(`push ${file.relPath}`);
-      } else if (!existsSync(file.absPath)) {
-        actions.push(`pull ${file.relPath}`);
+      const decision = await decideSyncAction(file, ref, cacheDir);
+      switch (decision.action) {
+        case 'push_new':
+        case 'push':
+          actions.push(`push ${file.relPath}`);
+          break;
+        case 'pull_missing':
+        case 'pull':
+          actions.push(`pull ${file.relPath}`);
+          break;
+        case 'conflict':
+          actions.push(`conflict ${file.relPath} (would error; ${SYNC_CONFLICT_HELP})`);
+          break;
+        case 'ambiguous':
+          actions.push(`error ${file.relPath} (${SYNC_AMBIGUOUS_HELP})`);
+          break;
+        case 'up_to_date':
+          break;
       }
     }
     if (globalOpts.json) {
@@ -431,76 +568,148 @@ export async function handleSync(
   let pushed = 0;
   let pulled = 0;
   let errors = 0;
+  let conflicts = 0;
+
+  const pushModified = async (
+    file: { relPath: string; absPath: string; refPath: string },
+    ref: Awaited<ReturnType<typeof readBref>>,
+    localHash: string,
+  ): Promise<void> => {
+    const modifiedRef = {
+      ...ref,
+      hash: localHash,
+      size: statSync(file.absPath).size,
+      remote_key: undefined,
+    };
+    const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
+    if (result.success && result.refUpdates) {
+      const updatedRef = { ...modifiedRef, ...result.refUpdates };
+      await writeBref(file.refPath, updatedRef);
+      const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
+      await writeCacheEntry(cacheDir, entry);
+      pushed++;
+      if (!globalOpts.quiet && !globalOpts.json) {
+        console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
+      }
+    } else {
+      errors++;
+      if (!globalOpts.quiet) {
+        console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
+      }
+    }
+  };
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
+    const decision = await decideSyncAction(file, ref, cacheDir);
 
-    if (!ref.remote_key) {
-      const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
-      if (result.success && result.refUpdates) {
-        const updatedRef = { ...ref, ...result.refUpdates };
-        await writeBref(file.refPath, updatedRef);
+    switch (decision.action) {
+      case 'push_new': {
+        // First push of a tracked file. If the payload changed since track,
+        // re-hash so the uploaded content and the recorded hash stay
+        // consistent (never upload new bytes under a stale hash — DS-03).
+        let pushRef = ref;
         if (existsSync(file.absPath)) {
-          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
-          await writeCacheEntry(cacheDir, entry);
+          const currentHash = await computeHash(file.absPath);
+          if (currentHash !== ref.hash) {
+            pushRef = { ...ref, hash: currentHash, size: statSync(file.absPath).size };
+          }
         }
-        pushed++;
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
-        }
-      } else {
-        errors++;
-        if (!globalOpts.quiet) {
-          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
-        }
-      }
-    } else if (!existsSync(file.absPath)) {
-      const result = await pullFile(ref, file.absPath, config, repoRoot);
-      if (result.success) {
-        const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
-        await writeCacheEntry(cacheDir, entry);
-        pulled++;
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled`);
-        }
-      } else {
-        errors++;
-        if (!globalOpts.quiet) {
-          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`);
-        }
-      }
-    } else {
-      const currentHash = await computeHash(file.absPath);
-      if (currentHash !== ref.hash) {
-        const modifiedRef = {
-          ...ref,
-          hash: currentHash,
-          size: statSync(file.absPath).size,
-          remote_key: undefined,
-        };
-        const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
+        const result = await pushFile(file.absPath, file.relPath, pushRef, config, repoRoot);
         if (result.success && result.refUpdates) {
-          const updatedRef = { ...modifiedRef, ...result.refUpdates };
+          const updatedRef = { ...pushRef, ...result.refUpdates };
           await writeBref(file.refPath, updatedRef);
-          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
-          await writeCacheEntry(cacheDir, entry);
+          if (existsSync(file.absPath)) {
+            const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
+            await writeCacheEntry(cacheDir, entry);
+          }
           pushed++;
           if (!globalOpts.quiet && !globalOpts.json) {
-            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
+            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
           }
         } else {
           errors++;
+          if (!globalOpts.quiet) {
+            console.error(
+              `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`,
+            );
+          }
         }
-      } else if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`));
+        break;
+      }
+
+      case 'pull_missing':
+      case 'pull': {
+        const result = await pullFile(ref, file.absPath, config, repoRoot);
+        if (result.success) {
+          const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
+          await writeCacheEntry(cacheDir, entry);
+          pulled++;
+          if (!globalOpts.quiet && !globalOpts.json) {
+            const note = decision.action === 'pull' ? ' (updated)' : '';
+            console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled${note}`);
+          }
+        } else {
+          errors++;
+          if (!globalOpts.quiet) {
+            console.error(
+              `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`,
+            );
+          }
+        }
+        break;
+      }
+
+      case 'push': {
+        await pushModified(file, ref, decision.localHash);
+        break;
+      }
+
+      case 'conflict': {
+        conflicts++;
+        if (!globalOpts.quiet) {
+          console.error(
+            `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - conflict: local and .bref both changed ` +
+              `since last sync (local ${decision.localHash.slice(0, 19)}…, ` +
+              `ref ${decision.refHash.slice(0, 19)}…); ${SYNC_CONFLICT_HELP}`,
+          );
+        }
+        break;
+      }
+
+      case 'ambiguous': {
+        conflicts++;
+        if (!globalOpts.quiet) {
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - ${SYNC_AMBIGUOUS_HELP}`);
+        }
+        break;
+      }
+
+      case 'up_to_date': {
+        // Refresh the merge base so future syncs have a reliable base.
+        const entry = await createCacheEntry(file.absPath, file.relPath, decision.localHash);
+        await writeCacheEntry(cacheDir, entry);
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(c.muted(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`));
+        }
+        break;
       }
     }
   }
 
   if (globalOpts.json) {
-    console.log(formatJson({ sync: { pushed, pulled, errors, total: files.length } }));
+    console.log(formatJson({ sync: { pushed, pulled, errors, conflicts, total: files.length } }));
   } else if (!globalOpts.quiet) {
-    console.log(`Sync complete: ${pushed} pushed, ${pulled} pulled, ${errors} errors.`);
+    const conflictNote = conflicts > 0 ? `, ${conflicts} conflicts` : '';
+    console.log(
+      `Sync complete: ${pushed} pushed, ${pulled} pulled, ${errors} errors${conflictNote}.`,
+    );
+  }
+
+  if (conflicts > 0) {
+    process.exitCode = CONFLICT_EXIT_CODE;
+  } else if (errors > 0) {
+    process.exitCode = 1;
   }
 
   if (errors > 0) {
@@ -1662,8 +1871,12 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
 
   console.log(`blobsy pre-push: uploading ${formatCount(unpushed.length, 'blob')}...`);
 
-  // Push each unpushed blob
+  // Push each unpushed blob. This hook is the design's primary prevention
+  // layer against committed-ref-without-blob data loss, so a failed upload
+  // MUST abort the git push (review finding HK-01) — never report success
+  // on a network error or missing credentials.
   const cacheDir = getStatCacheDir(repoRoot);
+  const failures: { relPath: string; error: string }[] = [];
   for (const relPath of unpushed) {
     const refPath = join(repoRoot, brefPath(relPath));
     const ref = await readBref(refPath);
@@ -1678,7 +1891,22 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
         const entry = await createCacheEntry(absPath, relPath, updatedRef.hash);
         await writeCacheEntry(cacheDir, entry);
       }
+    } else if (!result.success) {
+      failures.push({ relPath, error: result.error ?? 'unknown error' });
     }
+  }
+
+  if (failures.length > 0) {
+    for (const f of failures) {
+      console.error(`blobsy pre-push: ${OUTPUT_SYMBOLS.fail} ${f.relPath}: ${f.error}`);
+    }
+    console.error(
+      `blobsy pre-push: ${formatCount(failures.length, 'upload')} failed; aborting push. ` +
+        'Collaborators would see committed refs with no blob behind them. ' +
+        'Fix the error and retry, or bypass with `git push --no-verify`.',
+    );
+    process.exitCode = 1;
+    return;
   }
 
   console.log('blobsy pre-push: all blobs uploaded.');

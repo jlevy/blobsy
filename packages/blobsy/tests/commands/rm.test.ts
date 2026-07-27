@@ -84,24 +84,15 @@ describe('rm command with --remote flag', () => {
       await blobsy(['push', 'file.bin'], { cwd: testDir });
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
       const bref = parseYaml(brefContent) as { remote_key?: string };
-
-      // Only run this test if remote_key was set (push succeeded)
-      if (!bref.remote_key) {
-        console.warn('Skipping test: file was not pushed successfully');
-        return;
-      }
+      expect(bref.remote_key).toBeDefined();
 
       const result = await blobsy(['rm', 'file.bin', '--remote', '--force'], {
         cwd: testDir,
-        reject: false,
       });
 
-      // If command succeeded, check for success message
-      if (result.exitCode === 0) {
-        const output = result.stdout + '\n' + result.stderr;
-        // Backend deletion message should appear if remote_key was present
-        expect(output).toMatch(/Deleted from backend|Remote deletion/i);
-      }
+      expect(result.exitCode).toBe(0);
+      const output = result.stdout + '\n' + result.stderr;
+      expect(output).toMatch(/Deleted from backend/i);
     });
 
     it('should not show deletion message with --quiet flag', async () => {
@@ -117,50 +108,64 @@ describe('rm command with --remote flag', () => {
     });
   });
 
-  describe('confirmation prompt', () => {
-    it('should prompt for confirmation without --force', async () => {
+  describe('--remote without --force (DS-04: no prompt, refuse up front)', () => {
+    it('refuses with a history-breaking error and mutates nothing', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
       await blobsy(['track', 'file.bin'], { cwd: testDir });
       await blobsy(['push', 'file.bin'], { cwd: testDir });
 
-      // Get remote_key before deletion
       const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
       const bref = parseYaml(brefContent) as { remote_key?: string };
+      expect(bref.remote_key).toBeDefined();
+      const backendBlobPath = join(backendDir, bref.remote_key!);
+      expect(existsSync(backendBlobPath)).toBe(true);
 
-      // Only run if push succeeded and remote_key is set
-      if (!bref.remote_key) {
-        console.warn('Skipping test: file was not pushed successfully');
-        return;
-      }
+      const result = await blobsy(['rm', 'file.bin', '--remote'], {
+        cwd: testDir,
+        reject: false,
+      });
 
-      const remoteKey = bref.remote_key;
-      const backendBlobPath = join(backendDir, remoteKey);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toMatch(/git history/i);
+      expect(result.stderr).toMatch(/--force/);
 
-      // Check if blob exists before deletion (may not if backend path is wrong)
-      const blobExistedBefore = existsSync(backendBlobPath);
+      // Refusal happens before any local mutation: everything intact.
+      expect(existsSync(join(testDir, 'file.bin'))).toBe(true);
+      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(true);
+      expect(existsSync(backendBlobPath)).toBe(true);
+    });
 
-      // Spawn process to handle interactive prompt
+    it('refuses even with --quiet (quiet must never imply consent)', async () => {
+      await writeFile(join(testDir, 'file.bin'), 'test content');
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
+
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+      expect(bref.remote_key).toBeDefined();
+      const backendBlobPath = join(backendDir, bref.remote_key!);
+
+      const result = await blobsy(['rm', 'file.bin', '--remote', '--quiet'], {
+        cwd: testDir,
+        reject: false,
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(existsSync(backendBlobPath)).toBe(true);
+      expect(existsSync(join(testDir, 'file.bin'))).toBe(true);
+    });
+
+    it('never opens an interactive prompt (exits without consuming stdin)', async () => {
+      await writeFile(join(testDir, 'file.bin'), 'test content');
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
+
+      // With stdin an open pipe and no input written, a prompting
+      // implementation would hang; the command must exit immediately.
       const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
         cwd: testDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-
-      let output = '';
-
-      child.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        output += data.toString();
-      });
-
-      // Wait a bit for prompt to appear
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Answer 'n' to cancel
-      child.stdin.write('n\n');
-      child.stdin.end();
 
       const exitCode = await new Promise<number>((resolve) => {
         child.on('close', (code) => {
@@ -168,94 +173,7 @@ describe('rm command with --remote flag', () => {
         });
       });
 
-      expect(exitCode).toBe(0);
-
-      // Should show cancellation message
-      expect(output).toMatch(/cancelled|Remote deletion cancelled/i);
-
-      // Local file and .bref should still be removed regardless
-      expect(existsSync(join(testDir, 'file.bin'))).toBe(false);
-      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(false);
-
-      // Blob should still exist if it existed before (deletion cancelled)
-      // Only check if we could verify it existed before
-      if (blobExistedBefore) {
-        expect(existsSync(backendBlobPath)).toBe(true);
-      }
-    });
-
-    it('should delete when user confirms with "y"', async () => {
-      await writeFile(join(testDir, 'file.bin'), 'test content');
-      await blobsy(['track', 'file.bin'], { cwd: testDir });
-      await blobsy(['push', 'file.bin'], { cwd: testDir });
-
-      // Get remote_key before deletion
-      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
-      const bref = parseYaml(brefContent) as { remote_key?: string };
-      const remoteKey = bref.remote_key!;
-      const backendBlobPath = join(backendDir, remoteKey);
-
-      // Spawn process to handle interactive prompt
-      const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
-        cwd: testDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      // Wait for prompt
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Answer 'y' to confirm
-      child.stdin.write('y\n');
-      child.stdin.end();
-
-      const exitCode = await new Promise<number>((resolve) => {
-        child.on('close', (code) => {
-          resolve(code ?? 0);
-        });
-      });
-
-      expect(exitCode).toBe(0);
-
-      // Blob should be deleted
-      expect(existsSync(backendBlobPath)).toBe(false);
-    });
-
-    it('should show file path and remote key in confirmation prompt', async () => {
-      await writeFile(join(testDir, 'file.bin'), 'test content');
-      await blobsy(['track', 'file.bin'], { cwd: testDir });
-      await blobsy(['push', 'file.bin'], { cwd: testDir });
-
-      // Spawn process
-      const child = spawn(process.execPath, [CLI_PATH, 'rm', 'file.bin', '--remote'], {
-        cwd: testDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let output = '';
-
-      child.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        output += data.toString();
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Cancel
-      child.stdin.write('n\n');
-      child.stdin.end();
-
-      await new Promise((resolve) => {
-        child.on('close', resolve);
-      });
-
-      // Prompt should mention file name
-      expect(output).toMatch(/file\.bin/);
-
-      // Prompt should mention it can't be undone
-      expect(output).toMatch(/cannot be undone|This cannot be undone/i);
+      expect(exitCode).not.toBe(0);
     });
   });
 

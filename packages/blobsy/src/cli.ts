@@ -179,7 +179,10 @@ function createProgram(): Command {
     .description('Remove tracked files: delete local + move .bref to trash')
     .argument('<path...>', 'Files or directories to remove')
     .option('--local', 'Delete local file only, keep .bref and remote')
-    .option('--remote', 'Also delete blob from backend (requires confirmation)')
+    .option(
+      '--remote',
+      'DANGER: also delete the blob from the backend (breaks git history; requires --force)',
+    )
     .option('--force', 'Skip confirmation prompts')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleRm));
@@ -1353,6 +1356,24 @@ async function handleRm(
     throw new ValidationError('Cannot use both --local and --remote flags');
   }
 
+  // Refuse remote deletion up front, before any local mutation, so a refusal
+  // never leaves the repo half-cleaned (review finding DS-04). Remote
+  // deletion is history-breaking: a .bref is a durable pointer in git
+  // history, and deleting the object can break older commits, tags, other
+  // branches, other clones sharing the backend, or another .bref sharing a
+  // CAS key. No prompt can make that safe (and the design forbids prompts);
+  // reachability-aware cleanup is the deferred GC's job. This flag stays
+  // only as emergency plumbing: explicit --force, never influenced by
+  // --quiet.
+  if (deleteRemote && !force) {
+    throw new ValidationError(
+      'rm --remote permanently deletes the blob for ALL git history — older ' +
+        'commits, tags, and other clones that reference it will break. ' +
+        'If you are sure, re-run with --force. ' +
+        'To stop tracking without destroying history, use rm without --remote.',
+    );
+  }
+
   for (const inputPath of paths) {
     const absPath = resolveFilePath(stripBrefExtension(inputPath));
 
@@ -1420,66 +1441,38 @@ async function rmFile(
   const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
   await rename(refPath, trashPath);
 
-  // Delete from backend if --remote flag set
+  // Delete from backend if --remote --force (handleRm refuses --remote
+  // without --force before any local mutation; see the DS-04 rationale
+  // there). No prompt: prompts are forbidden by design, and --quiet must
+  // never influence a safety decision.
   if (deleteRemote) {
     const bref = await readBref(trashPath); // Read from trash copy
 
     if (bref.remote_key) {
-      // Confirmation prompt (unless --force)
-      if (!force && !globalOpts.quiet) {
-        const { createInterface } = await import('node:readline/promises');
-        const rl = createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
+      try {
+        const config = await resolveConfig(repoRoot, repoRoot);
+        const { createBackend, resolveBackend } = await import('./transfer.js');
+        if (!config.backends) {
+          throw new ValidationError('No backend configured');
+        }
+        const resolvedBackend = resolveBackend(config);
+        const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+        await backend.delete(bref.remote_key);
 
-        const answer = await rl.question(
-          `Delete blob from backend?\n` +
-            `  File: ${relPath}\n` +
-            `  Remote key: ${bref.remote_key}\n` +
-            `  This cannot be undone. Continue? (y/N): `,
+        if (!globalOpts.quiet) {
+          if (globalOpts.json) {
+            console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
+          } else {
+            console.log(`Deleted from backend: ${bref.remote_key}`);
+          }
+        }
+      } catch (err: unknown) {
+        // Don't fail the whole rm operation if backend deletion fails
+        // Local cleanup already succeeded
+        console.warn(
+          `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
+            `  Remote blob may still exist: ${bref.remote_key}`,
         );
-
-        rl.close();
-
-        if (answer.toLowerCase() !== 'y') {
-          if (!globalOpts.quiet) {
-            console.log(
-              'Remote deletion cancelled. Local file and .bref removed, remote blob kept.',
-            );
-          }
-          // Still continue with local cleanup below
-          deleteRemote = false; // Skip backend deletion
-        }
-      }
-
-      // Delete from backend if confirmed or --force
-      if (deleteRemote) {
-        try {
-          const config = await resolveConfig(repoRoot, repoRoot);
-          const { createBackend, resolveBackend } = await import('./transfer.js');
-          if (!config.backends) {
-            throw new ValidationError('No backend configured');
-          }
-          const resolvedBackend = resolveBackend(config);
-          const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
-          await backend.delete(bref.remote_key);
-
-          if (!globalOpts.quiet) {
-            if (globalOpts.json) {
-              console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
-            } else {
-              console.log(`Deleted from backend: ${bref.remote_key}`);
-            }
-          }
-        } catch (err: unknown) {
-          // Don't fail the whole rm operation if backend deletion fails
-          // Local cleanup already succeeded
-          console.warn(
-            `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
-              `  Remote blob may still exist: ${bref.remote_key}`,
-          );
-        }
       }
     } else if (!globalOpts.quiet) {
       console.log(`Note: File was never pushed (no remote_key), skipping backend deletion`);
