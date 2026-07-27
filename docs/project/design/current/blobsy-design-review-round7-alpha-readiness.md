@@ -43,7 +43,7 @@ reports success. Each of these is a localized fix; none requires redesign.
 
 The second theme is **drift**: three divergent versions of the agent skill text, a
 README that documents a different externalize threshold than the code ships, hooks
-described three different ways across three docs, ~50 golden tests that never run in CI,
+described three different ways across three docs, 65 golden tests that never run in CI,
 and a `pnpm test` that fails on a fresh clone.
 
 The third theme is **complexity creep against goal #4**: 22 CLI commands (with several
@@ -313,14 +313,24 @@ blobsy-backend-and-transport-design.md:390. All three call sites hardcode
 **Fix:** Thread the repo-relative path through `Backend.push/pull/exists`, or remove the
 variable from docs and `KNOWN_TEMPLATE_VARS` and error if used.
 
-**TEST-01 — The golden test suite does not run in CI.**
+**TEST-01 — The golden test suite does not run in CI, and has already drifted.**
 `packages/blobsy/vitest.config.ts` (includes only `tests/**/*.test.ts`),
 `.github/workflows/ci.yml:48-53` (runs exactly one tryscript file, the rclone
-lifecycle). ~50 `.tryscript.md` golden tests — the testing design’s centerpiece ("CI
-fails on any unintentional output change") — never execute in CI. Output regressions,
-including `--json` shape breaks for agents, ship silently.
-**Fix:** Add a `test:golden` script running the full tryscript suite and wire it into
-ci.yml (both Node lanes); include it in the lefthook pre-push gate.
+lifecycle).
+65 `.tryscript.md` golden tests — the testing design’s centerpiece ("CI fails
+on any unintentional output change", blobsy-testing-design.md:1993 promises “All unit
+tests (vitest) and golden tests (tryscript) run on every PR”) — never execute in CI. The
+consequence is already observable: at least five golden files carry stale size
+expectations (`32 B` where the fixture now yields `21 B`) and fail when run —
+`commands/status.tryscript.md:105`, `commands/push-pull.tryscript.md:59`,
+`commands/check-unpushed.tryscript.md:54`, `workflows/branch-workflow.tryscript.md:57`,
+`workflows/fresh-setup.tryscript.md:70` (verified by running
+`npx tryscript run tests/golden/commands/status.tryscript.md`: 13 passed, 1 failed).
+The suite is currently ornamental: it documents intended behavior without enforcing it,
+and `--json` shape breaks for agents would ship silently.
+**Fix:** Add a `test:golden` script running the full tryscript suite; repair the five
+stale files (`--update` after verifying the new output is correct); wire the script into
+ci.yml (both Node lanes) and the lefthook pre-push gate.
 
 **DX-01 — Fresh clone fails `pnpm test` (49 failures across 5 files).**
 `tests/hooks.test.ts`, `setup.test.ts`, `init.test.ts`, `commands/rm.test.ts`,
@@ -357,6 +367,30 @@ locally-modified→push case entirely, reporting “Everything up to date”); `
 `--dry-run` is the primary trust mechanism for agents and scripts; it must match the
 real plan — especially while DS-01/DS-02 make the real plan destructive.
 **Fix:** Run the same per-file decision logic in dry-run mode and print its actions.
+
+**TEST-03 — False-pass tests mask regressions in the primary S3 backend.**
+`packages/blobsy/tests/backend-s3.test.ts:87-98,101-111`. Two error-categorization tests
+wrap the call in try/catch with assertions only inside `catch` and no
+`expect.assertions()` — if the code under test stops throwing, the tests pass with zero
+assertions executed.
+**Fix:** `await expect(...).rejects.toThrow(BlobsyError)` (or `expect.assertions(n)`).
+Also add push/pull tests: `backend-s3.test.ts` currently covers only
+`exists`/`healthCheck`/error mapping, and `backend-aws-cli.ts` (173 lines, a primary S3
+transfer path) has no test file at all.
+
+**TEST-04 — Correctness-critical modules with zero unit tests.** `src/stat-cache.ts`
+(112 lines — the component DS-01’s fix will depend on; the testing design lists 16
+specific cases at blobsy-testing-design.md:1957-1976, none implemented),
+`src/backend-aws-cli.ts` (see TEST-03), and `src/format.ts` (292 lines of pure,
+trivially testable output functions).
+**Fix:** Add `tests/stat-cache.test.ts` first — it is a prerequisite for landing DS-01
+safely; aws-cli and format tests follow.
+
+**TEST-05 — `release.yml` publishes to npm without running tests.**
+`.github/workflows/release.yml` builds and `pnpm -r publish`es with no test step
+(publish.yml has one; both trigger on version tags).
+**Fix:** Add `pnpm test` (and the golden suite once TEST-01 lands) before publish, or
+consolidate the two workflows.
 
 ### Medium
 
@@ -455,6 +489,31 @@ design says should happen only for the deferred `{git_branch}`).
 `compile-template` script references a missing `admin/` directory (template leftover).
 **Fix:** Delete both, or create the e2e directory when real S3 e2e tests land.
 
+**TEST-06 — Promised error golden tests are missing.** The testing design specifies
+auth-errors, permission-errors, and network-errors golden tests with full expected
+output (blobsy-testing-design.md:298-301); none exist.
+Only validation, not-found, conflict, and partial-failure error tests are implemented —
+cloud/credential failure UX has zero coverage.
+The echo/command backend can simulate these without credentials.
+
+**TEST-07 — Fragile interactive tests in `rm.test.ts`.**
+`tests/commands/rm.test.ts:158,203,244` race a fixed 100 ms `setTimeout` against the
+confirmation prompt before writing stdin (flaky on slow CI); `:87-89,127-130` return
+early when push didn’t set `remote_key`, silently passing without testing remote
+deletion at all. **Fix:** Wait for the prompt text on stdout; replace early returns with
+`expect(bref.remote_key).toBeDefined()`. (Note both blocks are obsolete if DS-04 removes
+the prompt.)
+
+**TEST-08 — Test tooling/metadata drift.** The golden coverage matrix
+(`docs/project/specs/active/golden-test-coverage-matrix.md`) claims 49 files vs 65 on
+disk and references a nonexistent `prime` test; `check-golden-coverage.sh` currently
+exits 1 (flags the bare `...` elisions in `readme`/`docs` tryscripts) and is not run in
+CI; the vitest+tryscript coverage merge described at blobsy-testing-design.md:117-121 is
+unwired; the testing design’s paths (`tests/unit/`, `tests/golden/tryscript.config.ts`)
+don’t match the actual layout.
+**Fix:** Regenerate the matrix (or automate it from the file listing), fix the `...`
+elisions, then add the coverage script to CI; update the testing-design paths.
+
 **DOCS-03 — Hooks documented three contradictory ways.** README.md:250-251 and the
 implementation agree (pre-commit verifies, pre-push uploads); blobsy-design.md:2510-2515
 and blobsy-implementation-notes.md:99-141 both describe pre-commit *pushing*. Fix the
@@ -513,8 +572,40 @@ pattern by resolving this round the same way.
 
 ## Testing and CI Assessment
 
-*(Pending — final reviewer pass on the test suite is being incorporated; see TEST-01,
-TEST-02, DX-01 above for confirmed CI/test-infrastructure findings.)*
+**The two-layer strategy is right and the infrastructure is good; the problem is
+under-wiring, not over-engineering.** The tryscript golden approach (sandboxed markdown
+scripts, pattern placeholders, a 91-line echo backend, local-backend integration) is
+lightweight, readable, and proportionate.
+Unit test quality is generally solid where tests exist (`backend-command`,
+`backend-local`, `hash`, `ref-parser`, `config`, `transfer` test behavior, not
+implementation).
+The pieces simply aren’t connected: 65 golden files and a coverage-check
+script exist, and CI runs one of them (TEST-01) — with measurable drift already
+accumulated as a result.
+
+Coverage by module (unit tests; golden coverage exists for nearly all CLI behavior but
+is unenforced until TEST-01 lands):
+
+| Area | State |
+| --- | --- |
+| Well covered | `config`, `transfer`, `backend-command`, `backend-local`, `backend-url`, `gitignore`, `paths`, `ref`, `template`, `compress`, `externalize`, `hash` |
+| Partial | `cli.ts` (init/setup/hooks/rm via integration), `backend-s3` (exists/health only, with false-pass bugs — TEST-03), `backend-rclone` (heavily mocked), `types` |
+| Zero unit tests | `commands-stage2.ts` (1,703 lines: push/pull/sync/doctor — golden tests cover it once enforced), `stat-cache.ts` (TEST-04), `backend-aws-cli.ts` (TEST-04), `format.ts` (TEST-04) |
+
+**Biggest coverage hole vs.
+the blockers:** there is no test — unit or golden — for the two-user desync scenario at
+the heart of DS-01 (`two-user-conflict.tryscript.md` is a single user force-pushing and
+re-pulling), none for pull-refuses-modified (DS-02), none for push-hash-mismatch
+(DS-03), and none asserting the pre-push hook fails on upload error (HK-01). The blocker
+fixes should each land with a golden test reproducing the scenario; the local backend
+makes all four testable without credentials.
+
+**Priority order (test work only):** wire golden suite into CI + repair the five stale
+files (TEST-01, ~30 min) → fix S3 false-pass tests and add S3/aws-cli push-pull tests
+(TEST-03) → write `stat-cache.test.ts` ahead of the DS-01 fix (TEST-04) → add the
+missing error-scenario goldens (TEST-06) → add tests to release.yml (TEST-05). Defer
+past alpha: coverage merge, `format.ts` unit tests (golden covers it), binary fixture,
+matrix regeneration automation.
 
 ## Documentation Actions (summary)
 
@@ -533,8 +624,9 @@ TEST-02, DX-01 above for confirmed CI/test-infrastructure findings.)*
 1. **Data safety (blockers):** DS-01, DS-02, DS-03, HK-01, DS-04, CLI-01, SEC-01 — with
    golden tests for each scenario (the two-user desync scenario currently has no test;
    `two-user-conflict.tryscript.md` exercises a single user force-pushing).
-2. **CI trust:** TEST-01 (golden suite in CI), DX-01 (fresh-clone tests), CLI-02
-   (truthful dry-run).
+2. **CI trust:** TEST-01 (golden suite in CI + repair five stale goldens), DX-01
+   (fresh-clone tests), TEST-03 (S3 false-pass tests), TEST-05 (tests in release.yml),
+   CLI-02 (truthful dry-run), TEST-04 (`stat-cache.test.ts` as the DS-01 prerequisite).
 3. **Real-world transfer viability:** BE-01 (timeout), BE-04 (streaming S3), BE-02
    (async exec + backend reuse; decide on parallelism vs deleting `sync.parallel`).
 4. **Correctness cleanup:** LIB-01, LIB-02, BE-03, BE-05..BE-09, CFG-01..03, HK-02,
