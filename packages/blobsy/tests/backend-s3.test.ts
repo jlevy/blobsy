@@ -32,6 +32,7 @@ vi.mock('@aws-sdk/client-s3', () => {
     },
     PutObjectCommand: class PutObjectCommand extends MockCommand {},
     GetObjectCommand: class GetObjectCommand extends MockCommand {},
+    HeadBucketCommand: class HeadBucketCommand extends MockCommand {},
     HeadObjectCommand: class HeadObjectCommand extends MockCommand {},
     DeleteObjectCommand: class DeleteObjectCommand extends MockCommand {},
     CreateMultipartUploadCommand: class CreateMultipartUploadCommand extends MockCommand {},
@@ -81,10 +82,12 @@ describe('BuiltinS3Backend', () => {
     await expect(backend.exists('some-key')).rejects.toThrow(BlobsyError);
   });
 
-  it('healthCheck writes and deletes a temp key', async () => {
+  it('healthCheck sends a single HeadBucket probe, no write (BE-07)', async () => {
     mockSend.mockResolvedValue({});
     await backend.healthCheck();
-    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const call = mockSend.mock.calls[0]![0] as { constructor: { name: string } };
+    expect(call.constructor.name).toBe('HeadBucketCommand');
   });
 
   it('healthCheck wraps S3 errors', async () => {

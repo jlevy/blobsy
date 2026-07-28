@@ -129,21 +129,28 @@ export class CommandBackend implements Backend {
     return this.config.bucket ? `${this.config.bucket}/${remoteKey}` : remoteKey;
   }
 
-  push(localPath: string, remoteKey: string): Promise<void> {
+  push(localPath: string, remoteKey: string, relativePath?: string): Promise<void> {
     if (!this.config.pushCommand) {
       throw new ValidationError('No push_command configured for command backend.');
     }
     const vars: CommandTemplateVars = {
       local: resolve(localPath),
       remote: this.remoteFor(remoteKey),
-      relative_path: '',
+      // Threaded from the coordinator so {relative_path} templates work as
+      // documented instead of expanding to '' (review finding BE-06).
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
     commandPush(this.config.pushCommand, vars);
     return Promise.resolve();
   }
 
-  async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
+  async pull(
+    remoteKey: string,
+    localPath: string,
+    expectedHash?: string,
+    relativePath?: string,
+  ): Promise<void> {
     if (!this.config.pullCommand) {
       throw new ValidationError('No pull_command configured for command backend.');
     }
@@ -155,7 +162,7 @@ export class CommandBackend implements Backend {
     const vars: CommandTemplateVars = {
       local: resolve(tempPath),
       remote: this.remoteFor(remoteKey),
-      relative_path: '',
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
     try {
@@ -180,14 +187,14 @@ export class CommandBackend implements Backend {
     }
   }
 
-  exists(remoteKey: string): Promise<boolean> {
+  exists(remoteKey: string, relativePath?: string): Promise<boolean> {
     if (!this.config.existsCommand) {
       return Promise.resolve(false);
     }
     const vars: CommandTemplateVars = {
       local: '',
       remote: this.remoteFor(remoteKey),
-      relative_path: '',
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
     return Promise.resolve(commandBlobExists(this.config.existsCommand, vars));
@@ -203,14 +210,30 @@ export class CommandBackend implements Backend {
     if (!this.config.pushCommand && !this.config.pullCommand) {
       throw new ValidationError('Command backend has no push or pull commands configured.');
     }
-    // Verify the command binary exists in PATH
+    // Verify the command binary exists in PATH. Probe the EXPANDED argv[0]
+    // — a raw `$TOOL`-style template would probe the literal string — and
+    // use a platform-aware lookup (review finding BE-09).
     const command = this.config.pushCommand ?? this.config.pullCommand!;
-    const binary = command.split(/\s+/)[0];
+    let binary: string | undefined;
+    try {
+      const argv = parseAndExpandCommand(command, {
+        local: '',
+        remote: '',
+        relative_path: '',
+        bucket: this.config.bucket ?? '',
+      });
+      binary = argv[0];
+    } catch {
+      // Template expansion may fail on undefined env vars during a health
+      // check; fall back to the raw first token.
+      binary = command.split(/\s+/).find(Boolean);
+    }
     if (!binary) {
       throw new ValidationError('Command template is empty.');
     }
+    const lookup = process.platform === 'win32' ? 'where' : 'which';
     try {
-      execFileSync('which', [binary], { stdio: 'pipe' });
+      execFileSync(lookup, [binary], { stdio: 'pipe' });
     } catch {
       throw new BlobsyError(
         `Command not found: ${binary}. Ensure it is installed and in your PATH.`,

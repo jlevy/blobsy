@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
-import { localPush, localPull, localBlobExists, localHealthCheck } from '../src/backend-local.js';
+import {
+  LocalBackend,
+  localPush,
+  localPull,
+  localBlobExists,
+  localHealthCheck,
+} from '../src/backend-local.js';
 import { computeHash } from '../src/hash.js';
 
 describe('local backend', () => {
@@ -107,6 +113,24 @@ describe('local backend', () => {
 
     it('throws for non-existent directory', async () => {
       await expect(localHealthCheck(join(tmpDir, 'nonexistent'))).rejects.toThrow('not found');
+    });
+  });
+
+  describe('remote_key containment (BE-03, Bugbot r6)', () => {
+    it('rejects keys that escape the backend directory', async () => {
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('../../outside.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('../outside.bin')).rejects.toThrow(/escapes the backend/);
+    });
+
+    it('rejects empty and "." keys that resolve to the store root', async () => {
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.exists('.')).rejects.toThrow(/escapes the backend/);
+      const srcPath = join(tmpDir, 'src.bin');
+      await writeFile(srcPath, 'x');
+      await expect(backend.push(srcPath, '')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('.')).rejects.toThrow(/escapes the backend/);
     });
   });
 });

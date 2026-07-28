@@ -314,8 +314,8 @@ export async function pushFile(
       uploadPath = tempCompressedPath;
     }
 
-    // Upload
-    await backend.push(uploadPath, remoteKey);
+    // Upload (repoPath threaded for {relative_path} templates — BE-06)
+    await backend.push(uploadPath, remoteKey, repoPath);
 
     return {
       path: repoPath,
@@ -375,7 +375,7 @@ export async function pullFile(
       const tmpDecompressed = `${localPath}.blobsy-pull-${tmpSuffix}`;
 
       try {
-        await backend.pull(ref.remote_key, tmpCompressed);
+        await backend.pull(ref.remote_key, tmpCompressed, undefined, repoPath);
         await decompressFile(tmpCompressed, tmpDecompressed, ref.compressed);
 
         // Verify hash of decompressed content
@@ -402,7 +402,7 @@ export async function pullFile(
       }
     } else {
       // Download directly with hash verification
-      await backend.pull(ref.remote_key, localPath, ref.hash);
+      await backend.pull(ref.remote_key, localPath, ref.hash, repoPath);
     }
 
     return {
@@ -426,9 +426,10 @@ export async function blobExists(
   remoteKey: string,
   config: BlobsyConfig,
   repoRoot: string,
+  relativePath?: string,
 ): Promise<boolean> {
   const backend = getBackend(config, repoRoot);
-  return backend.exists(remoteKey);
+  return backend.exists(remoteKey, relativePath);
 }
 
 /** Run a health check on the configured backend. */

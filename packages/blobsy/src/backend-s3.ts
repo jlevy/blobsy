@@ -15,8 +15,8 @@ import { pipeline } from 'node:stream/promises';
 
 import {
   S3Client,
-  PutObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
@@ -178,8 +178,16 @@ export class BuiltinS3Backend implements Backend {
       );
       return true;
     } catch (err) {
-      const name = (err as { name?: string }).name;
-      if (name === 'NotFound' || name === 'NoSuchKey') {
+      // Not-found comes in several shapes across SDK versions and S3
+      // implementations: error name, NoSuchBucket, or a bare 404 status
+      // (review finding BE-09).
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (
+        e.name === 'NotFound' ||
+        e.name === 'NoSuchKey' ||
+        e.name === 'NoSuchBucket' ||
+        e.$metadata?.httpStatusCode === 404
+      ) {
         return false;
       }
       throw this.wrapError(err, `check existence of s3://${this.bucket}/${key}`);
@@ -187,21 +195,11 @@ export class BuiltinS3Backend implements Backend {
   }
 
   async healthCheck(): Promise<void> {
-    const healthKey = this.fullKey(`.blobsy-health-check-${randomBytes(4).toString('hex')}`);
+    // HeadBucket only: a put+delete probe fails for read-only credentials
+    // (common for pull-only CI) and a failed delete strands probe objects
+    // (review finding BE-07).
     try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: healthKey,
-          Body: 'health-check',
-        }),
-      );
-      await this.client.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: healthKey,
-        }),
-      );
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch (err) {
       throw this.wrapError(err, `health check on s3://${this.bucket}`);
     }

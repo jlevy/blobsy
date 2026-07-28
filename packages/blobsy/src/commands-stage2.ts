@@ -1870,7 +1870,7 @@ export async function handlePrePushCheck(
       continue;
     }
 
-    const exists = await blobExists(ref.remote_key, config, repoRoot);
+    const exists = await blobExists(ref.remote_key, config, repoRoot, relPath);
     if (!exists) {
       missing.push(relPath);
     }

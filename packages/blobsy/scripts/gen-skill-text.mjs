@@ -25,7 +25,7 @@ const generated = `/**
  * installs into .claude/skills/blobsy/SKILL.md.
  */
 
-export const SKILL_TEXT: string = ${JSON.stringify(skillMd)};
+export const SKILL_TEXT = ${JSON.stringify(skillMd)};
 `;
 
 writeFileSync(join(pkgRoot, 'src', 'skill-text.ts'), generated);

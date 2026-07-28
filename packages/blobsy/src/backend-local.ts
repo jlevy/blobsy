@@ -34,9 +34,12 @@ export class LocalBackend implements Backend {
   private resolveKey(remoteKey: string): string {
     const root = resolve(this.remoteDir);
     const resolved = resolve(root, remoteKey);
-    if (resolved !== root && !resolved.startsWith(root + sep)) {
+    // Strictly inside the root: an empty or "." key resolves to the store
+    // root itself, and push/pull/delete on the root corrupts or exposes the
+    // backend layout (Bugbot r6).
+    if (!resolved.startsWith(root + sep)) {
       throw new BlobsyError(
-        `Invalid remote_key escapes the backend directory: ${remoteKey}`,
+        `Invalid remote_key escapes the backend directory: ${JSON.stringify(remoteKey)}`,
         'validation',
         1,
         ['The .bref file may be corrupted or malicious. Inspect it before retrying.'],
@@ -49,9 +52,19 @@ export class LocalBackend implements Backend {
     const destPath = this.resolveKey(remoteKey);
     await ensureDir(dirname(destPath));
 
+    // Copy to a temp name, then rename: a direct copyFile interrupted
+    // mid-write leaves a partial blob under the final key that later reads
+    // treat as the real object (review finding BE-09).
+    const tmpPath = `${destPath}.blobsy-push-${randomBytes(8).toString('hex')}`;
     try {
-      await copyFile(localPath, destPath);
+      await copyFile(localPath, tmpPath);
+      await rename(tmpPath, destPath);
     } catch (err: unknown) {
+      try {
+        await unlink(tmpPath);
+      } catch {
+        // Temp file may not exist if the copy failed early.
+      }
       const error = err as NodeJS.ErrnoException;
 
       if (error.code === 'ENOENT') {
@@ -138,13 +151,14 @@ export class LocalBackend implements Backend {
     }
   }
 
-  exists(remoteKey: string): Promise<boolean> {
-    // Propagate resolveKey validation errors instead of reporting "blob
-    // absent": push/pull/delete reject the same traversal key loudly, and
-    // a status check must surface the malformed .bref, not hide it
-    // (Bugbot r5).
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async exists(remoteKey: string): Promise<boolean> {
+    // Propagate resolveKey validation errors (as a rejection, not a sync
+    // throw) instead of reporting "blob absent": push/pull/delete reject
+    // the same traversal key loudly, and a status check must surface the
+    // malformed .bref, not hide it (Bugbot r5).
     const blobPath = this.resolveKey(remoteKey);
-    return Promise.resolve(existsSync(blobPath));
+    return existsSync(blobPath);
   }
 
   async delete(remoteKey: string): Promise<void> {

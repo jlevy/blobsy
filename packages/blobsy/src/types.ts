@@ -271,9 +271,16 @@ export interface ParsedBackendUrl {
  */
 export interface Backend {
   readonly type: BackendType;
-  push(localPath: string, remoteKey: string): Promise<void>;
-  pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void>;
-  exists(remoteKey: string): Promise<boolean>;
+  /** relativePath is the repo-relative file path, for command backends'
+   * {relative_path} template variable (review finding BE-06). */
+  push(localPath: string, remoteKey: string, relativePath?: string): Promise<void>;
+  pull(
+    remoteKey: string,
+    localPath: string,
+    expectedHash?: string,
+    relativePath?: string,
+  ): Promise<void>;
+  exists(remoteKey: string, relativePath?: string): Promise<boolean>;
   delete(remoteKey: string): Promise<void>;
   healthCheck(): Promise<void>;
 }
