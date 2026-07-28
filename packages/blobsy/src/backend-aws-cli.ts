@@ -21,6 +21,7 @@ import { BlobsyError } from './types.js';
 import { categorizeCommandError } from './backend-command.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
+import { normalizePrefix } from './backend-url.js';
 
 import type { S3BackendConfig } from './backend-s3.js';
 
@@ -32,7 +33,7 @@ export class AwsCliBackend implements Backend {
 
   constructor(config: S3BackendConfig) {
     this.bucket = config.bucket;
-    this.prefix = config.prefix ?? '';
+    this.prefix = normalizePrefix(config.prefix);
 
     this.extraArgs = [];
     if (config.endpoint) {

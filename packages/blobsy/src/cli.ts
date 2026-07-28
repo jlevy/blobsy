@@ -83,7 +83,14 @@ import {
   resolveTrackedFiles,
   computeFileStates,
 } from './commands-stage2.js';
-import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
+import {
+  createCacheEntry,
+  deleteCacheEntry,
+  getStatCacheDir,
+  writeCacheEntry,
+} from './stat-cache.js';
+import { createBackend, resolveBackend } from './transfer.js';
+import { parse as parseYamlDoc, stringify as stringifyYamlDoc } from 'yaml';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
 import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
@@ -221,14 +228,12 @@ function createProgram(): Command {
     .command('status')
     .description('Show sync state of tracked files')
     .argument('[path...]', 'Files or directories (default: all tracked)')
-    .option('--json', 'Structured JSON output')
     .action(wrapAction(handleStatus));
 
   program
     .command('verify')
     .description('Verify local files match their .bref hashes')
     .argument('[path...]', 'Files or directories (default: all tracked)')
-    .option('--json', 'Structured JSON output')
     .action(wrapAction(handleVerify));
 
   program
@@ -250,8 +255,6 @@ function createProgram(): Command {
     .command('doctor')
     .description('Run diagnostics and optionally auto-fix issues')
     .option('--fix', 'Attempt to automatically fix detected issues')
-    .option('--json', 'Structured JSON output')
-    .option('--verbose', 'Show detailed diagnostic logs')
     .action(wrapAction(handleDoctor));
 
   program
@@ -591,7 +594,16 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     if (!existsSync(configPath)) {
       actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
     }
-    actions.push('install pre-commit hook');
+    // Mirror the real path's hook opt-outs (--no-hooks, BLOBSY_NO_HOOKS,
+    // hook managers) so the plan matches what would run (Bugbot r8).
+    const hooksPlanned =
+      opts.hooks !== false &&
+      !hooksDisabledByEnv() &&
+      !existsSync(join(repoRoot, 'lefthook.yml')) &&
+      !existsSync(join(repoRoot, '.husky'));
+    if (hooksPlanned) {
+      actions.push('install pre-commit hook');
+    }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
     } else {
@@ -1075,7 +1087,7 @@ async function handleStatus(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const repoRoot = findRepoRoot();
 
   const files = resolveTrackedFiles(paths, repoRoot);
@@ -1130,7 +1142,7 @@ async function handleVerify(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const repoRoot = findRepoRoot();
 
   const files = resolveTrackedFiles(paths, repoRoot);
@@ -1281,18 +1293,13 @@ async function untrackFile(
     return;
   }
 
-  // Move .bref to trash
-  const trashDir = join(repoRoot, '.blobsy', 'trash');
-  await ensureDir(trashDir);
-  const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
-  await rename(refPath, trashPath);
+  await moveBrefToTrash(repoRoot, refPath);
 
   // Remove from gitignore
   await removeGitignoreEntry(fileDir, fileName);
 
   // Clean stat cache
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
 
   // Stage the modified .gitignore
@@ -1425,11 +1432,7 @@ async function rmFile(
     return;
   }
 
-  // Move .bref to trash
-  const trashDir = join(repoRoot, '.blobsy', 'trash');
-  await ensureDir(trashDir);
-  const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
-  await rename(refPath, trashPath);
+  const trashPath = await moveBrefToTrash(repoRoot, refPath);
 
   // Delete from backend if --remote --force (handleRm refuses --remote
   // without --force before any local mutation; see the DS-04 rationale
@@ -1441,7 +1444,6 @@ async function rmFile(
     if (bref.remote_key) {
       try {
         const config = await resolveConfig(repoRoot, repoRoot);
-        const { createBackend, resolveBackend } = await import('./transfer.js');
         if (!config.backends) {
           throw new ValidationError('No backend configured');
         }
@@ -1479,7 +1481,6 @@ async function rmFile(
 
   // Clean stat cache
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
 
   // Stage the modified .gitignore
@@ -1556,11 +1557,11 @@ async function handleMvDirectory(
   }
 
   if (globalOpts.dryRun) {
-    const actions = brefFiles.map((rel) => {
-      const filePath = rel.replace(/\.bref$/, '');
-      const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+    // findBrefFiles returns payload-relative paths (no .bref suffix) — L-04.
+    const actions = brefFiles.map((relPath) => {
+      const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), relPath);
       const destPath = join(toRepoRelative(destDir, repoRoot), relFromSrc);
-      return `move ${filePath} -> ${destPath}`;
+      return `move ${relPath} -> ${destPath}`;
     });
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
@@ -1572,10 +1573,9 @@ async function handleMvDirectory(
     return;
   }
 
-  for (const relBref of brefFiles) {
-    const filePath = relBref.replace(/\.bref$/, '');
-    const srcFileAbs = join(repoRoot, filePath);
-    const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+  for (const relPath of brefFiles) {
+    const srcFileAbs = join(repoRoot, relPath);
+    const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), relPath);
     const destFileAbs = join(destDir, relFromSrc);
 
     await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts, force);
@@ -1649,7 +1649,6 @@ async function mvSingleFile(
   await addGitignoreEntry(dirname(destAbs), basename(destAbs));
 
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, srcRel);
   if (existsSync(destAbs)) {
     const entry = await createCacheEntry(destAbs, destRel, ref.hash);
@@ -1816,7 +1815,7 @@ async function handleConfig(
       return;
     }
 
-    const { parse: parseYaml } = await import('yaml');
+    const parseYaml = parseYamlDoc;
     const content = await readFile(configPath, 'utf-8');
     const config = (parseYaml(content) as Record<string, unknown>) ?? {};
 
@@ -1870,7 +1869,7 @@ async function handleConfig(
     const content = await readFile(configPath, 'utf-8');
     if (globalOpts.json) {
       if (useGlobal) {
-        const { parse: parseYaml } = await import('yaml');
+        const parseYaml = parseYamlDoc;
         const config = parseYaml(content) as Record<string, unknown>;
         console.log(formatJson({ config }));
       } else if (repoRoot) {
@@ -1890,7 +1889,7 @@ async function handleConfig(
       if (!existsSync(configPath)) {
         val = undefined;
       } else {
-        const { parse: parseYaml } = await import('yaml');
+        const parseYaml = parseYamlDoc;
         const content = await readFile(configPath, 'utf-8');
         const config = parseYaml(content) as Record<string, unknown>;
         val = getNestedValue(config, key);
@@ -1906,7 +1905,7 @@ async function handleConfig(
       if (val === undefined) {
         console.log(`(not set)`);
       } else if (typeof val === 'object') {
-        const { stringify } = await import('yaml');
+        const stringify = stringifyYamlDoc;
         console.log(stringify(val).trimEnd());
       } else {
         console.log(`${val as string | number | boolean}`);
@@ -1934,7 +1933,7 @@ async function handleConfig(
     return;
   }
 
-  const { parse: parseYaml } = await import('yaml');
+  const parseYaml = parseYamlDoc;
   const content = await readFile(configPath, 'utf-8');
   const config = (parseYaml(content) as Record<string, unknown>) ?? {};
   setNestedValue(config, key, value);
@@ -2004,6 +2003,28 @@ function getNestedValue(obj: object, path: string): unknown {
   return current;
 }
 
+/**
+ * Move a `.bref` to `.blobsy/trash/`, preserving its repo-relative path
+ * (the design's path-preserving layout — review finding L-01). A numeric
+ * suffix avoids overwriting when the same path is trashed repeatedly.
+ */
+async function moveBrefToTrash(repoRoot: string, refPath: string): Promise<string> {
+  const rel = toRepoRelative(refPath, repoRoot);
+  const trashRoot = join(repoRoot, '.blobsy', 'trash');
+  let trashPath = join(trashRoot, rel);
+  await ensureDir(dirname(trashPath));
+  for (let n = 1; existsSync(trashPath); n++) {
+    trashPath = join(trashRoot, `${rel}.${n}`);
+  }
+  await rename(refPath, trashPath);
+  return trashPath;
+}
+
+/**
+ * Coerce a `blobsy config` value string to boolean/number where unambiguous.
+ * Only plain decimal numbers coerce — `Number()` also accepted hex and
+ * `Infinity` (review finding L-03).
+ */
 function coerceConfigValue(value: string): string | number | boolean {
   if (value === 'true') {
     return true;
@@ -2011,9 +2032,8 @@ function coerceConfigValue(value: string): string | number | boolean {
   if (value === 'false') {
     return false;
   }
-  const num = Number(value);
-  if (!Number.isNaN(num) && value.trim().length > 0) {
-    return num;
+  if (/^-?\d+(\.\d+)?$/.test(value.trim()) && value.trim().length > 0) {
+    return Number(value);
   }
   return value;
 }

@@ -5,8 +5,6 @@
  * Only applies to directory tracking -- explicit file tracking always externalizes.
  */
 
-import picomatch from 'picomatch';
-
 import type { ExternalizeConfig } from './types.js';
 import { parseSize } from './config.js';
 import { matchesGlobList } from './glob-match.js';
@@ -32,29 +30,4 @@ export function shouldExternalize(
   }
   const minSize = parseSize(config.min_size);
   return fileSize >= minSize;
-}
-
-/**
- * Filter a list of files, marking each as externalize or not.
- * Respects ignore patterns to skip files entirely.
- */
-export function filterFilesForExternalization(
-  files: { path: string; size: number }[],
-  config: ExternalizeConfig,
-  ignorePatterns: string[],
-): { path: string; size: number; externalize: boolean }[] {
-  const ignoreMatcher = ignorePatterns.length > 0 ? picomatch(ignorePatterns) : null;
-
-  return files
-    .filter((f) => {
-      if (ignoreMatcher) {
-        const filename = f.path.split('/').pop() ?? f.path;
-        return !ignoreMatcher(filename) && !ignoreMatcher(f.path);
-      }
-      return true;
-    })
-    .map((f) => ({
-      ...f,
-      externalize: shouldExternalize(f.path, f.size, config),
-    }));
 }

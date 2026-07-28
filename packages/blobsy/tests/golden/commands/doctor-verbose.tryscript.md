@@ -38,7 +38,7 @@ $ BLOBSY_HOME=/tmp/test-no-global-config blobsy doctor --verbose
 === INTEGRITY ===
 
 === BACKEND ===
-  ✓  Backend reachable and writable
+  ✓  Backend reachable
 
 No issues found.
 ? 0

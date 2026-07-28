@@ -28,6 +28,12 @@ export interface TemplateVars {
  * Sanitize a string for safe use as an S3 key component.
  * Replaces characters that are problematic in S3/GCS/R2 keys
  * while preserving forward slashes for path structure.
+ *
+ * Known collision (review finding L-09): leading dots are stripped per
+ * segment, so `.hidden.csv` and `hidden.csv` map to the same remote key.
+ * Acceptable because keys are content-addressed under a hash directory —
+ * two different payloads never share a full key — but flat custom
+ * key_templates without `{content_sha256_short}` could collide.
  */
 export function sanitizeKeyComponent(value: string): string {
   return (

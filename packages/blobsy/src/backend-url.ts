@@ -33,6 +33,18 @@ const SCHEME_EXAMPLES = [
 ];
 
 /** Parse a backend URL into structured config. */
+/**
+ * Normalize a key prefix to end with exactly one `/` (empty stays empty).
+ * Backend constructors call this so prefix/key concatenation never depends
+ * on an undocumented invariant of URL parsing (review finding L-12).
+ */
+export function normalizePrefix(prefix: string | undefined): string {
+  if (!prefix) {
+    return '';
+  }
+  return prefix.endsWith('/') ? prefix : `${prefix}/`;
+}
+
 export function parseBackendUrl(url: string): ParsedBackendUrl {
   if (!url || url.trim().length === 0) {
     throw new ValidationError('Backend URL is required.', [

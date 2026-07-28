@@ -95,6 +95,11 @@ export function getGlobalOpts(cmd: Command): GlobalOptions {
   };
 }
 
+/**
+ * Expand user-supplied paths (files, directories, or none = whole repo)
+ * into the tracked files they cover, as repo-relative + absolute + .bref
+ * path triples.
+ */
 export function resolveTrackedFiles(
   paths: string[],
   repoRoot: string,
@@ -183,6 +188,10 @@ async function getFileState(
   return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed', size: ref.size };
 }
 
+/**
+ * Compute the sync-state symbol/details for each tracked file (synced,
+ * modified, new, missing, corrupt .bref) as shown by status and doctor.
+ */
 export async function computeFileStates(
   files: { absPath: string; refPath: string; relPath: string }[],
 ): Promise<FileStateResult[]> {
@@ -194,6 +203,11 @@ export async function computeFileStates(
   return results;
 }
 
+/**
+ * `blobsy push` — upload tracked blobs to the configured backend.
+ * Refuses modified-since-track content without --force (DS-03); dry-run
+ * mirrors the real plan including refusals and exit codes (CLI-02).
+ */
 export async function handlePush(
   paths: string[],
   opts: Record<string, unknown>,
@@ -367,6 +381,10 @@ export async function handlePush(
   }
 }
 
+/**
+ * `blobsy pull` — download blobs for tracked files. Refuses to overwrite
+ * locally modified files without --force; dry-run mirrors the plan.
+ */
 export async function handlePull(
   paths: string[],
   opts: Record<string, unknown>,
@@ -571,6 +589,11 @@ const SYNC_MISSING_LOCAL_HELP =
   'local file missing and never pushed (no remote copy to pull); ' +
   'restore the file or run `blobsy untrack` to stop tracking it';
 
+/**
+ * `blobsy sync` — bidirectional: push unpushed, pull missing/outdated.
+ * Conflicts and tracking ambiguity exit 2 (CONFLICT_EXIT_CODE); transfer
+ * errors exit 1.
+ */
 export async function handleSync(
   paths: string[],
   opts: Record<string, unknown>,
@@ -816,9 +839,9 @@ export async function handleHealth(_opts: Record<string, unknown>, cmd: Command)
   try {
     await runHealthCheck(config, repoRoot);
     if (globalOpts.json) {
-      console.log(formatJson({ status: 'ok', message: 'Backend is reachable and writable.' }));
+      console.log(formatJson({ status: 'ok', message: 'Backend is reachable.' }));
     } else {
-      console.log(c.success('Backend is reachable and writable.'));
+      console.log(c.success('Backend is reachable.'));
     }
   } catch (err) {
     if (globalOpts.json) {
@@ -832,7 +855,7 @@ export async function handleHealth(_opts: Record<string, unknown>, cmd: Command)
 
 export async function handleDoctor(opts: Record<string, unknown>, cmd: Command): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const fix = Boolean(opts.fix);
   const verbose = globalOpts.verbose;
   const repoRoot = findRepoRoot();
@@ -1299,7 +1322,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
         backendIssues.push({
           type: 'backend',
           severity: 'info',
-          message: 'Backend reachable and writable',
+          message: 'Backend reachable',
           fixed: false,
           fixable: false,
         });

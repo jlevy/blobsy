@@ -21,7 +21,7 @@ import { BlobsyError } from './types.js';
 import { categorizeCommandError } from './backend-command.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
-import { parseBackendUrl } from './backend-url.js';
+import { normalizePrefix, parseBackendUrl } from './backend-url.js';
 
 export interface RcloneBackendConfig {
   type: BackendType;
@@ -48,7 +48,7 @@ export function buildRcloneConfig(config: ResolvedBackendConfig): RcloneBackendC
 
   const parsed = config.url ? parseBackendUrl(config.url) : undefined;
   const bucket = config.bucket ?? parsed?.bucket ?? '';
-  const prefix = config.prefix ?? parsed?.prefix ?? '';
+  const prefix = normalizePrefix(config.prefix ?? parsed?.prefix);
 
   return { type: config.type, remote, bucket, prefix };
 }

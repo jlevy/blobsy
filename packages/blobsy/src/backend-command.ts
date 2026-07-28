@@ -116,6 +116,7 @@ function validateExpandedToken(token: string, context: string): void {
 }
 
 export class CommandBackend implements Backend {
+  private static warnedNoExistsCommand = false;
   readonly type = 'command' as const;
   private readonly config: CommandBackendConfig;
 
@@ -189,6 +190,15 @@ export class CommandBackend implements Backend {
 
   exists(remoteKey: string, relativePath?: string): Promise<boolean> {
     if (!this.config.existsCommand) {
+      // Without exists_command every blob looks absent, so pushes always
+      // re-upload — say why once instead of silently degrading (L-13).
+      if (!CommandBackend.warnedNoExistsCommand) {
+        CommandBackend.warnedNoExistsCommand = true;
+        console.warn(
+          'Note: command backend has no exists_command configured; remote blobs ' +
+            'are assumed absent and pushes always re-upload.',
+        );
+      }
       return Promise.resolve(false);
     }
     const vars: CommandTemplateVars = {

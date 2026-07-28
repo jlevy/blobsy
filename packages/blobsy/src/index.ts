@@ -48,5 +48,5 @@ export {
   getCacheEntryPath,
 } from './paths.js';
 export { addGitignoreEntry, removeGitignoreEntry, readBlobsyBlock } from './gitignore.js';
-export { shouldExternalize, filterFilesForExternalization } from './externalize.js';
+export { shouldExternalize } from './externalize.js';
 export { formatSize, formatJson, formatJsonMessage, formatJsonError } from './format.js';

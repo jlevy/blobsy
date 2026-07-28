@@ -152,6 +152,11 @@ export function findBrefFiles(dir: string, repoRoot: string): string[] {
  * Find all non-bref, non-hidden files in a directory for tracking.
  * Returns absolute paths. Applies ignore patterns to skip directories and files.
  * Optional onSymlink callback is invoked with the path of each skipped symlink.
+ *
+ * Dotfiles (and dot-directories) are skipped by design (review finding
+ * L-10): hidden files are overwhelmingly config/state (.git, .env, .DS_Store)
+ * that must not be externalized to a blob store. Track one explicitly by
+ * naming it: `blobsy track .hidden.bin`.
  */
 export function findTrackableFiles(
   dir: string,

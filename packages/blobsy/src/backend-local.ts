@@ -197,37 +197,3 @@ export class LocalBackend implements Backend {
     }
   }
 }
-
-/**
- * Standalone helper functions used by tests.
- * New code should use LocalBackend class directly.
- */
-
-export async function localPush(
-  localPath: string,
-  remoteDir: string,
-  remoteKey: string,
-): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.push(localPath, remoteKey);
-}
-
-export async function localPull(
-  remoteDir: string,
-  remoteKey: string,
-  localPath: string,
-  expectedHash?: string,
-): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.pull(remoteKey, localPath, expectedHash);
-}
-
-export function localBlobExists(remoteDir: string, remoteKey: string): boolean {
-  const blobPath = join(remoteDir, remoteKey);
-  return existsSync(blobPath);
-}
-
-export async function localHealthCheck(remoteDir: string): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.healthCheck();
-}

@@ -117,9 +117,10 @@ $ rm -f .blobsy.yml
 ```console
 $ blobsy setup --auto --dry-run local:../remote
 Would create .blobsy.yml
-Would install pre-commit hook
 ? 0
 ```
+
+# Dry-run honors hook opt-outs (BLOBSY_NO_HOOKS is set for this suite), matching the real run
 
 ```console
 $ test -f .blobsy.yml && echo "exists" || echo "not created"

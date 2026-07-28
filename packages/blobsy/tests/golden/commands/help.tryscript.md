@@ -40,8 +40,8 @@ Commands:
   pull [options] [path...]        Download blobs from the configured backend
   sync [options] [path...]        Bidirectional sync: push unpushed + pull
                                   missing
-  status [options] [path...]      Show sync state of tracked files
-  verify [options] [path...]      Verify local files match their .bref hashes
+  status [path...]                Show sync state of tracked files
+  verify [path...]                Verify local files match their .bref hashes
   config [options] [key] [value]  Show, get, or set .blobsy.yml values
   health                          Test backend connectivity and permissions
   doctor [options]                Run diagnostics and optionally auto-fix issues
@@ -164,7 +164,6 @@ Arguments:
   path            Files or directories (default: all tracked)
 
 Options:
-  --json          Structured JSON output
   -h, --help      Display help for command
 
 Global Options:
@@ -216,7 +215,6 @@ Arguments:
   path            Files or directories (default: all tracked)
 
 Options:
-  --json          Structured JSON output
   -h, --help      Display help for command
 
 Global Options:
@@ -270,8 +268,6 @@ Run diagnostics and optionally auto-fix issues
 
 Options:
   --fix           Attempt to automatically fix detected issues
-  --json          Structured JSON output
-  --verbose       Show detailed diagnostic logs
   -h, --help      Display help for command
 
 Global Options:

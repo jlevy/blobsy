@@ -27,6 +27,7 @@ import type { Backend, ErrorCategory } from './types.js';
 import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
+import { normalizePrefix } from './backend-url.js';
 
 /** Multipart part size. 8 MiB parts allow objects up to ~78 GiB (10k parts). */
 const UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
@@ -49,7 +50,9 @@ export class BuiltinS3Backend implements Backend {
 
   constructor(config: S3BackendConfig) {
     this.bucket = config.bucket;
-    this.prefix = config.prefix ?? '';
+    // Normalize here instead of relying on parseBackendUrl's undocumented
+    // trailing-slash invariant (review finding L-12).
+    this.prefix = normalizePrefix(config.prefix);
 
     const clientConfig: S3ClientConfig = {};
     if (config.region) {

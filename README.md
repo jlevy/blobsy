@@ -11,6 +11,8 @@ No hosting requirements.
 
 ## Quick Start
 
+Requires [Node.js](https://nodejs.org/) >= 22.15.
+
 ```bash
 # Install
 npm install -g blobsy
@@ -119,6 +121,7 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `--quiet` | Suppress all output except errors |
 | `--verbose` | Detailed progress output |
 | `--dry-run` | Show what would happen without doing it |
+| `--color <when>` | Color output: `always`, `never`, `auto` |
 
 ## Backend Configuration
 
