@@ -61,6 +61,20 @@ export function detectBlobsyPath(): string {
 }
 
 /**
+ * True when installHook would write this hook: no hook file exists yet, or
+ * the existing file carries the blobsy managed marker. Lets dry-run report
+ * exactly what the real installer would do.
+ */
+export async function wouldInstallHook(repoRoot: string, hook: HookType): Promise<boolean> {
+  const hookPath = join(gitHooksDir(repoRoot), hook.name);
+  if (!existsSync(hookPath)) {
+    return true;
+  }
+  const existing = await readFile(hookPath, 'utf-8');
+  return existing.includes(HOOK_MANAGED_MARKER);
+}
+
+/**
  * Install a single git hook.
  *
  * Returns false (without touching the file) when a hook exists that blobsy
@@ -74,11 +88,8 @@ export async function installHook(repoRoot: string, hook: HookType): Promise<boo
   const blobsyPath = detectBlobsyPath();
   const hookPath = join(hookDir, hook.name);
 
-  if (existsSync(hookPath)) {
-    const existing = await readFile(hookPath, 'utf-8');
-    if (!existing.includes(HOOK_MANAGED_MARKER)) {
-      return false;
-    }
+  if (!(await wouldInstallHook(repoRoot, hook))) {
+    return false;
   }
 
   const hookContent = `#!/bin/sh

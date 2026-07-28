@@ -94,7 +94,7 @@ import { parse as parseYamlDoc, stringify as stringifyYamlDoc } from 'yaml';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
 import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
-import { HOOK_TYPES, hooksDisabledByEnv, installHook } from './hooks.js';
+import { HOOK_TYPES, hooksDisabledByEnv, installHook, wouldInstallHook } from './hooks.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -610,15 +610,26 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
       actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
     }
     // Mirror the real path's hook opt-outs (--no-hooks, BLOBSY_NO_HOOKS,
-    // hook managers) so the plan matches what would run (Bugbot r8).
-    const hooksPlanned =
+    // hook managers) and per-hook ownership checks — the installer skips
+    // existing hooks it doesn't manage — so the plan matches what would
+    // actually run (Bugbot r8/r11).
+    const hooksEnabled =
       opts.hooks !== false &&
       !hooksDisabledByEnv() &&
       !existsSync(join(repoRoot, 'lefthook.yml')) &&
       !existsSync(join(repoRoot, '.husky'));
-    if (hooksPlanned) {
-      // Both hooks, matching the real run (Bugbot r10).
-      actions.push('install pre-commit and pre-push hooks');
+    if (hooksEnabled) {
+      const plannedHooks: string[] = [];
+      for (const hook of HOOK_TYPES) {
+        if (await wouldInstallHook(repoRoot, hook)) {
+          plannedHooks.push(hook.name);
+        }
+      }
+      if (plannedHooks.length > 0) {
+        actions.push(
+          `install ${plannedHooks.join(' and ')} hook${plannedHooks.length > 1 ? 's' : ''}`,
+        );
+      }
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));

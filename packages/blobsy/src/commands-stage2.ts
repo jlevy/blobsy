@@ -1902,6 +1902,7 @@ export async function handlePrePushCheck(
 
   const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const missing: string[] = [];
+  const errors: { path: string; message: string }[] = [];
 
   for (const relPath of allBrefs) {
     const refPath = join(repoRoot, brefPath(relPath));
@@ -1912,27 +1913,46 @@ export async function handlePrePushCheck(
       continue;
     }
 
-    const exists = await blobExists(ref.remote_key, config, repoRoot, relPath);
+    // An invalid remote_key (or a backend failure) must be reported per-file,
+    // not crash the whole check — this runs as a pre-push hook.
+    let exists: boolean;
+    try {
+      exists = await blobExists(ref.remote_key, config, repoRoot, relPath);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ path: relPath, message });
+      continue;
+    }
     if (!exists) {
       missing.push(relPath);
     }
   }
 
+  const failures = missing.length + errors.length;
+
   if (globalOpts.json) {
-    console.log(formatJson({ missing, count: missing.length, ok: missing.length === 0 }));
+    console.log(formatJson({ missing, errors, count: failures, ok: failures === 0 }));
   } else {
-    if (missing.length === 0) {
+    if (failures === 0) {
       console.log(c.success('All refs have remote blobs. Safe to push.'));
     } else {
       for (const path of missing) {
         console.log(`  ${path}  missing remote blob`);
       }
-      console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
-      console.log('Run blobsy push first.');
+      for (const { path, message } of errors) {
+        console.log(`  ${path}  check failed: ${message}`);
+      }
+      if (missing.length > 0) {
+        console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
+        console.log('Run blobsy push first.');
+      }
+      if (errors.length > 0) {
+        console.log(`\n${formatCount(errors.length, 'file')} could not be checked.`);
+      }
     }
   }
 
-  if (missing.length > 0) {
+  if (failures > 0) {
     process.exitCode = 1;
   }
 }

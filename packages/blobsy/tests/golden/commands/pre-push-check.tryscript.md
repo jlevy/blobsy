@@ -48,3 +48,18 @@ $ blobsy pre-push-check
 All refs have remote blobs. Safe to push.
 ? 0
 ```
+
+# An invalid remote_key is reported per-file, not a crash
+
+```console
+$ sed -i.bak 's|^remote_key:.*|remote_key: ../escape|' data/model.bin.bref && rm data/model.bin.bref.bak
+? 0
+```
+
+```console
+$ blobsy pre-push-check
+  data/model.bin  check failed: Invalid remote_key escapes the backend directory: "../escape"
+
+1 file could not be checked.
+? 1
+```
