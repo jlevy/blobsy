@@ -45,7 +45,7 @@ blobsy doctor --json       # Health check (JSON)
 blobsy config [key] [val]  # Get/set config (supports --global, --show-origin, --unset)
 
 # Documentation
-blobsy readme              # Display README
+blobsy docs --readme       # Display README
 blobsy docs [topic]        # User guide (--list for topics, --brief for summary)
 ```
 

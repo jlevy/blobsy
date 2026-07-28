@@ -146,7 +146,7 @@ function createProgram(): Command {
     .action(wrapAction(handleSetup));
 
   program
-    .command('init')
+    .command('init', { hidden: true })
     .description('Initialize blobsy config (low-level; prefer setup --auto)')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
@@ -165,7 +165,7 @@ function createProgram(): Command {
     .action(wrapAction(handleAdd));
 
   program
-    .command('track')
+    .command('track', { hidden: true })
     .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option(
@@ -247,7 +247,7 @@ function createProgram(): Command {
     .action(wrapAction(handleConfig));
 
   program
-    .command('health')
+    .command('health', { hidden: true })
     .description('Test backend connectivity and permissions')
     .action(wrapAction(handleHealth));
 
@@ -264,12 +264,12 @@ function createProgram(): Command {
     .action(wrapAction(handleHooks));
 
   program
-    .command('check-unpushed')
+    .command('check-unpushed', { hidden: true })
     .description('List committed .bref files whose blobs are not yet pushed')
     .action(wrapAction(handleCheckUnpushed));
 
   program
-    .command('pre-push-check')
+    .command('pre-push-check', { hidden: true })
     .description('CI guard: fail if any .bref is missing its remote blob')
     .action(wrapAction(handlePrePushCheck));
 
@@ -280,7 +280,7 @@ function createProgram(): Command {
     .action(wrapAction(handleHook));
 
   program
-    .command('readme')
+    .command('readme', { hidden: true })
     .description('Display the blobsy README')
     .action(
       wrapAction(async (opts: Record<string, unknown>) => {
@@ -297,9 +297,24 @@ function createProgram(): Command {
     .argument('[topic]', 'Section to display (e.g. "compression", "backends")')
     .option('--list', 'List available sections')
     .option('--brief', 'Condensed version')
+    .option('--readme', 'Display the blobsy README')
+    .option('--skill', 'Output blobsy skill documentation (for AI agents)')
     .action(
       wrapAction(async (topic: string | undefined, opts: Record<string, unknown>) => {
         const interactive = isInteractive(opts);
+
+        // CLI-07: readme and skill fold into docs; the standalone commands
+        // remain as hidden aliases.
+        if (opts.readme) {
+          const readme = await loadBundledDoc('README.md');
+          const rendered = renderMarkdown(readme, interactive);
+          await paginateOutput(rendered, interactive);
+          return;
+        }
+        if (opts.skill) {
+          console.log(SKILL_TEXT);
+          return;
+        }
 
         if (opts.brief) {
           const brief = await loadBundledDoc('blobsy-docs-brief.md');
@@ -336,7 +351,7 @@ function createProgram(): Command {
     );
 
   program
-    .command('skill')
+    .command('skill', { hidden: true })
     .description('Output blobsy skill documentation (for AI agents)')
     .action(
       // eslint-disable-next-line @typescript-eslint/require-await

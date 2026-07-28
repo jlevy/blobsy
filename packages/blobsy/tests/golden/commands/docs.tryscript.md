@@ -68,3 +68,20 @@ $ blobsy docs | head -1
 # blobsy User Guide
 ? 0
 ```
+
+# docs --readme folds in the readme command (CLI-07)
+
+```console
+$ blobsy docs --readme | head -1
+# blobsy
+? 0
+```
+
+# docs --skill folds in the skill command (CLI-07)
+
+```console
+$ blobsy docs --skill | head -2
+---
+name: blobsy
+? 0
+```

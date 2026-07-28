@@ -94,9 +94,7 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | Command | Description |
 | --- | --- |
 | `blobsy setup --auto <url>` | Set up blobsy in a git repo (recommended) |
-| `blobsy init <url>` | Initialize blobsy config (low-level) |
-| `blobsy add <path...>` | Track files and stage changes to git (recommended) |
-| `blobsy track <path...>` | Track files without git staging (low-level) |
+| `blobsy add <path...>` | Track files and stage changes to git |
 | `blobsy untrack <path...>` | Stop tracking (keep local files) |
 | `blobsy push [path...]` | Upload local blobs to remote |
 | `blobsy pull [path...]` | Download remote blobs to local |
@@ -106,12 +104,14 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .bref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
 | `blobsy config [key] [val]` | Get or set configuration (supports `--global`, `--show-origin`, `--unset`) |
-| `blobsy health` | Check backend connectivity |
-| `blobsy doctor [--fix]` | Diagnostics and self-repair |
+| `blobsy doctor [--fix]` | Diagnostics and self-repair (includes backend health) |
 | `blobsy hooks <action>` | Install or uninstall git hooks (pre-commit, pre-push) |
-| `blobsy check-unpushed` | List committed .bref files missing remote blobs |
-| `blobsy pre-push-check` | CI guard: fail if any .bref lacks remote blob |
-| `blobsy skill` | Output skill documentation for AI agents |
+| `blobsy docs [topic]` | User documentation (`--readme`, `--skill`, `--list`) |
+
+Hidden plumbing (kept for scripts and compatibility, folded into the commands above):
+`init` (use `setup`), `track` (use `add`; tracks without staging), `health` (use
+`doctor`), `check-unpushed` / `pre-push-check` (exit-code contracts used by CI and
+hooks), `readme` / `skill` (use `docs --readme` / `docs --skill`).
 
 ### Global Options
 
