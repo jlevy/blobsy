@@ -224,6 +224,13 @@ export async function handlePush(
     let wouldBlock = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
+      // Missing payload with nothing pushed: the real run fails in
+      // pushFile — don't promise a push that cannot happen (Bugbot r5).
+      if (!ref.remote_key && !existsSync(file.absPath)) {
+        needsPush.push(`error ${file.relPath} (local file missing; nothing to push)`);
+        wouldBlock++;
+        continue;
+      }
       const modified = existsSync(file.absPath) && (await computeHash(file.absPath)) !== ref.hash;
       if (ref.remote_key && !opts.force) {
         if (modified) {
@@ -1670,9 +1677,11 @@ async function checkHooks(
       continue;
     }
 
-    // Hook exists — check content
+    // Hook exists — check ownership by the exact managed marker, matching
+    // install/uninstall (Bugbot r5): a user hook that merely CALLS blobsy
+    // is theirs, and doctor must not report it as blobsy-managed.
     const content = readFileSync(hookPath, 'utf-8');
-    if (!content.includes('blobsy hook')) {
+    if (!content.includes(HOOK_MANAGED_MARKER)) {
       issues.push({
         type: 'hooks',
         severity: 'warning',

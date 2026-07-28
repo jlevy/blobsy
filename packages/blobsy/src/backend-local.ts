@@ -139,12 +139,11 @@ export class LocalBackend implements Backend {
   }
 
   exists(remoteKey: string): Promise<boolean> {
-    let blobPath: string;
-    try {
-      blobPath = this.resolveKey(remoteKey);
-    } catch {
-      return Promise.resolve(false);
-    }
+    // Propagate resolveKey validation errors instead of reporting "blob
+    // absent": push/pull/delete reject the same traversal key loudly, and
+    // a status check must surface the malformed .bref, not hide it
+    // (Bugbot r5).
+    const blobPath = this.resolveKey(remoteKey);
     return Promise.resolve(existsSync(blobPath));
   }
 

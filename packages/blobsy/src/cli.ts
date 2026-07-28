@@ -9,7 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -193,6 +193,7 @@ function createProgram(): Command {
     .description('Rename or move tracked files or directories (updates .bref + .gitignore)')
     .argument('<source>', 'Source tracked file or directory')
     .argument('<dest>', 'Destination path')
+    .option('--force', 'Overwrite an existing destination file or tracking metadata')
     .action(wrapAction(handleMv));
 
   program
@@ -1525,8 +1526,10 @@ async function handleMv(
   const srcAbs = resolveRepoPath(stripBrefExtension(source), repoRoot);
   const destAbs = resolveRepoPath(stripBrefExtension(dest), repoRoot);
 
+  const force = Boolean(opts.force);
+
   if (isDirectory(srcAbs)) {
-    await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts);
+    await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts, force);
     return;
   }
 
@@ -1537,7 +1540,7 @@ async function handleMv(
     throw new ValidationError(`Not tracked: ${srcRel} (no .bref file found)`);
   }
 
-  await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts);
+  await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts, force);
 }
 
 async function handleMvDirectory(
@@ -1545,6 +1548,7 @@ async function handleMvDirectory(
   destDir: string,
   repoRoot: string,
   globalOpts: GlobalOptions,
+  force: boolean,
 ): Promise<void> {
   const brefFiles = findBrefFiles(srcDir, repoRoot);
   if (brefFiles.length === 0) {
@@ -1574,7 +1578,7 @@ async function handleMvDirectory(
     const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
     const destFileAbs = join(destDir, relFromSrc);
 
-    await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts);
+    await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts, force);
   }
 }
 
@@ -1583,6 +1587,7 @@ async function mvSingleFile(
   destAbs: string,
   repoRoot: string,
   globalOpts: GlobalOptions,
+  force: boolean,
 ): Promise<void> {
   const srcRel = toRepoRelative(srcAbs, repoRoot);
   const destRel = toRepoRelative(destAbs, repoRoot);
@@ -1590,20 +1595,50 @@ async function mvSingleFile(
   const srcRefPath = brefPath(srcAbs);
   const destRefPath = brefPath(destAbs);
 
+  // Refuse to clobber an existing destination (review finding CLI-04):
+  // overwriting dest.bref silently destroys that file's tracking metadata
+  // and leaves a dangling gitignore entry.
+  const destBlocked =
+    !force && (existsSync(destRefPath) || (existsSync(destAbs) && !isDirectory(destAbs)));
+
   if (globalOpts.dryRun) {
+    const action = destBlocked
+      ? `refuse ${srcRel} -> ${destRel} (destination exists; would need --force)`
+      : `move ${srcRel} -> ${destRel}`;
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([`move ${srcRel} -> ${destRel}`]));
+      console.log(formatJsonDryRun([action]));
     } else {
-      console.log(formatDryRun(`move ${srcRel} -> ${destRel}`));
+      console.log(formatDryRun(action));
+    }
+    if (destBlocked) {
+      process.exitCode = 1;
     }
     return;
+  }
+
+  if (destBlocked) {
+    throw new ValidationError(
+      `Destination already exists: ${existsSync(destRefPath) ? `${destRel}.bref` : destRel}`,
+      ['Use --force to overwrite, or pick a different destination.'],
+    );
   }
 
   const ref = await readBref(srcRefPath);
 
   if (existsSync(srcAbs)) {
     await ensureDir(dirname(destAbs));
-    await rename(srcAbs, destAbs);
+    try {
+      await rename(srcAbs, destAbs);
+    } catch (err) {
+      // rename() cannot cross filesystems; fall back to copy + unlink
+      // (review finding CLI-04).
+      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+        await copyFile(srcAbs, destAbs);
+        await unlink(srcAbs);
+      } else {
+        throw err;
+      }
+    }
   }
 
   await ensureDir(dirname(destRefPath));

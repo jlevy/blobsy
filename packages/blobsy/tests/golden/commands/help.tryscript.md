@@ -34,7 +34,7 @@ Commands:
                                   .bref to trash)
   rm [options] <path...>          Remove tracked files: delete local + move
                                   .bref to trash
-  mv <source> <dest>              Rename or move tracked files or directories
+  mv [options] <source> <dest>    Rename or move tracked files or directories
                                   (updates .bref + .gitignore)
   push [options] [path...]        Upload local blobs to the configured backend
   pull [options] [path...]        Download blobs from the configured backend
@@ -353,6 +353,7 @@ Arguments:
   dest            Destination path
 
 Options:
+  --force         Overwrite an existing destination file or tracking metadata
   -h, --help      Display help for command
 
 Global Options:
