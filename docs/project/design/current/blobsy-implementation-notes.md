@@ -96,48 +96,33 @@ blobsy.
   The hook assumes blobsy is installed as a system tool, the same way `git lfs` hooks
   assume `git-lfs` is installed.
 
-### The `blobsy hook pre-commit` Command
+### The `blobsy hook pre-commit` and `blobsy hook pre-push` Commands
 
-An internal command (not prominently documented in `--help` but available) that performs
-the actual pre-commit logic in TypeScript.
+Internal commands (not prominently documented in `--help` but available) that perform
+the hook logic in TypeScript.
+The split of responsibilities (review finding DOCS-03, matching README and the
+implementation):
 
-```typescript
-async function hookPreCommit(): Promise<void> {
-  // 1. Find staged .bref files
-  const stagedFiles = await git("diff", "--cached", "--name-only", "--diff-filter=ACM");
-  const brefFiles = stagedFiles.filter((f) => f.endsWith(".bref"));
-
-  if (brefFiles.length === 0) {
-    return; // Nothing to do -- exit 0
-  }
-
-  console.log(`blobsy: ${brefFiles.length} .bref file(s) staged`);
-
-  // 2. Derive payload paths and push each blob
-  const payloadPaths = brefFiles.map((f) => f.replace(/\.bref$/, ""));
-
-  for (const payloadPath of payloadPaths) {
-    await push(payloadPath, { quiet: true }); // calls push() directly, no subprocess
-  }
-
-  // 3. Re-stage .bref files that push may have updated (remote_key written back)
-  await git("add", ...brefFiles);
-
-  console.log("blobsy: all blobs uploaded, proceeding with commit");
-}
-```
+- **pre-commit verifies, never uploads.** It finds staged `.bref` files and checks that
+  each local payload still hashes to the `.bref` hash — catching files modified after
+  tracking before the stale ref enters history.
+  No network I/O runs on commit, so commits stay fast and work offline.
+- **pre-push uploads.** Before `git push` proceeds, it re-hashes each unpushed payload
+  (refusing on hash mismatch rather than uploading wrong bytes under a stale hash),
+  uploads unpushed blobs, and blocks the push with exit code 1 if any upload fails —
+  this is the “Prevention (Primary)” layer against committed-ref-without-blob data loss
+  (review finding HK-01).
 
 **Key implementation details:**
 
-- **Direct function call, not subprocess.** The hook command calls `push()` directly --
-  no spawning `blobsy push` as a child process.
+- **Direct function call, not subprocess.** The hook commands call the transfer
+  functions directly -- no spawning `blobsy push` as a child process.
   This avoids process overhead and shares configuration, caching, and connection state.
-- **Error handling.** If any push fails, the process exits with code 1 (blocking the
-  commit). Error messages come from the standard push error handling, keeping output
+- **Error handling.** If verification or any upload fails, the process exits with code 1
+  (blocking the commit or push).
+  Error messages come from the standard transfer error handling, keeping output
   consistent with manual `blobsy push`.
-- **Re-staging.** After push writes `remote_key` back to `.bref` files, the hook
-  re-stages them via `git add` so the commit includes the updated refs.
-- **Concurrency.** For multiple `.bref` files, pushes run through the standard
+- **Concurrency.** For multiple `.bref` files, uploads run through the standard
   concurrency pool (same as `blobsy push` with multiple paths).
 
 ### Coexistence with Hook Managers

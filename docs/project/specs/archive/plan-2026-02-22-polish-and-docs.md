@@ -1147,9 +1147,9 @@ dependency).
     Compression section header
   - `blobsy docs backends | head -3`: verify partial-title matching works (matches
     “Backend Configuration”)
-  - `blobsy docs nonexistent-section`: verify error message `Section
-    "nonexistent-section" not found.
-    Use --list to see available sections.` and exit code 1
+  - `blobsy docs nonexistent-section`: verify error message
+    `Section "nonexistent-section" not found. Use --list to see available sections.` and
+    exit code 1
   - `blobsy docs | head -5`: verify full docs output starts with `# blobsy User Guide`
 
 - [ ] **`packages/blobsy/tests/markdown-output.test.ts`** — Unit tests for pure

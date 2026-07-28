@@ -123,6 +123,14 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `--dry-run` | Show what would happen without doing it |
 | `--color <when>` | Color output: `always`, `never`, `auto` |
 
+## Guides
+
+- [Joining a repo that uses blobsy](docs/joining-a-blobsy-repo.md) — first-time setup
+  and recovery drills
+- [Migrating from Git LFS](docs/migrating-from-git-lfs.md)
+- [Using blobsy in GitHub Actions](docs/ci-github-actions.md)
+- [Troubleshooting](docs/troubleshooting.md)
+
 ## Backend Configuration
 
 Configure backends in `.blobsy.yml` at your repo root:

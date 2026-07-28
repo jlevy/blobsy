@@ -81,9 +81,8 @@ Treat this file as the source of truth for manual QA.
 **Important discoveries from QA testing (v0.1.0):**
 
 1. **Backend Directory**: For `local://` backends, manually create the directory before
-   init:
+   init (the local backend directory is auto-created):
    ```bash
-   mkdir -p ../blobsy-remote
    blobsy init local:../blobsy-remote
    ```
 
@@ -231,10 +230,8 @@ Initialized empty Git repository in /tmp/blobsy-qa-test/test-repo/.git/
 ### 1.3 Initialize Blobsy with Local Backend
 
 ```bash
-# IMPORTANT: Create backend directory first (init doesn't auto-create it)
-cd /tmp/blobsy-qa-test
-mkdir -p blobsy-remote
-cd test-repo
+# Note: init auto-creates a local: backend directory; no manual mkdir needed
+cd /tmp/blobsy-qa-test/test-repo
 
 # Initialize with local backend (outside repo for safety)
 blobsy init local:../blobsy-remote
@@ -264,7 +261,6 @@ cat .blobsy.yml
 **Expected**:
 
 ```yaml
-backend: default
 backends:
   default:
     url: local:../blobsy-remote
@@ -301,8 +297,9 @@ blobsy health
 
 **Troubleshooting**:
 
-- **Issue**: “Local backend directory not found” **Fix**: Create the directory manually
-  with `mkdir -p ../blobsy-remote` (init doesn’t auto-create it in v0.1.0)
+- **Issue**: “Local backend directory not found” **Fix**: `blobsy init` auto-creates
+  local backend directories; if the directory was removed later, recreate it with
+  `mkdir -p ../blobsy-remote`
 - **Issue**: Health check failed **Fix**: Run `blobsy health --verbose` for detailed
   diagnostics
 
@@ -768,7 +765,6 @@ blobsy verify
 
 ```bash
 cat > .blobsy.yml << 'EOF'
-backend: default
 backends:
   default:
     url: local:../blobsy-remote
@@ -967,7 +963,7 @@ blobsy pull large.bin 2>&1
 ```bash
 # Restore local file from another source or recreate
 dd if=/dev/urandom of=large.bin bs=1024 count=5000
-blobsy track large.bin --force
+blobsy track large.bin  # re-track re-hashes and updates the .bref
 blobsy push large.bin --force
 ```
 
@@ -978,7 +974,7 @@ blobsy push large.bin --force
 ```bash
 # Modify file locally
 echo "modified" >> medium-file.bin
-blobsy track medium-file.bin --force  # Re-track with new hash
+blobsy track medium-file.bin  # Re-track with new hash
 
 # Simulate remote change (edit .bref directly to fake different remote hash)
 FAKE_HASH="sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -997,7 +993,7 @@ blobsy sync medium-file.bin 2>&1
   Base hash:   sha256:def... (from stat cache)
 
   Resolution options:
-  - Use local version:  blobsy sync medium-file.bin --force
+  - Use local version:  blobsy track medium-file.bin && blobsy push medium-file.bin --force
   - Discard local:      blobsy pull medium-file.bin --force
   - Manual resolution:  inspect file and .bref
 ```
@@ -1009,10 +1005,10 @@ blobsy sync medium-file.bin 2>&1
 - [ ] Clear resolution options provided
 - [ ] Exit code 2 (conflict error)
 
-**Resolve with --force**:
+**Resolve by re-tracking and force-pushing (sync has no --force flag)**:
 
 ```bash
-blobsy sync medium-file.bin --force
+blobsy track medium-file.bin && blobsy push medium-file.bin --force
 ```
 
 **Verify**:
@@ -1726,7 +1722,7 @@ blobsy verify --verbose
 
 **Likely causes**:
 
-- File modified after tracking (re-track with `blobsy track --force`)
+- File modified after tracking (re-track with `blobsy track <path>`)
 - Corrupted .bref file (restore from git or regenerate)
 
 **Fix**: Re-track file or restore from remote with `blobsy pull --force`
@@ -1905,3 +1901,26 @@ Key findings:
 - Improve error messages (less technical, more actionable)
 - Document backend switching and file deletion behaviors
 - Add `--remote` flag to `rm` for full cleanup option
+
+## Recovery Drills (DOCS-08)
+
+Run each drill from [docs/joining-a-blobsy-repo.md](../../docs/joining-a-blobsy-repo.md)
+in a scratch clone against a `local:` backend and record pass/fail:
+
+1. **Fresh clone**: clone repo, `blobsy setup --auto`, `blobsy pull`, `blobsy status`
+   shows all synced.
+2. **Keep local edit**: modify a tracked file; `blobsy push` warns and exits 1;
+   `blobsy track <f>` then `blobsy push <f> --force` succeeds.
+3. **Discard local edit**: modify a tracked file; `blobsy pull <f>` refuses;
+   `blobsy pull <f> --force` restores remote content.
+4. **Sync conflict**: change the file in two clones (push from one); `blobsy sync` in
+   the other exits 2 and names the conflicted file.
+5. **Credential/connectivity failure**: point the backend at a nonexistent directory;
+   `blobsy health` fails with a categorized error; `.bref` files untouched.
+6. **Interrupted transfer**: kill a large push/pull mid-transfer; re-run completes; no
+   partial blob exists under the final key (temp + rename).
+7. **Rollback**: `git checkout` an older commit; `blobsy pull` restores the older
+   payloads (remote keys are immutable).
+8. **Remote corruption**: overwrite a blob in the local backend directory with junk;
+   `blobsy pull --force` fails with a hash mismatch and does not overwrite the local
+   file.

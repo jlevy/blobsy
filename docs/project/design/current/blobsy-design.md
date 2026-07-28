@@ -76,12 +76,22 @@ Git is the manifest.
 
 11. **Deterministic by design:** Blobsy operations are predictable and reproducible.
     Same content produces same hash.
-    Same configuration produces same remote keys.
     `.bref` files use stable field ordering to minimize git diff noise.
-    Content-addressable storage ensures multiple users pushing identical content produce
-    identical remote blobs.
+    Remote keys are deterministic given the same content, configuration, *and* push
+    time: the default `key_template` includes `{iso_date_secs}`, so two pushes of
+    identical content at different times produce distinct keys — the `.bref` records
+    which one is authoritative.
+    (A purely content-addressed template without the timestamp yields fully
+    deterministic keys and cross-user dedup, at the cost of losing per-push provenance.)
     This determinism enables reliable team collaboration, reproducible builds, and
     predictable storage costs.
+
+12. **Remote blobs are immutable.** Once a blob is written under a remote key, that
+    key’s content never changes: push refuses to re-upload modified content under an
+    existing key (a changed file gets a new key on re-track + push), and no command
+    overwrites an existing remote object in place.
+    This invariant is what makes `.bref` files trustworthy pointers — any clone at any
+    commit can fetch exactly the bytes that were pushed.
 
 ## Design Decisions
 
@@ -587,11 +597,10 @@ experimental/temporary branches that should be cleanly removed.
 **Error behavior (V2 specification):**
 
 - **Detached HEAD:** If `{git_branch}` is used but the working tree is in detached HEAD
-  state, `blobsy push` MUST fail with a clear error: `Error: Cannot resolve
-  {git_branch}: HEAD is detached.
-  Use a named branch or switch to a template without {git_branch}.` Rationale: pushing
-  to a namespace derived from a commit hash would create un-discoverable, un-manageable
-  blobs.
+  state, `blobsy push` MUST fail with a clear error:
+  `Error: Cannot resolve {git_branch}: HEAD is detached. Use a named branch or switch to a template without {git_branch}.`
+  Rationale: pushing to a namespace derived from a commit hash would create
+  un-discoverable, un-manageable blobs.
 - **Unnamed branch:** Same error if HEAD points to a branch that has no name (orphan
   branch state).
 - **Branch name sanitization:** The resolved branch name will be passed through
@@ -1510,13 +1519,16 @@ blobsy rm data/model.bin.bref   # Also works (same result)
 | (none) | Move .bref to trash, remove from .gitignore, delete local file |
 | `--local` | Delete local file only, keep .bref and remote blob (useful for freeing disk space) |
 | `--recursive` | Required for directory removal |
+| `--remote` | DANGER: also delete the blob from the backend. Requires `--force`; history-breaking (older commits referencing the blob can no longer pull it). Emergency plumbing only — see DS-04. |
 
 **What it does:**
 
 1. Default: Move `.bref` to `.blobsy/trash/`, remove from `.gitignore`, delete local
    file
 2. `--local`: Only delete local file (keep tracking and remote)
-3. Remote blobs always left untouched (GC removes them later, see deferred features)
+3. Remote blobs are left untouched unless `--remote --force` is given (per decision
+   DS-04: no prompts, never influenced by `--quiet`, labeled history-breaking in help
+   text); routine cleanup is deferred to GC (see deferred features)
 
 **Difference from `blobsy untrack`:**
 - `blobsy rm`: Deletes local file + stops tracking (permanent removal)
@@ -2507,11 +2519,11 @@ changes.
 
 Blobsy uses a three-layer defense:
 
-1. **Prevention (Primary):** A pre-commit hook (installed by `blobsy init`) auto-runs
-   `blobsy push` when committing `.bref` files.
-   This ensures blobs are uploaded before refs enter git history.
-   `blobsy push` also verifies the local file hash matches the `.bref` hash, catching
-   files modified after tracking.
+1. **Prevention (Primary):** Two hooks installed by `blobsy init`: the pre-commit hook
+   verifies that committed `.bref` files match their local payloads (catching files
+   modified after tracking), and the pre-push hook uploads any unpushed blobs before the
+   git push proceeds. This ensures blobs are uploaded before refs reach collaborators,
+   without running network transfers on every commit.
 
 2. **Detection (Secondary):** The stat cache provides the merge base for three-way
    conflict detection during sync.
@@ -3331,7 +3343,7 @@ This section consolidates all features designed but deferred to future versions.
 | --- | --- | --- |
 | **Transfer tool delegation** (rclone) | ✅ Implemented via RcloneBackend | ~2 weeks |
 | **GCS backend** (`gs://`) | ✅ Implemented via RcloneBackend | ~1 week |
-| **Azure Blob backend** (`az://`) | ✅ Implemented via RcloneBackend | ~1 week |
+| **Azure Blob backend** (`azure://`) | ✅ Implemented via RcloneBackend | ~1 week |
 | **Command backend health checks** (user-defined) | Deferred; optional | ~3 days |
 | **blobsy clean command** | Deferred; auto cleanup sufficient | ~2 days |
 
