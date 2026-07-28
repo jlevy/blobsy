@@ -41,9 +41,9 @@ backends:
 
 ```console
 $ head -3 .claude/skills/blobsy/SKILL.md
-# blobsy
-
-Git-native large file storage. Track large files with `.bref` pointers in Git,
+---
+name: blobsy
+description: Track large files in Git with .bref pointers; store blobs in S3, local directories, or custom backends. Use when a repo has large binary files, when files must sync across machines without committing bytes to Git, or when the user mentions blobsy, .bref, externalize, or a Git LFS alternative.
 ? 0
 ```
 

@@ -39,11 +39,36 @@ export interface BackendToolAvailability {
   rclone: boolean;
 }
 
+let cachedToolAvailability: BackendToolAvailability | undefined;
+
 function detectBackendToolAvailability(): BackendToolAvailability {
-  return {
+  // Detected once per process: availability doesn't change mid-command and
+  // each probe spawns a subprocess — per-file re-detection meant O(N)
+  // spawns before any transfer started (review finding BE-02).
+  cachedToolAvailability ??= {
     awsCli: isAwsCliAvailable(),
     rclone: isRcloneAvailable(),
   };
+  return cachedToolAvailability;
+}
+
+/**
+ * Backend instances, one per distinct resolved config within a process.
+ * Transfers are documented as sequential in V1 (the dead `sync.parallel`
+ * config key was removed — review finding BE-02); reuse still matters so a
+ * 100-file push constructs one backend, not 100.
+ */
+const backendCache = new Map<string, Backend>();
+
+function getBackend(config: BlobsyConfig, repoRoot: string): Backend {
+  const resolved = resolveBackend(config);
+  const key = JSON.stringify([resolved, repoRoot, config.sync?.tools]);
+  let backend = backendCache.get(key);
+  if (!backend) {
+    backend = createBackend(resolved, repoRoot, config.sync?.tools);
+    backendCache.set(key, backend);
+  }
+  return backend;
 }
 
 /**
@@ -245,8 +270,7 @@ export async function pushFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
   const compressConfig = getCompressConfig(config);
 
   // Determine compression
@@ -318,8 +342,7 @@ export async function pullFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
 
   if (!ref.remote_key) {
     return {
@@ -392,14 +415,12 @@ export async function blobExists(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<boolean> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
   return backend.exists(remoteKey);
 }
 
 /** Run a health check on the configured backend. */
 export async function runHealthCheck(config: BlobsyConfig, repoRoot: string): Promise<void> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
   await backend.healthCheck();
 }

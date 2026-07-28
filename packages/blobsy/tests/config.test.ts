@@ -39,7 +39,7 @@ describe('config', () => {
     const defaults = getBuiltinDefaults();
     expect(defaults.externalize?.min_size).toBe('200kb');
     expect(defaults.compress?.algorithm).toBe('zstd');
-    expect(defaults.sync?.parallel).toBe(8);
+    expect(defaults.sync?.tools).toEqual(['aws-cli', 'rclone']);
     expect(defaults.checksum?.algorithm).toBe('sha256');
   });
 

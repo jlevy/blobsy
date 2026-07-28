@@ -188,7 +188,7 @@ blobsy config compress.algorithm
 blobsy config compress.algorithm zstd
 
 # Set a value in global config (~/.blobsy.yml)
-blobsy config --global sync.parallel 16
+blobsy config --global sync.tools '[aws-cli]'
 
 # See where a value comes from
 blobsy config --show-origin compress.algorithm

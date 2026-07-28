@@ -89,15 +89,18 @@ $ chmod +x .git/hooks/pre-commit
 
 ```console
 $ blobsy hooks uninstall
-Pre-commit hook not managed by blobsy.
+Pre-commit hook not managed by blobsy; leaving it in place.
 No pre-push hook found.
 ? 0
 ```
 
 # Hook execution: install hook and verify it runs on commit
 
+The custom hook from the previous section is user-owned, so install would refuse to
+touch it (HK-03); remove it first to test a clean install.
+
 ```console
-$ mkdir -p data
+$ rm .git/hooks/pre-commit && mkdir -p data
 ? 0
 ```
 

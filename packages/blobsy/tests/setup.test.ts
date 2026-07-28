@@ -64,7 +64,7 @@ describe('setup command', () => {
       expect(existsSync(skillPath)).toBe(true);
 
       const content = await readFile(skillPath, 'utf-8');
-      expect(content).toContain('# blobsy');
+      expect(content).toContain('name: blobsy');
       expect(content).toContain('blobsy track');
       expect(content).toContain('status --json');
     } finally {
@@ -218,7 +218,7 @@ describe('setup command', () => {
 
       const content = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
       // Should be updated to latest content, not 'old content'
-      expect(content).toContain('# blobsy');
+      expect(content).toContain('name: blobsy');
       expect(content).not.toBe('old content');
     } finally {
       await rm(backendDir, { recursive: true, force: true }).catch(() => {

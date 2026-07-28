@@ -1912,6 +1912,21 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
     const ref = await readBref(refPath);
     const absPath = join(repoRoot, relPath);
 
+    // Same push sanity check as explicit push (DS-03): never upload new
+    // bytes under the stale hash recorded at track time.
+    if (existsSync(absPath)) {
+      const currentHash = await computeHash(absPath);
+      if (currentHash !== ref.hash) {
+        failures.push({
+          relPath,
+          error:
+            'local file changed since it was tracked (hash mismatch); ' +
+            'run `blobsy track` to re-track, then commit and push again',
+        });
+        continue;
+      }
+    }
+
     const result = await pushFile(absPath, relPath, ref, config, repoRoot);
 
     if (result.success && result.refUpdates) {

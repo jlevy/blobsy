@@ -43,7 +43,7 @@
     "content-addressable"
   ],
   "scripts": {
-    "build": "tsdown && node scripts/copy-docs.mjs",
+    "build": "node scripts/gen-skill-text.mjs && tsdown && node scripts/copy-docs.mjs",
     "dev": "tsdown --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

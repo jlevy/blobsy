@@ -5,11 +5,10 @@ sandbox: true
 
 ```console
 $ blobsy skill | head -5
-# blobsy
-
-Git-native large file storage. Track large files with `.bref` pointers in Git,
-store blobs in S3/local/custom backends.
-
+---
+name: blobsy
+description: Track large files in Git with .bref pointers; store blobs in S3, local directories, or custom backends. Use when a repo has large binary files, when files must sync across machines without committing bytes to Git, or when the user mentions blobsy, .bref, externalize, or a Git LFS alternative.
+---
 ? 0
 ```
 
@@ -33,7 +32,7 @@ $ blobsy skill | grep -c "blobsy setup"
 
 ```console
 $ blobsy skill | grep "blobsy track"
-blobsy track <path...>     # Track files (creates .bref)
+blobsy track <path...>     # Track files (creates .bref pointers)
 ? 0
 ```
 

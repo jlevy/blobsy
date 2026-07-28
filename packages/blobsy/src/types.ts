@@ -131,8 +131,8 @@ export interface BlobsyConfig {
   ignore?: string[] | undefined;
   /** Remote key template config */
   remote?: { key_template: string } | undefined;
-  /** Sync tool and parallelism settings */
-  sync?: { tools: string[]; parallel: number } | undefined;
+  /** Sync tool preferences. Transfers are sequential in V1 (BE-02). */
+  sync?: { tools: string[] } | undefined;
   /** Checksum algorithm config */
   checksum?: { algorithm: string } | undefined;
 }
