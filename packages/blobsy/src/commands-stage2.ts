@@ -1329,6 +1329,7 @@ const KNOWN_CONFIG_KEYS = new Set([
   'remote',
   'sync',
   'checksum',
+  'trust_command_backends',
 ]);
 
 const VALID_COMPRESS_ALGORITHMS = new Set(['zstd', 'gzip', 'brotli', 'none']);

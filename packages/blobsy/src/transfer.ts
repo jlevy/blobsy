@@ -5,10 +5,12 @@
  * handle compression, manage atomic writes, coordinate push/pull/sync.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
+
+import { parse as parseYaml } from 'yaml';
 
 import type {
   Backend,
@@ -28,7 +30,7 @@ import { AwsCliBackend, isAwsCliAvailable } from './backend-aws-cli.js';
 import { RcloneBackend, buildRcloneConfig, isRcloneAvailable } from './backend-rclone.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
-import { getCompressConfig } from './config.js';
+import { getCompressConfig, getGlobalConfigPath } from './config.js';
 import { normalizePath, toRepoRelative } from './paths.js';
 import { ensureDir } from './fs-utils.js';
 
@@ -104,6 +106,53 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
   ]);
 }
 
+/**
+ * Refuse to execute a repository-configured command backend without an
+ * out-of-repo trust grant (review finding SEC-03).
+ *
+ * A committed .blobsy.yml chooses the executable and arguments the command
+ * backend runs, and hooks/sync/doctor run backends automatically — so
+ * "clone, then run blobsy" would execute repository-controlled commands.
+ * The grant must come from outside the repository: the user-global config
+ * (~/.blobsy.yml `trust_command_backends`: true or a list of repo paths) or
+ * the BLOBSY_TRUST_COMMAND_BACKEND environment variable (for CI).
+ */
+function assertCommandBackendTrusted(repoRoot: string): void {
+  if (process.env.BLOBSY_TRUST_COMMAND_BACKEND) {
+    return;
+  }
+
+  const globalPath = getGlobalConfigPath();
+  try {
+    if (existsSync(globalPath)) {
+      const raw = parseYaml(readFileSync(globalPath, 'utf-8')) as {
+        trust_command_backends?: boolean | string[];
+      } | null;
+      const grant = raw?.trust_command_backends;
+      if (grant === true) {
+        return;
+      }
+      if (Array.isArray(grant) && grant.some((p) => resolve(p) === resolve(repoRoot))) {
+        return;
+      }
+    }
+  } catch {
+    // Unreadable global config -> fall through to refusal.
+  }
+
+  throw new BlobsyError(
+    'This repository configures a command backend, which executes ' +
+      'repository-controlled commands. Refusing without an out-of-repo trust grant.',
+    'validation',
+    1,
+    [
+      `Trust this repo: add to ${globalPath}:  trust_command_backends: ["${repoRoot}"]`,
+      'Trust all repos: trust_command_backends: true',
+      'Or set BLOBSY_TRUST_COMMAND_BACKEND=1 in the environment (e.g. CI).',
+    ],
+  );
+}
+
 /** Create a Backend instance from resolved config. */
 export function createBackend(
   config: ResolvedBackendConfig,
@@ -117,6 +166,7 @@ export function createBackend(
       return new LocalBackend(remotePath);
     }
     case 'command': {
+      assertCommandBackendTrusted(repoRoot);
       return new CommandBackend({
         pushCommand: config.push_command,
         pullCommand: config.pull_command,
