@@ -32,6 +32,11 @@ jobs:
 
       - run: pnpm test
 
+      # The rclone-lifecycle golden fails in its before-hook without rclone;
+      # keep parity with ci.yml so a tagged release can't fail after green PR CI.
+      - name: Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
       - name: Run golden test suite
         working-directory: packages/blobsy
         run: pnpm test:golden

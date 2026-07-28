@@ -32,5 +32,11 @@ export function blobsy<T extends Options = Record<never, never>>(
   args: readonly string[],
   options?: T,
 ) {
-  return execa(process.execPath, [CLI_PATH, ...args], options);
+  // Ambient BLOBSY_NO_HOOKS (set by some CI/sandbox environments) would
+  // silently change hook-install behavior; clear it unless a test opts in.
+  const merged = {
+    ...options,
+    env: { BLOBSY_NO_HOOKS: '', ...options?.env },
+  } as unknown as T;
+  return execa(process.execPath, [CLI_PATH, ...args], merged);
 }

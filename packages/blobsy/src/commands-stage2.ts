@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { appendFile, chmod, readdir, readFile, unlink } from 'node:fs/promises';
-import { basename, dirname, join, isAbsolute } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { Command } from 'commander';
 
@@ -76,6 +76,13 @@ import {
   FILE_STATE_SYMBOLS,
   HOOK_MANAGED_MARKER,
 } from './types.js';
+import {
+  HOOK_TYPES,
+  detectBlobsyPath,
+  gitHooksDir,
+  hooksDisabledByEnv,
+  installHook,
+} from './hooks.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -1563,64 +1570,29 @@ async function checkConfig(
 }
 
 /** Run git hook checks for doctor. */
-/** Detect path to the blobsy executable. */
-function detectBlobsyPath(): string {
-  const execPath = process.argv[1];
-  if (execPath && isAbsolute(execPath)) {
-    return execPath;
-  }
-  try {
-    return execFileSync('which', ['blobsy'], { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'blobsy';
-  }
-}
-
-/**
- * Install a single git hook.
- *
- * Returns false (without touching the file) when a hook exists that blobsy
- * does not own — identified by the exact managed marker. Overwriting a
- * user's hook silently removes their linters/tests/signing (review finding
- * HK-03); "the file mentions blobsy" is not ownership.
- */
-async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<boolean> {
-  const hookDir = join(repoRoot, '.git', 'hooks');
-  await ensureDir(hookDir);
-  const blobsyPath = detectBlobsyPath();
-  const hookPath = join(hookDir, hook.name);
-
-  if (existsSync(hookPath)) {
-    const existing = await readFile(hookPath, 'utf-8');
-    if (!existing.includes(HOOK_MANAGED_MARKER)) {
-      return false;
-    }
-  }
-
-  const hookContent = `#!/bin/sh
-${HOOK_MANAGED_MARKER}
-# To bypass: ${hook.bypassCmd}
-exec "${blobsyPath}" hook ${hook.gitEvent}
-`;
-  const { writeFile: writeFs } = await import('node:fs/promises');
-  await writeFs(hookPath, hookContent);
-  await chmod(hookPath, 0o755);
-  return true;
-}
-
 async function checkHooks(
   repoRoot: string,
   fix: boolean,
   verbose: boolean,
 ): Promise<DoctorIssue[]> {
   const issues: DoctorIssue[] = [];
-  const hookDir = join(repoRoot, '.git', 'hooks');
+  const hookDir = gitHooksDir(repoRoot);
 
   for (const hook of HOOK_TYPES) {
     const hookPath = join(hookDir, hook.name);
 
     if (!existsSync(hookPath)) {
-      if (fix) {
+      if (fix && hooksDisabledByEnv()) {
+        // Setup/init honor BLOBSY_NO_HOOKS; --fix must not sneak hooks
+        // back in behind the same opt-out.
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not installed (BLOBSY_NO_HOOKS is set; not installing)`,
+          fixed: false,
+          fixable: false,
+        });
+      } else if (fix) {
         await installHook(repoRoot, hook);
         issues.push({
           type: 'hooks',
@@ -1692,11 +1664,6 @@ async function checkHooks(
   return issues;
 }
 
-const HOOK_TYPES = [
-  { name: 'pre-commit', gitEvent: 'pre-commit', bypassCmd: 'git commit --no-verify' },
-  { name: 'pre-push', gitEvent: 'pre-push', bypassCmd: 'git push --no-verify' },
-] as const;
-
 export async function handleHooks(
   action: string,
   _opts: Record<string, unknown>,
@@ -1718,6 +1685,15 @@ export async function handleHooks(
   }
 
   if (action === 'install') {
+    if (hooksDisabledByEnv()) {
+      // Same opt-out setup/init honor; an explicit install must not
+      // silently override it (Bugbot: env flag inconsistently honored).
+      if (!globalOpts.quiet) {
+        console.log('BLOBSY_NO_HOOKS is set; not installing hooks.');
+      }
+      return;
+    }
+
     const blobsyPath = detectBlobsyPath();
 
     if (blobsyPath === 'blobsy' && !globalOpts.quiet) {
@@ -1746,8 +1722,9 @@ export async function handleHooks(
       console.log(`  Using executable: ${blobsyPath}`);
     }
   } else if (action === 'uninstall') {
+    const hookDir = gitHooksDir(repoRoot);
     for (const hook of HOOK_TYPES) {
-      const hookPath = join(repoRoot, '.git', 'hooks', hook.name);
+      const hookPath = join(hookDir, hook.name);
       if (existsSync(hookPath)) {
         const content = await readFile(hookPath, 'utf-8');
         // Delete only hooks carrying the exact managed marker — a user

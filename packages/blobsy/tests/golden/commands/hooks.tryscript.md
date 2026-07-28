@@ -14,7 +14,7 @@ before: |
 # Install hooks
 
 ```console
-$ blobsy hooks install
+$ BLOBSY_NO_HOOKS= blobsy hooks install
 Installed pre-commit hook.
 Installed pre-push hook.
   Using executable: [LOCAL_PATH]
@@ -105,7 +105,7 @@ $ rm .git/hooks/pre-commit && mkdir -p data
 ```
 
 ```console
-$ blobsy hooks install
+$ BLOBSY_NO_HOOKS= blobsy hooks install
 Installed pre-commit hook.
 Installed pre-push hook.
   Using executable: [LOCAL_PATH]

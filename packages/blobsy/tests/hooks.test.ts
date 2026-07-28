@@ -219,3 +219,106 @@ describe('hook ownership (HK-03)', () => {
     expect(result.stdout).toMatch(/Installed pre-commit hook/);
   });
 });
+
+describe('BLOBSY_NO_HOOKS opt-out consistency', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'blobsy-nohooks-test-'));
+    await execa('git', ['init'], { cwd: testDir });
+    await execa('git', ['config', 'user.email', 'test@example.com'], { cwd: testDir });
+    await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
+    await blobsy(['init', '--no-hooks', 'local:../nohooks-backend'], { cwd: testDir });
+  });
+
+  afterEach(async () => {
+    const backendDir = join(testDir, '..', 'nohooks-backend');
+    await rm(testDir, { recursive: true, force: true });
+    await rm(backendDir, { recursive: true, force: true }).catch(() => {
+      /* ignore */
+    });
+  });
+
+  it('hooks install refuses when BLOBSY_NO_HOOKS is set', async () => {
+    const result = await blobsy(['hooks', 'install'], {
+      cwd: testDir,
+      env: { BLOBSY_NO_HOOKS: '1' },
+    });
+    expect(result.stdout).toMatch(/BLOBSY_NO_HOOKS is set; not installing hooks/);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-push'))).toBe(false);
+  });
+
+  it('doctor --fix does not install hooks when BLOBSY_NO_HOOKS is set', async () => {
+    const result = await blobsy(['doctor', '--fix'], {
+      cwd: testDir,
+      env: { BLOBSY_NO_HOOKS: '1' },
+      reject: false,
+    });
+    expect(result.stdout).toMatch(/BLOBSY_NO_HOOKS is set; not installing/);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-push'))).toBe(false);
+  });
+});
+
+describe('worktree and core.hooksPath support (HK-04)', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'blobsy-hk04-test-'));
+    await execa('git', ['init'], { cwd: testDir });
+    await execa('git', ['config', 'user.email', 'test@example.com'], { cwd: testDir });
+    await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
+    await execa('git', ['config', 'commit.gpgsign', 'false'], { cwd: testDir });
+    await blobsy(['init', '--no-hooks', 'local:../hk04-backend'], { cwd: testDir });
+    await execa('git', ['add', '-A'], { cwd: testDir });
+    await execa('git', ['commit', '-m', 'init'], { cwd: testDir });
+  });
+
+  afterEach(async () => {
+    const backendDir = join(testDir, '..', 'hk04-backend');
+    const worktreeDir = join(testDir, '..', 'hk04-worktree');
+    await rm(worktreeDir, { recursive: true, force: true }).catch(() => {
+      /* ignore */
+    });
+    await rm(testDir, { recursive: true, force: true });
+    await rm(backendDir, { recursive: true, force: true }).catch(() => {
+      /* ignore */
+    });
+  });
+
+  it('installs into the shared hooks dir when run from a linked worktree', async () => {
+    const worktreeDir = join(testDir, '..', 'hk04-worktree');
+    await execa('git', ['worktree', 'add', worktreeDir, '-b', 'hk04-branch'], { cwd: testDir });
+
+    const result = await blobsy(['hooks', 'install'], { cwd: worktreeDir });
+    expect(result.stdout).toMatch(/Installed pre-commit hook/);
+
+    // In a linked worktree .git is a file; hooks live in the main repo's
+    // .git/hooks. The old join(root, '.git', 'hooks') would have failed.
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(true);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-push'))).toBe(true);
+  });
+
+  it('honors core.hooksPath when set', async () => {
+    await execa('git', ['config', 'core.hooksPath', '.githooks'], { cwd: testDir });
+
+    const result = await blobsy(['hooks', 'install'], { cwd: testDir });
+    expect(result.stdout).toMatch(/Installed pre-commit hook/);
+
+    expect(existsSync(join(testDir, '.githooks', 'pre-commit'))).toBe(true);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+  });
+
+  it('hooks uninstall removes hooks from the shared dir when run from a worktree', async () => {
+    const worktreeDir = join(testDir, '..', 'hk04-worktree');
+    await execa('git', ['worktree', 'add', worktreeDir, '-b', 'hk04-branch'], { cwd: testDir });
+
+    await blobsy(['hooks', 'install'], { cwd: worktreeDir });
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(true);
+
+    const result = await blobsy(['hooks', 'uninstall'], { cwd: worktreeDir });
+    expect(result.stdout).toMatch(/Uninstalled pre-commit hook/);
+    expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+  });
+});

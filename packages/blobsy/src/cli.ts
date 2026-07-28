@@ -86,13 +86,8 @@ import {
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
-import {
-  BlobsyError,
-  BREF_FORMAT,
-  HOOK_MANAGED_MARKER,
-  ValidationError,
-  UserError,
-} from './types.js';
+import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
+import { HOOK_TYPES, hooksDisabledByEnv, installHook } from './hooks.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -684,15 +679,8 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
   }
 }
 
-const HOOKS = [
-  { name: 'pre-commit', gitEvent: 'pre-commit' },
-  { name: 'pre-push', gitEvent: 'pre-push' },
-] as const;
-
 async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
-  if (process.env.BLOBSY_NO_HOOKS) return;
-
-  const hookDir = join(repoRoot, '.git', 'hooks');
+  if (hooksDisabledByEnv()) return;
 
   // Check for hook managers
   if (existsSync(join(repoRoot, 'lefthook.yml')) || existsSync(join(repoRoot, '.husky'))) {
@@ -704,35 +692,20 @@ async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promis
     return;
   }
 
-  await ensureDir(hookDir);
-  const { writeFile: writeFs, chmod } = await import('node:fs/promises');
-
-  for (const hook of HOOKS) {
-    const hookPath = join(hookDir, hook.name);
-
-    if (existsSync(hookPath)) {
-      const content = await readFile(hookPath, 'utf-8');
-      // Only rewrite hooks blobsy itself installed (exact managed marker).
-      // A user hook that merely CALLS blobsy is still the user's file —
-      // overwriting it silently removes their linters/tests/signing
-      // (review finding HK-03).
-      if (!content.includes(HOOK_MANAGED_MARKER)) {
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(
-            `Existing ${hook.name} hook found (not managed by blobsy). ` +
-              `Add manually: blobsy hook ${hook.gitEvent}`,
-          );
-        }
-        continue;
-      }
-    }
-
-    const hookContent = `#!/bin/sh\n# Installed by: blobsy hooks install\n# To bypass: git ${hook.name === 'pre-commit' ? 'commit' : 'push'} --no-verify\nexec blobsy hook ${hook.gitEvent}\n`;
-    await writeFs(hookPath, hookContent);
-    await chmod(hookPath, 0o755);
+  for (const hook of HOOK_TYPES) {
+    // Shared installer (review finding HK-02): marker-based ownership
+    // check (HK-03) and worktree-safe hooks dir (HK-04).
+    const installed = await installHook(repoRoot, hook);
 
     if (!globalOpts.quiet && !globalOpts.json) {
-      console.log(`Installed ${hook.name} hook.`);
+      if (installed) {
+        console.log(`Installed ${hook.name} hook.`);
+      } else {
+        console.log(
+          `Existing ${hook.name} hook found (not managed by blobsy). ` +
+            `Add manually: blobsy hook ${hook.gitEvent}`,
+        );
+      }
     }
   }
 }
