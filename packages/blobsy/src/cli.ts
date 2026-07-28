@@ -1429,6 +1429,13 @@ async function rmFile(
     return;
   }
 
+  // Every rm variant requires the file to be tracked BEFORE touching the
+  // payload — `rm --local somefile` used to unlink untracked files, which
+  // is unrecoverable since blobsy holds no copy (review finding CLI-05).
+  if (!existsSync(refPath)) {
+    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
+  }
+
   if (localOnly) {
     // Just delete local file, keep .bref
     if (existsSync(absPath)) {
@@ -1442,10 +1449,6 @@ async function rmFile(
       }
     }
     return;
-  }
-
-  if (!existsSync(refPath)) {
-    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
   }
 
   // Move .bref to trash
@@ -1966,8 +1969,23 @@ function formatConfigPath(filePath: string, repoRoot?: string): string {
   return filePath;
 }
 
+/**
+ * Reject key segments that traverse into the prototype chain.
+ *
+ * `blobsy config __proto__.x 1` would otherwise pollute Object.prototype for
+ * the running process (review finding SEC-01).
+ */
+export function assertSafeKeyPath(parts: string[]): void {
+  for (const part of parts) {
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      throw new ValidationError(`Invalid config key segment: ${part}`);
+    }
+  }
+}
+
 function getNestedValue(obj: object, path: string): unknown {
   const parts = path.split('.');
+  assertSafeKeyPath(parts);
   let current: unknown = obj;
   for (const part of parts) {
     if (typeof current !== 'object' || current === null) {
@@ -1994,6 +2012,7 @@ function coerceConfigValue(value: string): string | number | boolean {
 
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string): void {
   const parts = path.split('.');
+  assertSafeKeyPath(parts);
   let current = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]!;

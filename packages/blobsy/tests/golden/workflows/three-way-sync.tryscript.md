@@ -102,7 +102,7 @@ A newer version
 $ cd repoB && printf 'B edits again\n' > data/doc.txt && blobsy push data/doc.txt
   ⚠ data/doc.txt  modified since last push (run `blobsy sync` or `blobsy push --force`)
 Done: 0 pushed.
-? 0
+? 1
 ```
 
 # DS-03: push refuses content modified after track (stale hash, no remote_key)

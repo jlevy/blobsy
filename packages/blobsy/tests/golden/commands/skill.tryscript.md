@@ -9,6 +9,7 @@ $ blobsy skill | head -5
 name: blobsy
 description: Track large files in Git with .bref pointers; store blobs in S3, local directories, or custom backends. Use when a repo has large binary files, when files must sync across machines without committing bytes to Git, or when the user mentions blobsy, .bref, externalize, or a Git LFS alternative.
 ---
+# Blobsy Agent Skill
 ? 0
 ```
 

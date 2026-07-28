@@ -143,7 +143,10 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
  * the BLOBSY_TRUST_COMMAND_BACKEND environment variable (for CI).
  */
 function assertCommandBackendTrusted(repoRoot: string): void {
-  if (process.env.BLOBSY_TRUST_COMMAND_BACKEND) {
+  // Affirmative values only: a trust grant must never be conferred by
+  // BLOBSY_TRUST_COMMAND_BACKEND=0 or =false.
+  const envGrant = process.env.BLOBSY_TRUST_COMMAND_BACKEND;
+  if (envGrant === '1' || envGrant === 'true') {
     return;
   }
 

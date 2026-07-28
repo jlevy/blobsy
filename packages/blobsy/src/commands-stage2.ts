@@ -209,12 +209,26 @@ export async function handlePush(
   }
 
   if (globalOpts.dryRun) {
+    // Mirror the real plan including the DS-03 hash checks (dry-run is the
+    // primary trust mechanism for agents; it must not promise a push the
+    // real run would refuse).
     const needsPush = [];
+    let wouldTransfer = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (!ref.remote_key || opts.force) {
-        needsPush.push(`push ${file.relPath}`);
+      const modified = existsSync(file.absPath) && (await computeHash(file.absPath)) !== ref.hash;
+      if (ref.remote_key && !opts.force) {
+        if (modified) {
+          needsPush.push(`warn ${file.relPath} (modified since last push; would not upload)`);
+        }
+        continue;
       }
+      if (modified && !opts.force) {
+        needsPush.push(`refuse ${file.relPath} (changed since track; would need --force)`);
+        continue;
+      }
+      needsPush.push(`push ${file.relPath}`);
+      wouldTransfer++;
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(needsPush));
@@ -222,7 +236,7 @@ export async function handlePush(
       for (const a of needsPush) {
         console.log(formatDryRun(a));
       }
-      console.log(formatDryRun(`push ${formatCount(needsPush.length, 'file')}`));
+      console.log(formatDryRun(`push ${formatCount(wouldTransfer, 'file')}`));
     }
     return;
   }
@@ -316,7 +330,9 @@ export async function handlePush(
     );
   }
 
-  if (failed.length > 0) {
+  // A blocked push (modified since last push, upload skipped) must be
+  // visible to automation, not read as success.
+  if (failed.length > 0 || warnings.length > 0) {
     process.exitCode = 1;
   }
 }
@@ -801,7 +817,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   }
 
   // --- CONFIGURATION section ---
-  const configIssues = checkConfig(config, repoRoot, verbose);
+  const configIssues = await checkConfig(config, repoRoot, verbose);
   renderSection('CONFIGURATION', configIssues, verbose, useJson);
   issues.push(...configIssues);
 
@@ -1374,11 +1390,11 @@ function findClosestMatch(input: string, candidates: Set<string>): string | unde
 }
 
 /** Run configuration validation checks for doctor. */
-function checkConfig(
+async function checkConfig(
   config: BlobsyConfig | null,
   repoRoot: string,
   verbose: boolean,
-): DoctorIssue[] {
+): Promise<DoctorIssue[]> {
   const issues: DoctorIssue[] = [];
 
   // 1. Config file exists
@@ -1412,8 +1428,9 @@ function checkConfig(
     const globalPath = getGlobalConfigPath();
     if (existsSync(globalPath)) {
       try {
-        // loadConfigFile is async but we only need to validate YAML parsing
-        void loadConfigFile(globalPath);
+        // Await the parse: a corrupt global config was reported "valid"
+        // because the rejected promise was discarded (review finding CLI-03).
+        await loadConfigFile(globalPath);
         if (verbose) {
           issues.push({
             type: 'config',
@@ -1651,7 +1668,8 @@ async function checkHooks(
       }
     } catch {
       if (fix) {
-        void chmod(hookPath, 0o755);
+        // Await: a failed chmod was reported "fixed" (review finding CLI-03).
+        await chmod(hookPath, 0o755);
         issues.push({
           type: 'hooks',
           severity: 'warning',

@@ -7,7 +7,7 @@
 
 import { basename, dirname } from 'node:path';
 
-import { formatWarning } from './format.js';
+import { ValidationError } from './types.js';
 import { parseHash } from './hash.js';
 import { normalizePath } from './paths.js';
 
@@ -72,8 +72,14 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     if (key in replacements) {
       return replacements[key]!;
     }
-    console.warn(formatWarning(`unknown template variable {${key}} in key template`));
-    return `{${key}}`;
+    // Hard error: warn-and-continue put a literal "{var}" into remote keys
+    // and wrote unstructured stderr into --json output streams (review
+    // finding LIB-03).
+    throw new ValidationError(`Unknown template variable {${key}} in key template.`, [
+      `Known variables: ${Object.keys(replacements)
+        .map((k) => `{${k}}`)
+        .join(', ')}`,
+    ]);
   });
 }
 

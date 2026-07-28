@@ -7,7 +7,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 import { writeFile } from 'atomically';
@@ -138,7 +138,10 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   let dir = targetDir;
   const repoRootResolved = resolve(repoRoot);
 
-  while (dir.startsWith(repoRootResolved)) {
+  // Separator-suffixed compare: without it /home/u/project-data "starts
+  // with" repo root /home/u/project and config discovery walks outside the
+  // repo (review finding CFG-01).
+  while (dir === repoRootResolved || dir.startsWith(repoRootResolved + sep)) {
     const configPath = join(dir, CONFIG_FILENAME);
     if (existsSync(configPath)) {
       configFiles.unshift(configPath);
@@ -194,7 +197,10 @@ export async function resolveConfigWithOrigins(
   let dir = targetDir;
   const repoRootResolved = resolve(repoRoot);
 
-  while (dir.startsWith(repoRootResolved)) {
+  // Separator-suffixed compare: without it /home/u/project-data "starts
+  // with" repo root /home/u/project and config discovery walks outside the
+  // repo (review finding CFG-01).
+  while (dir === repoRootResolved || dir.startsWith(repoRootResolved + sep)) {
     const configPath = join(dir, CONFIG_FILENAME);
     if (existsSync(configPath)) {
       configFiles.unshift(configPath);
@@ -253,6 +259,12 @@ function recordOrigins(
  */
 export function unsetNestedValue(obj: Record<string, unknown>, keyPath: string): boolean {
   const parts = keyPath.split('.');
+  // Never traverse into the prototype chain (review finding SEC-01).
+  for (const part of parts) {
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      throw new ValidationError(`Invalid config key segment: ${part}`);
+    }
+  }
   const parents: { obj: Record<string, unknown>; key: string }[] = [];
   let current = obj;
 

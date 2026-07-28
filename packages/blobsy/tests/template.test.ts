@@ -139,13 +139,14 @@ describe('evaluateTemplate', () => {
     expect(result).toBe('abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890');
   });
 
-  it('leaves unknown variables as-is', () => {
+  it('rejects unknown variables (LIB-03: no literal {var} in remote keys)', () => {
     const template = '{unknown_var}';
-    const result = evaluateTemplate(template, {
-      hash,
-      repoPath: 'file.txt',
-      compressSuffix: '',
-    });
-    expect(result).toBe('{unknown_var}');
+    expect(() =>
+      evaluateTemplate(template, {
+        hash,
+        repoPath: 'file.txt',
+        compressSuffix: '',
+      }),
+    ).toThrow(/Unknown template variable \{unknown_var\}/);
   });
 });

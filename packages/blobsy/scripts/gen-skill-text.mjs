@@ -29,4 +29,3 @@ export const SKILL_TEXT: string = ${JSON.stringify(skillMd)};
 `;
 
 writeFileSync(join(pkgRoot, 'src', 'skill-text.ts'), generated);
-console.log('Generated src/skill-text.ts from SKILL.md');

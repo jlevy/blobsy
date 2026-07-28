@@ -9,12 +9,13 @@
 
 import { execFileSync } from 'node:child_process';
 import { rename, unlink } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type { Backend } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
+import { ensureDir } from './fs-utils.js';
 
 /** Timeout for exists check commands (shorter than push/pull) */
 const EXISTS_CHECK_TIMEOUT_MS = 30000;
@@ -122,13 +123,19 @@ export class CommandBackend implements Backend {
     this.config = config;
   }
 
+  // Without a bucket, "${bucket}/${key}" yielded a corrupting leading
+  // slash in user command paths (review finding BE-08).
+  private remoteFor(remoteKey: string): string {
+    return this.config.bucket ? `${this.config.bucket}/${remoteKey}` : remoteKey;
+  }
+
   push(localPath: string, remoteKey: string): Promise<void> {
     if (!this.config.pushCommand) {
       throw new ValidationError('No push_command configured for command backend.');
     }
     const vars: CommandTemplateVars = {
       local: resolve(localPath),
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      remote: this.remoteFor(remoteKey),
       relative_path: '',
       bucket: this.config.bucket ?? '',
     };
@@ -142,26 +149,35 @@ export class CommandBackend implements Backend {
     }
     const tmpSuffix = randomBytes(8).toString('hex');
     const tempPath = `${localPath}.blobsy-cmd-${tmpSuffix}`;
+    // Match the other backends: ensure the target directory exists and never
+    // leak the temp file on failure (review finding BE-05).
+    await ensureDir(dirname(localPath));
     const vars: CommandTemplateVars = {
       local: resolve(tempPath),
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      remote: this.remoteFor(remoteKey),
       relative_path: '',
       bucket: this.config.bucket ?? '',
     };
-    commandPull(this.config.pullCommand, vars, tempPath);
+    try {
+      commandPull(this.config.pullCommand, vars, tempPath);
 
-    if (expectedHash) {
-      const actualHash = await computeHash(tempPath);
-      if (actualHash !== expectedHash) {
-        await unlink(tempPath);
-        throw new BlobsyError(
-          `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
-          'validation',
-        );
+      if (expectedHash) {
+        const actualHash = await computeHash(tempPath);
+        if (actualHash !== expectedHash) {
+          throw new BlobsyError(
+            `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
+            'validation',
+          );
+        }
       }
-    }
 
-    await rename(tempPath, localPath);
+      await rename(tempPath, localPath);
+    } catch (err) {
+      await unlink(tempPath).catch(() => {
+        // Temp file may not exist if the command failed before writing it.
+      });
+      throw err;
+    }
   }
 
   exists(remoteKey: string): Promise<boolean> {
@@ -170,7 +186,7 @@ export class CommandBackend implements Backend {
     }
     const vars: CommandTemplateVars = {
       local: '',
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
+      remote: this.remoteFor(remoteKey),
       relative_path: '',
       bucket: this.config.bucket ?? '',
     };
