@@ -221,17 +221,20 @@ export async function handlePush(
     // real run would refuse).
     const needsPush = [];
     let wouldTransfer = 0;
+    let wouldBlock = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
       const modified = existsSync(file.absPath) && (await computeHash(file.absPath)) !== ref.hash;
       if (ref.remote_key && !opts.force) {
         if (modified) {
           needsPush.push(`warn ${file.relPath} (modified since last push; would not upload)`);
+          wouldBlock++;
         }
         continue;
       }
       if (modified && !opts.force) {
         needsPush.push(`refuse ${file.relPath} (changed since track; would need --force)`);
+        wouldBlock++;
         continue;
       }
       needsPush.push(`push ${file.relPath}`);
@@ -244,6 +247,11 @@ export async function handlePush(
         console.log(formatDryRun(a));
       }
       console.log(formatDryRun(`push ${formatCount(wouldTransfer, 'file')}`));
+    }
+    // Dry-run reports the exit code the real run would produce — scripts
+    // gate on it (Bugbot round 4).
+    if (wouldBlock > 0) {
+      process.exitCode = 1;
     }
     return;
   }
@@ -318,11 +326,19 @@ export async function handlePush(
   const failed = results.filter((r) => !r.success);
 
   if (globalOpts.json) {
+    // warnings must be countable in the summary: a warning-only blocked push
+    // exits 1, and JSON automation reads the summary, not stderr (Bugbot
+    // round 4).
     console.log(
       formatJson({
         pushed: results,
         warnings,
-        summary: { total: results.length, succeeded: succeeded.length, failed: failed.length },
+        summary: {
+          total: results.length,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          warnings: warnings.length,
+        },
       }),
     );
   } else if (!globalOpts.quiet) {
@@ -370,6 +386,7 @@ export async function handlePull(
     // that would actually transfer, and surface refusals.
     const needsPull = [];
     let wouldTransfer = 0;
+    let wouldRefuse = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
       if (!ref.remote_key) {
@@ -381,6 +398,7 @@ export async function handlePull(
           continue;
         }
         needsPull.push(`refuse ${file.relPath} (locally modified; would need --force)`);
+        wouldRefuse++;
         continue;
       }
       needsPull.push(`pull ${file.relPath}`);
@@ -393,6 +411,11 @@ export async function handlePull(
         console.log(formatDryRun(a));
       }
       console.log(formatDryRun(`pull ${formatCount(wouldTransfer, 'file')}`));
+    }
+    // Dry-run reports the exit code the real run would produce — refusals
+    // exit with the conflict code (Bugbot round 4).
+    if (wouldRefuse > 0) {
+      process.exitCode = CONFLICT_EXIT_CODE;
     }
     return;
   }
@@ -484,6 +507,7 @@ export async function handlePull(
  */
 type SyncDecision =
   | { action: 'push_new' }
+  | { action: 'missing_local' }
   | { action: 'pull_missing' }
   | { action: 'up_to_date'; localHash: string }
   | { action: 'pull' }
@@ -497,6 +521,12 @@ async function decideSyncAction(
   cacheDir: string,
 ): Promise<SyncDecision> {
   if (!ref.remote_key) {
+    // No local payload and nothing ever pushed: there is nothing to push
+    // AND nothing to pull — report clearly instead of planning a push that
+    // can only fail (Bugbot round 4).
+    if (!existsSync(file.absPath)) {
+      return { action: 'missing_local' };
+    }
     return { action: 'push_new' };
   }
   if (!existsSync(file.absPath)) {
@@ -530,6 +560,10 @@ const SYNC_CONFLICT_HELP =
 const SYNC_AMBIGUOUS_HELP =
   'no merge base to tell a local edit from a git pull; run `blobsy push` or `blobsy pull` explicitly';
 
+const SYNC_MISSING_LOCAL_HELP =
+  'local file missing and never pushed (no remote copy to pull); ' +
+  'restore the file or run `blobsy untrack` to stop tracking it';
+
 export async function handleSync(
   paths: string[],
   opts: Record<string, unknown>,
@@ -561,6 +595,8 @@ export async function handleSync(
     // (review finding CLI-02) — it previously omitted the modified→push and
     // conflict cases entirely, reporting "Everything up to date".
     const actions = [];
+    let wouldConflict = 0;
+    let wouldError = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
       const decision = await decideSyncAction(file, ref, cacheDir);
@@ -569,15 +605,21 @@ export async function handleSync(
         case 'push':
           actions.push(`push ${file.relPath}`);
           break;
+        case 'missing_local':
+          actions.push(`error ${file.relPath} (${SYNC_MISSING_LOCAL_HELP})`);
+          wouldError++;
+          break;
         case 'pull_missing':
         case 'pull':
           actions.push(`pull ${file.relPath}`);
           break;
         case 'conflict':
           actions.push(`conflict ${file.relPath} (would error; ${SYNC_CONFLICT_HELP})`);
+          wouldConflict++;
           break;
         case 'ambiguous':
           actions.push(`error ${file.relPath} (${SYNC_AMBIGUOUS_HELP})`);
+          wouldConflict++;
           break;
         case 'up_to_date':
           break;
@@ -592,6 +634,13 @@ export async function handleSync(
       if (actions.length === 0) {
         console.log(c.muted('Everything up to date.'));
       }
+    }
+    // Dry-run reports the exit code the real run would produce — scripts
+    // gate on it (Bugbot round 4).
+    if (wouldConflict > 0) {
+      process.exitCode = CONFLICT_EXIT_CODE;
+    } else if (wouldError > 0) {
+      process.exitCode = 1;
     }
     return;
   }
@@ -665,6 +714,14 @@ export async function handleSync(
               `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`,
             );
           }
+        }
+        break;
+      }
+
+      case 'missing_local': {
+        errors++;
+        if (!globalOpts.quiet) {
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - ${SYNC_MISSING_LOCAL_HELP}`);
         }
         break;
       }

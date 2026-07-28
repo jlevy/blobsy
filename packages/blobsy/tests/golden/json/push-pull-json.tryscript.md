@@ -50,7 +50,8 @@ $ blobsy push --json
   "summary": {
     "total": 2,
     "succeeded": 2,
-    "failed": 0
+    "failed": 0,
+    "warnings": 0
   }
 }
 ? 0
@@ -107,7 +108,8 @@ $ blobsy push --json
   "summary": {
     "total": 0,
     "succeeded": 0,
-    "failed": 0
+    "failed": 0,
+    "warnings": 0
   }
 }
 ? 0

@@ -5,7 +5,7 @@
  * handle compression, manage atomic writes, coordinate push/pull/sync.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { rename, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -160,7 +160,16 @@ function assertCommandBackendTrusted(repoRoot: string): void {
       if (grant === true) {
         return;
       }
-      if (Array.isArray(grant) && grant.some((p) => resolve(p) === resolve(repoRoot))) {
+      // Compare canonical paths: a symlinked checkout must still match its
+      // allowlisted canonical path and vice versa (Bugbot round 4).
+      const canonical = (p: string): string => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      };
+      if (Array.isArray(grant) && grant.some((p) => canonical(p) === canonical(repoRoot))) {
         return;
       }
     }

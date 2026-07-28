@@ -14,7 +14,7 @@ before: |
   cp small-file.txt data/model.bin
   blobsy track data/model.bin
   blobsy push data/model.bin
-  blobsy hooks install
+  BLOBSY_NO_HOOKS= blobsy hooks install
   git add -A && git commit -q -m "track and push"
   export BLOBSY_HOME=/tmp/test-no-global-config
 ---

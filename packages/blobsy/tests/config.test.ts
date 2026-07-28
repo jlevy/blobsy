@@ -91,6 +91,78 @@ describe('config', () => {
     // Shallow merge: compress should remain from base
     expect(merged.compress?.algorithm).toBe('zstd');
   });
+
+  it('merges section objects one level deep (CFG-02)', () => {
+    const base = getBuiltinDefaults();
+    // A subdir override setting ONLY externalize.always must keep the
+    // parent's min_size and never.
+    const merged = mergeConfigs(base, {
+      externalize: { always: ['*.parquet'] } as never,
+    });
+    expect(merged.externalize?.always).toEqual(['*.parquet']);
+    expect(merged.externalize?.min_size).toBe('200kb');
+    expect(merged.externalize?.never).toEqual([]);
+  });
+
+  it('merges backends by name, keeping parent backends (CFG-02)', () => {
+    const base = { backends: { default: { url: 'local:../remote' } } };
+    const merged = mergeConfigs(base, {
+      backends: { archive: { url: 's3://bucket/archive' } },
+    });
+    expect(merged.backends?.default?.url).toBe('local:../remote');
+    expect(merged.backends?.archive?.url).toBe('s3://bucket/archive');
+  });
+
+  it('replaces arrays and scalars wholesale', () => {
+    const base = getBuiltinDefaults();
+    const merged = mergeConfigs(base, { ignore: ['only-this/**'] });
+    expect(merged.ignore).toEqual(['only-this/**']);
+  });
+
+  it('rejects wrong-typed config values at load time (CFG-03)', async () => {
+    const dir = tmpDir();
+    const configPath = join(dir, '.blobsy.yml');
+    writeFileSync(configPath, 'externalize:\n  min_size: true\n');
+
+    await expect(loadConfigFile(configPath)).rejects.toThrow(/externalize\.min_size/);
+  });
+
+  it('accepts a single-string pattern list (blobsy config writes scalars)', async () => {
+    const dir = tmpDir();
+    const configPath = join(dir, '.blobsy.yml');
+    writeFileSync(configPath, 'externalize:\n  never: "*.md"\nignore: "*.tmp"\n');
+
+    const config = await loadConfigFile(configPath);
+    expect(config.externalize?.never).toBe('*.md');
+  });
+
+  it('rejects wrong-typed ignore at load time (CFG-03)', async () => {
+    const dir = tmpDir();
+    const configPath = join(dir, '.blobsy.yml');
+    writeFileSync(configPath, 'ignore: 5\n');
+
+    await expect(loadConfigFile(configPath)).rejects.toThrow(/ignore/);
+  });
+
+  it('reports unresolved merge conflict markers clearly (CFG-03)', async () => {
+    const dir = tmpDir();
+    const configPath = join(dir, '.blobsy.yml');
+    writeFileSync(
+      configPath,
+      '<<<<<<< HEAD\nbackends:\n  default:\n    url: local:a\n=======\nbackends:\n  default:\n    url: local:b\n>>>>>>> theirs\n',
+    );
+
+    await expect(loadConfigFile(configPath)).rejects.toThrow(/merge conflict markers/);
+  });
+
+  it('accepts unknown top-level keys (doctor reports them instead)', async () => {
+    const dir = tmpDir();
+    const configPath = join(dir, '.blobsy.yml');
+    writeFileSync(configPath, 'some_future_key: 1\n');
+
+    const config = await loadConfigFile(configPath);
+    expect((config as Record<string, unknown>).some_future_key).toBe(1);
+  });
 });
 
 describe('parseSize', () => {

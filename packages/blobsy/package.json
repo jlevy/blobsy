@@ -74,6 +74,7 @@
     "marked-terminal": "^7.3.0",
     "picocolors": "^1.1.1",
     "picomatch": "^4.0.3",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "zod": "^4.4.3"
   }
 }
