@@ -2,7 +2,7 @@ import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   getBuiltinDefaults,
@@ -10,6 +10,7 @@ import {
   loadConfigFile,
   mergeConfigs,
   parseSize,
+  resolveConfig,
   resolveConfigWithOrigins,
   unsetNestedValue,
 } from '../src/config.js';
@@ -153,6 +154,24 @@ describe('config', () => {
     );
 
     await expect(loadConfigFile(configPath)).rejects.toThrow(/merge conflict markers/);
+  });
+
+  it('warns about and strips an in-repo trust_command_backends grant (SEC-03)', async () => {
+    const repoDir = tmpDir();
+    writeFileSync(
+      join(repoDir, '.blobsy.yml'),
+      'backends:\n  default:\n    url: local:remote\ntrust_command_backends: true\n',
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const config = await resolveConfig(repoDir, repoDir);
+      expect('trust_command_backends' in config).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('ignoring trust_command_backends'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('accepts unknown top-level keys (doctor reports them instead)', async () => {

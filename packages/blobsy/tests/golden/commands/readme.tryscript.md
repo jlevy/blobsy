@@ -4,9 +4,8 @@ sandbox: true
 # Readme output starts with project header
 
 ```console
-$ blobsy readme | head -5
+$ blobsy readme | head -1
 # blobsy
-...
 ? 0
 ```
 

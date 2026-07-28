@@ -44,6 +44,10 @@ jobs:
         working-directory: packages/blobsy
         run: pnpm test:golden
 
+      - name: Check golden coverage conventions
+        working-directory: packages/blobsy
+        run: bash scripts/check-golden-coverage.sh
+
       - run: pnpm test:coverage
 
       - name: Coverage Report

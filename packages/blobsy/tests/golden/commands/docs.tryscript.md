@@ -24,9 +24,8 @@ Use: blobsy docs <topic>
 # Brief version starts with quick reference header
 
 ```console
-$ blobsy docs --brief | head -3
+$ blobsy docs --brief | head -1
 # blobsy — Quick Reference
-...
 ? 0
 ```
 
@@ -41,18 +40,16 @@ For full documentation: `blobsy docs`
 # Extract specific section by slug
 
 ```console
-$ blobsy docs compression | head -3
+$ blobsy docs compression | head -1
 ## Compression
-...
 ? 0
 ```
 
 # Partial title match for backends
 
 ```console
-$ blobsy docs backend | head -3
+$ blobsy docs backend | head -1
 ## Backend Configuration
-...
 ? 0
 ```
 
@@ -67,8 +64,7 @@ Section "nonexistent-section" not found. Use --list to see available sections.
 # Full docs start with user guide header
 
 ```console
-$ blobsy docs | head -3
+$ blobsy docs | head -1
 # blobsy User Guide
-...
 ? 0
 ```

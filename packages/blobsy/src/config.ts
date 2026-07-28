@@ -189,11 +189,31 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
 
   // Apply in order: repo root first, deepest subdirectory last
   for (const configPath of configFiles) {
-    const override = await loadConfigFile(configPath);
+    const override = stripInRepoTrustGrant(await loadConfigFile(configPath), configPath);
     config = mergeConfigs(config, override);
   }
 
   return config;
+}
+
+/**
+ * The command-backend trust grant must come from OUTSIDE the repository
+ * (SEC-03) — a committed grant would let any clone self-authorize running
+ * repo-controlled commands. Accepting the key in a repo .blobsy.yml but
+ * silently ignoring it made a repo-only grant look valid while every
+ * transfer still refused (Bugbot r7): warn and strip instead.
+ */
+function stripInRepoTrustGrant(override: BlobsyConfig, configPath: string): BlobsyConfig {
+  if (!('trust_command_backends' in override)) {
+    return override;
+  }
+  console.warn(
+    `Warning: ignoring trust_command_backends in ${configPath}: ` +
+      'the trust grant must come from outside the repository (~/.blobsy.yml ' +
+      'or BLOBSY_TRUST_COMMAND_BACKEND).',
+  );
+  const { trust_command_backends: _ignored, ...rest } = override as Record<string, unknown>;
+  return rest as BlobsyConfig;
 }
 
 export type ConfigOrigin = 'builtin' | 'global' | 'repo' | 'subdir';
@@ -248,7 +268,7 @@ export async function resolveConfigWithOrigins(
 
   // Apply in order: repo root first, deepest subdirectory last
   for (const configPath of configFiles) {
-    const override = await loadConfigFile(configPath);
+    const override = stripInRepoTrustGrant(await loadConfigFile(configPath), configPath);
     const isRepoRoot = configPath === join(repoRootResolved, CONFIG_FILENAME);
     const origin: ConfigOrigin = isRepoRoot ? 'repo' : 'subdir';
     recordOrigins(override as Record<string, unknown>, origin, configPath, origins);

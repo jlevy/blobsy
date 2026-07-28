@@ -30,8 +30,7 @@
     "release:changes": "git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --oneline",
     "upgrade:check": "ncu --format group",
     "upgrade": "ncu --target minor -u && pnpm install && pnpm test",
-    "upgrade:major": "ncu --target latest --interactive --format group",
-    "compile-template": "python admin/compile_template.py"
+    "upgrade:major": "ncu --target latest --interactive --format group"
   },
   "devDependencies": {
     "@20minutes/s3rver": "^4.0.3",
