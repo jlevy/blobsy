@@ -32,7 +32,7 @@ import {
   findRepoRoot,
   findBrefFiles,
   isDirectory,
-  resolveFilePath,
+  resolveRepoPath,
   stripBrefExtension,
   toRepoRelative,
   brefPath,
@@ -69,7 +69,13 @@ import type {
   GlobalOptions,
   TransferResult,
 } from './types.js';
-import { ValidationError, BREF_EXTENSION, BREF_FORMAT, FILE_STATE_SYMBOLS } from './types.js';
+import {
+  ValidationError,
+  BREF_EXTENSION,
+  BREF_FORMAT,
+  FILE_STATE_SYMBOLS,
+  HOOK_MANAGED_MARKER,
+} from './types.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -87,7 +93,9 @@ export function resolveTrackedFiles(
   repoRoot: string,
 ): { relPath: string; absPath: string; refPath: string }[] {
   const targetPaths =
-    paths.length > 0 ? paths.map((p) => resolveFilePath(stripBrefExtension(p))) : [repoRoot];
+    paths.length > 0
+      ? paths.map((p) => resolveRepoPath(stripBrefExtension(p), repoRoot))
+      : [repoRoot];
 
   const files: { relPath: string; absPath: string; refPath: string }[] = [];
   for (const tp of targetPaths) {
@@ -1550,20 +1558,36 @@ function detectBlobsyPath(): string {
   }
 }
 
-/** Install a single git hook. */
-async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<void> {
+/**
+ * Install a single git hook.
+ *
+ * Returns false (without touching the file) when a hook exists that blobsy
+ * does not own — identified by the exact managed marker. Overwriting a
+ * user's hook silently removes their linters/tests/signing (review finding
+ * HK-03); "the file mentions blobsy" is not ownership.
+ */
+async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<boolean> {
   const hookDir = join(repoRoot, '.git', 'hooks');
   await ensureDir(hookDir);
   const blobsyPath = detectBlobsyPath();
   const hookPath = join(hookDir, hook.name);
+
+  if (existsSync(hookPath)) {
+    const existing = await readFile(hookPath, 'utf-8');
+    if (!existing.includes(HOOK_MANAGED_MARKER)) {
+      return false;
+    }
+  }
+
   const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
+${HOOK_MANAGED_MARKER}
 # To bypass: ${hook.bypassCmd}
 exec "${blobsyPath}" hook ${hook.gitEvent}
 `;
   const { writeFile: writeFs } = await import('node:fs/promises');
   await writeFs(hookPath, hookContent);
   await chmod(hookPath, 0o755);
+  return true;
 }
 
 async function checkHooks(
@@ -1686,9 +1710,16 @@ export async function handleHooks(
     }
 
     for (const hook of HOOK_TYPES) {
-      await installHook(repoRoot, hook);
+      const installed = await installHook(repoRoot, hook);
       if (!globalOpts.quiet) {
-        console.log(`Installed ${hook.name} hook.`);
+        if (installed) {
+          console.log(`Installed ${hook.name} hook.`);
+        } else {
+          console.log(
+            `Existing ${hook.name} hook found (not managed by blobsy); left in place. ` +
+              `Add manually: blobsy hook ${hook.gitEvent}`,
+          );
+        }
       }
     }
 
@@ -1700,14 +1731,16 @@ export async function handleHooks(
       const hookPath = join(repoRoot, '.git', 'hooks', hook.name);
       if (existsSync(hookPath)) {
         const content = await readFile(hookPath, 'utf-8');
-        if (content.includes('blobsy')) {
+        // Delete only hooks carrying the exact managed marker — a user
+        // hook that merely calls blobsy is theirs (review finding HK-03).
+        if (content.includes(HOOK_MANAGED_MARKER)) {
           await unlink(hookPath);
           if (!globalOpts.quiet) {
             console.log(`Uninstalled ${hook.name} hook.`);
           }
         } else if (!globalOpts.quiet) {
           console.log(
-            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy.`,
+            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy; leaving it in place.`,
           );
         }
       } else if (!globalOpts.quiet) {

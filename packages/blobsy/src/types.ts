@@ -35,6 +35,15 @@ export const BREF_COMMENT_HEADER =
   '# blobsy -- https://github.com/jlevy/blobsy\n# Run: blobsy status | blobsy --help\n\n';
 export const BREF_EXTENSION = '.bref';
 
+/**
+ * Ownership marker written into every blobsy-managed git hook.
+ *
+ * Install/uninstall must only ever rewrite or delete files carrying this
+ * exact marker — substring checks like "contains blobsy" destroyed users'
+ * multi-command hooks that merely invoked blobsy (review finding HK-03).
+ */
+export const HOOK_MANAGED_MARKER = '# Installed by: blobsy hooks install';
+
 /** Per-file stat cache entry for fast change detection and three-way merge. */
 export interface StatCacheEntry {
   /** Repo-relative file path */

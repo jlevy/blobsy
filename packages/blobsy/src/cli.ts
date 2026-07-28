@@ -63,7 +63,7 @@ import {
   findTrackableFiles,
   isDirectory,
   normalizePath,
-  resolveFilePath,
+  resolveRepoPath,
   stripBrefExtension,
   toRepoRelative,
   brefPath,
@@ -86,7 +86,13 @@ import {
 import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
-import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
+import {
+  BlobsyError,
+  BREF_FORMAT,
+  HOOK_MANAGED_MARKER,
+  ValidationError,
+  UserError,
+} from './types.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -706,10 +712,15 @@ async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promis
 
     if (existsSync(hookPath)) {
       const content = await readFile(hookPath, 'utf-8');
-      if (!content.includes('blobsy')) {
+      // Only rewrite hooks blobsy itself installed (exact managed marker).
+      // A user hook that merely CALLS blobsy is still the user's file —
+      // overwriting it silently removes their linters/tests/signing
+      // (review finding HK-03).
+      if (!content.includes(HOOK_MANAGED_MARKER)) {
         if (!globalOpts.quiet && !globalOpts.json) {
           console.log(
-            `Existing ${hook.name} hook found. Add manually: blobsy hook ${hook.gitEvent}`,
+            `Existing ${hook.name} hook found (not managed by blobsy). ` +
+              `Add manually: blobsy hook ${hook.gitEvent}`,
           );
         }
         continue;
@@ -738,7 +749,7 @@ async function handleTrack(
   const minSizeOverride = opts.minSize as string | undefined;
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
     if (isDirectory(absPath)) {
       await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts, minSizeOverride);
@@ -768,7 +779,7 @@ async function handleAdd(
   const allFilesToStage: string[] = [];
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
     let result: TrackResult;
     if (isDirectory(absPath)) {
       result = await trackDirectory(
@@ -1246,7 +1257,7 @@ async function handleUntrack(
     }
   } else {
     for (const inputPath of inputPaths) {
-      const absPath = resolveFilePath(stripBrefExtension(inputPath));
+      const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
       if (isDirectory(absPath)) {
         if (!recursive) {
@@ -1377,7 +1388,7 @@ async function handleRm(
   }
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
     if (isDirectory(absPath)) {
       if (!recursive) {
@@ -1535,8 +1546,8 @@ async function handleMv(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
-  const srcAbs = resolveFilePath(stripBrefExtension(source));
-  const destAbs = resolveFilePath(stripBrefExtension(dest));
+  const srcAbs = resolveRepoPath(stripBrefExtension(source), repoRoot);
+  const destAbs = resolveRepoPath(stripBrefExtension(dest), repoRoot);
 
   if (isDirectory(srcAbs)) {
     await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts);

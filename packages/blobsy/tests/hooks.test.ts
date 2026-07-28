@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -163,5 +163,59 @@ describe('hooks command - absolute path', () => {
     const hookContent = await readFile(hookPath, 'utf-8');
     // Should have absolute path
     expect(hookContent).toMatch(/exec "\/[^"]*" hook pre-commit/);
+  });
+});
+
+describe('hook ownership (HK-03)', () => {
+  const userHook = '#!/bin/sh\nnpm test\nblobsy hook pre-commit\ngitleaks protect\n';
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'blobsy-hook-own-test-'));
+    await execa('git', ['init'], { cwd: testDir });
+    await execa('git', ['config', 'user.email', 'test@example.com'], { cwd: testDir });
+    await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
+    await blobsy(['init', '--no-hooks', 'local:../own-backend'], {
+      cwd: testDir,
+      env: { ...process.env, BLOBSY_NO_HOOKS: '' },
+    });
+  });
+
+  afterEach(async () => {
+    const backendDir = join(testDir, '..', 'own-backend');
+    await rm(testDir, { recursive: true, force: true });
+    await rm(backendDir, { recursive: true, force: true }).catch(() => {
+      /* ignore */
+    });
+  });
+
+  it('hooks install leaves a user-owned hook in place even if it calls blobsy', async () => {
+    const hookPath = join(testDir, '.git', 'hooks', 'pre-commit');
+    await mkdir(join(testDir, '.git', 'hooks'), { recursive: true });
+    await writeFile(hookPath, userHook);
+
+    const result = await blobsy(['hooks', 'install'], { cwd: testDir });
+    expect(result.stdout).toMatch(/not managed by blobsy/);
+    expect(await readFile(hookPath, 'utf-8')).toBe(userHook);
+  });
+
+  it('hooks uninstall never deletes a user-owned hook that mentions blobsy', async () => {
+    const hookPath = join(testDir, '.git', 'hooks', 'pre-push');
+    await mkdir(join(testDir, '.git', 'hooks'), { recursive: true });
+    await writeFile(hookPath, userHook);
+
+    const result = await blobsy(['hooks', 'uninstall'], { cwd: testDir });
+    expect(result.stdout).toMatch(/not managed by blobsy/);
+    expect(await readFile(hookPath, 'utf-8')).toBe(userHook);
+  });
+
+  it('hooks install rewrites its own previously installed hook', async () => {
+    await blobsy(['hooks', 'install'], { cwd: testDir });
+    const hookPath = join(testDir, '.git', 'hooks', 'pre-commit');
+    const first = await readFile(hookPath, 'utf-8');
+    expect(first).toContain('# Installed by: blobsy hooks install');
+
+    const result = await blobsy(['hooks', 'install'], { cwd: testDir });
+    expect(result.stdout).toMatch(/Installed pre-commit hook/);
   });
 });

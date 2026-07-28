@@ -7,7 +7,7 @@
 
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
 import picomatch from 'picomatch';
@@ -85,6 +85,44 @@ export function getCacheEntryPath(cacheDir: string, relativePath: string): strin
 /** Resolve a user-provided path to an absolute path. */
 export function resolveFilePath(inputPath: string, cwd?: string): string {
   return resolve(cwd ?? process.cwd(), inputPath);
+}
+
+/**
+ * Resolve a user-supplied path and refuse anything outside the repository.
+ *
+ * "The caller supplied the path" is not a safety boundary for an
+ * agent-driven CLI (review finding SEC-02): without containment,
+ * `rm`/`untrack`/`mv` mutate or delete files outside the repo and
+ * `track`/`add` scatter `.bref`/`.gitignore` files across the filesystem.
+ * Symlinks are resolved (via the deepest existing ancestor for
+ * not-yet-created paths) so a link inside the repo cannot smuggle an
+ * operation outside it.
+ */
+export function resolveRepoPath(inputPath: string, repoRoot: string, cwd?: string): string {
+  const resolved = resolve(cwd ?? process.cwd(), inputPath);
+  const root = realpathSync(resolve(repoRoot));
+
+  let effective: string;
+  try {
+    effective = realpathSync(resolved);
+  } catch {
+    // Path doesn't exist yet (e.g. a mv destination): check containment on
+    // the deepest existing ancestor plus the remaining lexical tail.
+    let dir = dirname(resolved);
+    const tail: string[] = [basename(resolved)];
+    while (!existsSync(dir) && dir !== dirname(dir)) {
+      tail.unshift(basename(dir));
+      dir = dirname(dir);
+    }
+    effective = existsSync(dir) ? join(realpathSync(dir), ...tail) : resolved;
+  }
+
+  if (effective !== root && !effective.startsWith(root + sep)) {
+    throw new ValidationError(`Path is outside the repository: ${inputPath}`, [
+      `blobsy operations are confined to the repo root: ${repoRoot}`,
+    ]);
+  }
+  return resolved;
 }
 
 /** Check if a path is a directory. */
