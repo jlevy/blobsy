@@ -82,6 +82,7 @@ import {
   gitHooksDir,
   hooksDisabledByEnv,
   installHook,
+  wouldInstallHook,
 } from './hooks.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
@@ -1780,8 +1781,34 @@ export async function handleHooks(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
+  if (action !== 'install' && action !== 'uninstall') {
+    throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
+  }
+
   if (globalOpts.dryRun) {
-    const actions = HOOK_TYPES.map((h) => `${action} ${h.name} hook`);
+    // Mirror the real run's per-hook decisions (BLOBSY_NO_HOOKS opt-out,
+    // ownership marker checks) instead of listing every hook — a plan that
+    // promises actions the real run would skip misleads automation
+    // (Bugbot r12).
+    const actions: string[] = [];
+    if (action === 'install' && !hooksDisabledByEnv()) {
+      for (const hook of HOOK_TYPES) {
+        if (await wouldInstallHook(repoRoot, hook)) {
+          actions.push(`install ${hook.name} hook`);
+        }
+      }
+    } else if (action === 'uninstall') {
+      const hookDir = gitHooksDir(repoRoot);
+      for (const hook of HOOK_TYPES) {
+        const hookPath = join(hookDir, hook.name);
+        if (
+          existsSync(hookPath) &&
+          (await readFile(hookPath, 'utf-8')).includes(HOOK_MANAGED_MARKER)
+        ) {
+          actions.push(`uninstall ${hook.name} hook`);
+        }
+      }
+    }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
     } else {
@@ -1829,7 +1856,7 @@ export async function handleHooks(
     if (!globalOpts.quiet && blobsyPath !== 'blobsy') {
       console.log(`  Using executable: ${blobsyPath}`);
     }
-  } else if (action === 'uninstall') {
+  } else {
     const hookDir = gitHooksDir(repoRoot);
     for (const hook of HOOK_TYPES) {
       const hookPath = join(hookDir, hook.name);
@@ -1851,8 +1878,6 @@ export async function handleHooks(
         console.log(`No ${hook.name} hook found.`);
       }
     }
-  } else {
-    throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
   }
 }
 
