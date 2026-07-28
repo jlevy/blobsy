@@ -3,9 +3,9 @@ type: is
 id: is-01kyjxad4kcjtwg6d00fe9cvcc
 title: "Epic: Round 7 alpha readiness — implement review findings (v2)"
 kind: epic
-status: open
+status: closed
 priority: 0
-version: 34
+version: 35
 spec_path: docs/project/design/current/blobsy-design-review-round7-alpha-readiness.md
 labels: []
 dependencies: []
@@ -44,6 +44,8 @@ child_order_hints:
   - is-01kyjxdd4rgkt9cppqet4j39yh
   - is-01kyjxddf9t0q76zsm21sx9d8a
 created_at: 2026-07-27T23:07:21.106Z
-updated_at: 2026-07-27T23:08:59.753Z
+updated_at: 2026-07-28T03:23:04.117Z
+closed_at: 2026-07-28T03:23:04.117Z
+close_reason: "All round-7 findings implemented across PR #4: 6 blockers, all High/Medium gate items, TEST/BE/CLI/DOCS batches, L-01..15 polish (L-06 exec-helper and L-11 error-hierarchy unification deferred as pre-beta refactors), CLI-07 consolidation to 14 public commands, plus 10 rounds of Bugbot findings adopted. Deferred slivers documented in child close reasons and the review doc."
 ---
 Implement the alpha-exit matrix (22 gate items) and trailing findings from the round 7 review v2 (62 findings: 6 Blocker / 20 High / 21 Medium / 15 Low). Execution order per the matrix: CI trust (DX-01, TEST-01) -> data safety (TEST-04, DS-01..04, HK-01, BE-03, CLI-01, CLI-02) -> trust boundaries (SEC-02, HK-03, SEC-03) -> transfer viability (BE-01, BE-04, BE-02) -> docs gate (DOCS-01, DOCS-02) -> non-gate cleanup and docs. Each gate item has an acceptance test defined in the review doc's Alpha-Exit Matrix.
