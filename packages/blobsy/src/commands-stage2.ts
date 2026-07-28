@@ -538,7 +538,8 @@ type SyncDecision =
   | { action: 'pull' }
   | { action: 'push'; localHash: string }
   | { action: 'conflict'; localHash: string; baseHash: string; refHash: string }
-  | { action: 'ambiguous'; localHash: string };
+  | { action: 'ambiguous'; localHash: string }
+  | { action: 'refuse_modified'; localHash: string };
 
 async function decideSyncAction(
   file: { relPath: string; absPath: string; refPath: string },
@@ -551,6 +552,13 @@ async function decideSyncAction(
     // can only fail (Bugbot round 4).
     if (!existsSync(file.absPath)) {
       return { action: 'missing_local' };
+    }
+    // Payload changed since track: `blobsy push` refuses this state
+    // (DS-03) and sync must not become the bypass that silently uploads
+    // re-hashed content (Bugbot r9).
+    const localHash = await computeHash(file.absPath);
+    if (localHash !== ref.hash) {
+      return { action: 'refuse_modified', localHash };
     }
     return { action: 'push_new' };
   }
@@ -588,6 +596,9 @@ const SYNC_AMBIGUOUS_HELP =
 const SYNC_MISSING_LOCAL_HELP =
   'local file missing and never pushed (no remote copy to pull); ' +
   'restore the file or run `blobsy untrack` to stop tracking it';
+
+const SYNC_REFUSE_MODIFIED_HELP =
+  'changed since track; re-track with `blobsy track <path>` then `blobsy push --force`';
 
 /**
  * `blobsy sync` — bidirectional: push unpushed, pull missing/outdated.
@@ -637,6 +648,10 @@ export async function handleSync(
           break;
         case 'missing_local':
           actions.push(`error ${file.relPath} (${SYNC_MISSING_LOCAL_HELP})`);
+          wouldError++;
+          break;
+        case 'refuse_modified':
+          actions.push(`refuse ${file.relPath} (${SYNC_REFUSE_MODIFIED_HELP})`);
           wouldError++;
           break;
         case 'pull_missing':
@@ -715,19 +730,13 @@ export async function handleSync(
 
     switch (decision.action) {
       case 'push_new': {
-        // First push of a tracked file. If the payload changed since track,
-        // re-hash so the uploaded content and the recorded hash stay
-        // consistent (never upload new bytes under a stale hash — DS-03).
-        let pushRef = ref;
-        if (existsSync(file.absPath)) {
-          const currentHash = await computeHash(file.absPath);
-          if (currentHash !== ref.hash) {
-            pushRef = { ...ref, hash: currentHash, size: statSync(file.absPath).size };
-          }
-        }
-        const result = await pushFile(file.absPath, file.relPath, pushRef, config, repoRoot);
+        // First push of a tracked file. decideSyncAction has verified the
+        // payload still matches the .bref hash — a modified payload is
+        // refused (refuse_modified below) exactly like `blobsy push`
+        // (DS-03, Bugbot r9); sync must not silently re-hash and upload.
+        const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
         if (result.success && result.refUpdates) {
-          const updatedRef = { ...pushRef, ...result.refUpdates };
+          const updatedRef = { ...ref, ...result.refUpdates };
           await writeBref(file.refPath, updatedRef);
           if (existsSync(file.absPath)) {
             const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
@@ -752,6 +761,16 @@ export async function handleSync(
         errors++;
         if (!globalOpts.quiet) {
           console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - ${SYNC_MISSING_LOCAL_HELP}`);
+        }
+        break;
+      }
+
+      case 'refuse_modified': {
+        errors++;
+        if (!globalOpts.quiet) {
+          console.error(
+            `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push refused: ${SYNC_REFUSE_MODIFIED_HELP}`,
+          );
         }
         break;
       }

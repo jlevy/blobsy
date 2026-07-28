@@ -602,7 +602,8 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
       !existsSync(join(repoRoot, 'lefthook.yml')) &&
       !existsSync(join(repoRoot, '.husky'));
     if (hooksPlanned) {
-      actions.push('install pre-commit hook');
+      // Both hooks, matching the real run (Bugbot r10).
+      actions.push('install pre-commit and pre-push hooks');
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
