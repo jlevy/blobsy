@@ -1,11 +1,12 @@
 ---
 name: blobsy
-description: Track large files in Git with .bref pointers; store blobs in S3, local directories, or custom backends. Use when a repo has large binary files, when files must sync across machines without committing bytes to Git, or when the user mentions blobsy, .bref, externalize, or a Git LFS alternative.
+description: Track large files in Git with .bref pointers; store blobs in S3, GCS, Azure (via rclone), local directories, or custom backends. Use when a repo has large binary files, when files must sync across machines without committing bytes to Git, or when the user mentions blobsy, .bref, externalize, or a Git LFS alternative.
 ---
 # Blobsy Agent Skill
 
 Git-native large file storage CLI. Track large files with `.bref` pointers in Git while
-storing blobs in S3, local directories, or custom backends.
+storing blobs in S3, Google Cloud Storage, Azure (via rclone), local directories, or
+custom backends.
 
 ## Installation
 

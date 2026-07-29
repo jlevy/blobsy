@@ -5,9 +5,9 @@ Track them in Git.
 
 A simpler, more flexible, serverless alternative to Git LFS. Blobsy is a standalone CLI
 that tracks large files with lightweight `.bref` pointer files committed to Git, while
-the actual data lives in any storage backend -- S3, local directories, or custom
-commands. No special server.
-No hosting requirements.
+the actual data lives in any storage backend -- S3, Google Cloud Storage, Azure, local
+directories, or custom commands.
+No special server. No hosting requirements.
 
 ## Quick Start
 
@@ -152,6 +152,38 @@ backends:
     url: s3://my-bucket/prefix/
     endpoint: https://minio.example.com:9000
 ```
+
+S3 transfers use the AWS CLI when installed, falling back to the built-in AWS SDK. If
+you set `rclone_remote` (see below), [rclone](https://rclone.org/) is used as a fallback
+when the AWS CLI is unavailable.
+
+### Google Cloud Storage and Azure (via rclone)
+
+GCS and Azure backends transfer data through [rclone](https://rclone.org/), so you can
+use any rclone remote you have configured:
+
+1. Install rclone: https://rclone.org/install/
+2. Configure a remote for your provider: `rclone config` (e.g. a remote named `mygcs` of
+   type `google cloud storage`, or `myazure` of type `azureblob`)
+3. Point blobsy at the bucket/container and the rclone remote:
+
+```yaml
+backends:
+  default:
+    url: gs://my-bucket/prefix/
+    rclone_remote: mygcs
+```
+
+```yaml
+backends:
+  default:
+    url: azure://my-container/prefix/
+    rclone_remote: myazure
+```
+
+Credentials and endpoints come from your rclone remote configuration
+(`~/.config/rclone/rclone.conf`), so blobsy needs no cloud-specific setup of its own.
+`blobsy doctor` verifies that rclone is installed and the remote resolves.
 
 ### Local Directory
 
