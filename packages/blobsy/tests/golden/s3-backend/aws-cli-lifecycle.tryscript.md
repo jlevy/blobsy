@@ -64,6 +64,24 @@ This test exercises the AwsCliBackend (`aws s3 cp` / `aws s3api`) end to end aga
 hermetic local S3 endpoint (`rclone serve s3` backed by a sandbox directory), so it runs
 the real aws binary without needing cloud credentials.
 
+## Sanity: required tools present and the hermetic S3 endpoint is serving
+
+The harness ignores before-hook failures, so if the aws CLI is missing or
+`rclone serve s3` failed to start (e.g. rclone older than v1.63), this block names
+the actual problem instead of letting every later block fail with cascade errors.
+
+```console
+$ command -v aws >/dev/null && echo "aws present" || echo "aws MISSING (install the AWS CLI)"
+aws present
+? 0
+```
+
+```console
+$ curl -s -o /dev/null http://127.0.0.1:20787/ && echo "endpoint up" || { echo "endpoint DOWN"; cat rclone-serve.log 2>/dev/null || echo "(no serve log: before-hook aborted before starting rclone)"; }
+endpoint up
+? 0
+```
+
 ## Track two files
 
 ```console

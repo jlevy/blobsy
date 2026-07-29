@@ -34,8 +34,10 @@ jobs:
 
       # The rclone-lifecycle golden fails in its before-hook without rclone;
       # keep parity with ci.yml so a tagged release can't fail after green PR CI.
+      # Upstream install (not apt): `rclone serve s3` needs v1.63+ for the
+      # s3-backend golden's hermetic local endpoint.
       - name: Install rclone
-        run: sudo apt-get update && sudo apt-get install -y rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
 
       - name: Run golden test suite
         working-directory: packages/blobsy

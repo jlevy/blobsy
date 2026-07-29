@@ -37,8 +37,11 @@ jobs:
 
       - run: pnpm publint
 
+      # apt's rclone on ubuntu-latest is too old for `rclone serve s3` (needs
+      # v1.63+, which the s3-backend golden uses as a hermetic local endpoint),
+      # so install the current upstream build instead.
       - name: Install rclone
-        run: sudo apt-get update && sudo apt-get install -y rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
 
       - name: Run golden test suite
         working-directory: packages/blobsy
