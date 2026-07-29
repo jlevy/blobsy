@@ -3,8 +3,10 @@ sandbox: true
 timeout: 30000
 env:
   BLOBSY_NO_HOOKS: "1"
+  # Dummy credentials for the sandbox-local `rclone serve s3` endpoint below;
+  # they never touch a real cloud service.
   AWS_ACCESS_KEY_ID: blobsy-test-key
-  AWS_SECRET_ACCESS_KEY: blobsy-test-secret
+  AWS_SECRET_ACCESS_KEY: blobsy-test-secret # skipcq: SCT-A000
   AWS_DEFAULT_REGION: us-east-1
   AWS_EC2_METADATA_DISABLED: "true"
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
