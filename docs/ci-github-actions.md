@@ -35,7 +35,7 @@ jobs:
 
       - name: Pull tracked files
         env:
-          BLOBSY_NO_HOOKS: "1" # CI never commits; skip hook installation
+          BLOBSY_NO_HOOKS: "1" # kill switch: skips hook install AND disables any installed blobsy hooks
         run: |
           blobsy health
           blobsy pull

@@ -361,7 +361,10 @@ export async function pullFile(
       path: normalizePath(toRepoRelative(localPath, repoRoot)),
       success: false,
       action: 'pull',
-      error: 'No remote_key in .bref. File has not been pushed.',
+      error:
+        'No remote_key in .bref — either the file was never pushed, or it was ' +
+        'pushed without committing the updated .bref afterwards (push records ' +
+        'remote_key in the .bref; that update must be committed and pushed too).',
     };
   }
 

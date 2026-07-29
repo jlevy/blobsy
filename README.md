@@ -294,6 +294,13 @@ Blobsy installs two git hooks by default (via `blobsy setup --auto` or `blobsy i
 | **pre-commit** | `git commit` | Verifies staged `.bref` files match their local files (catches modifications after tracking) |
 | **pre-push** | `git push` | Auto-runs `blobsy push` to upload any unpushed blobs (ensures blobs and refs arrive together) |
 
+**Note:** when the pre-push hook uploads a blob, it records the resulting `remote_key`
+in the file’s `.bref` in your working tree.
+The push that triggered the hook does not include that update, so commit it in a
+follow-up (`git add '*.bref' && git commit -m 'Record blobsy remote keys'`) — until
+that lands, teammates see the file as not yet pullable.
+The hook prints a reminder when this applies.
+
 **Opting out:**
 
 - Skip during setup: `blobsy setup --auto --no-hooks s3://...`

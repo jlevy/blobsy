@@ -113,6 +113,24 @@ implementation):
   this is the “Prevention (Primary)” layer against committed-ref-without-blob data loss
   (review finding HK-01).
 
+**The two-phase `remote_key` flow (Bugbot round 10).** After the pre-push hook uploads
+a blob, it writes the resulting `remote_key` back into the file’s `.bref` in the
+working tree — but the commits being pushed are already fixed, and a pre-push hook
+cannot amend them (the push refspec references the old SHAs), so the pushed `.bref`
+lands upstream without `remote_key`.
+The key is not derivable on the pull side either: the default key template embeds
+`{iso_date_secs}`, a push-time timestamp.
+Consequences and current mitigations: teammates who fetch that commit see the file as
+“no remote_key” until the pusher commits the `.bref` update in a follow-up commit; the
+hook prints an explicit reminder with the exact commands, and the pull/sync/status
+messages say “not pushed, or the `.bref` update is uncommitted” rather than asserting
+the file was never pushed.
+No data is lost in this state — the blob is uploaded — but availability to
+collaborators lags by one commit.
+Closing the gap structurally (a derivable/deterministic key template by default,
+assigning `remote_key` at track time, or auto-staging `.bref` updates from the hook) is
+an open design decision.
+
 **Key implementation details:**
 
 - **Direct function call, not subprocess.** The hook commands call the transfer

@@ -46,7 +46,9 @@ checked against this table before merging.
 5. **Hooks are only rewritten or deleted when blobsy owns them**, identified by the
    exact `# Installed by: blobsy hooks install` marker.
    User hooks — including ones that call blobsy among other commands — are never
-   modified. `--no-hooks` and `BLOBSY_NO_HOOKS` opt out of installation.
+   modified. `--no-hooks` opts out of installation; `BLOBSY_NO_HOOKS` is a full
+   kill switch that opts out of installation and also disables execution of
+   already-installed blobsy hooks at runtime.
 6. **Remote objects are immutable under normal operations.** Once a `remote_key` is
    published, no normal command overwrites or deletes it; deletion exists only as
    `rm --remote --force` emergency plumbing, clearly labeled history-breaking, until

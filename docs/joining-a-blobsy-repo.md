@@ -23,7 +23,8 @@ blobsy status
 You’ll need credentials for the repo’s backend (e.g. AWS credentials for an `s3://`
 backend). `blobsy health` tests connectivity; read-only credentials are enough to pull.
 
-Opt-outs: set `BLOBSY_NO_HOOKS=1` to skip git-hook installation.
+Opt-outs: set `BLOBSY_NO_HOOKS=1` to disable blobsy git hooks entirely — it both
+skips hook installation and makes already-installed blobsy hooks no-ops at runtime.
 If the repo uses a `command` backend, blobsy refuses to run repo-controlled commands
 until you grant trust explicitly (`BLOBSY_TRUST_COMMAND_BACKEND=1` or a
 `trust_command_backends` entry in `~/.blobsy.yml`) — review the commands in

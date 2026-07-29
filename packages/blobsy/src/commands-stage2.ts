@@ -453,8 +453,15 @@ export async function handlePull(
     const ref = await readBref(file.refPath);
 
     if (!ref.remote_key) {
+      // Not necessarily "not pushed": with the pre-push hook flow the blob may
+      // exist remotely while the .bref update recording remote_key is still
+      // uncommitted on the pusher's machine (Bugbot round 10).
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${file.relPath}  not pushed yet (no remote_key)`));
+        console.log(
+          c.muted(
+            `  ${file.relPath}  no remote_key (not pushed, or pusher hasn't committed the .bref update)`,
+          ),
+        );
       }
       continue;
     }
@@ -595,8 +602,9 @@ const SYNC_AMBIGUOUS_HELP =
   'no merge base to tell a local edit from a git pull; run `blobsy push` or `blobsy pull` explicitly';
 
 const SYNC_MISSING_LOCAL_HELP =
-  'local file missing and never pushed (no remote copy to pull); ' +
-  'restore the file or run `blobsy untrack` to stop tracking it';
+  'local file missing and no remote_key recorded (no known remote copy to pull); ' +
+  'if a teammate pushed this file, they still need to commit the updated .bref; ' +
+  'otherwise restore the file or run `blobsy untrack` to stop tracking it';
 
 const SYNC_REFUSE_MODIFIED_HELP =
   'changed since track; re-track with `blobsy track <path>` then `blobsy push --force`';
@@ -2103,6 +2111,15 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
   }
 
   console.log('blobsy pre-push: all blobs uploaded.');
+  // The remote_key updates land in the working tree, not in the commits this
+  // push is sending (a pre-push hook cannot amend the outgoing commits), so
+  // collaborators cannot pull until a follow-up commit records them (Bugbot
+  // round 10). Say so instead of leaving the .bref changes silently dirty.
+  console.log(
+    'blobsy pre-push: remote keys were recorded in the .bref files in your ' +
+      'working tree; this push does not include them. Commit them so ' +
+      `collaborators can pull: git add '*.bref' && git commit -m 'Record blobsy remote keys'`,
+  );
 }
 
 export async function handleHook(
