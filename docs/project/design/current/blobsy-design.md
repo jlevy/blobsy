@@ -300,6 +300,12 @@ applies to compression)
 
 **Subdirectory Config Behavior:**
 
+> **Alpha status:** subdirectory `.blobsy.yml` files are currently **ignored** — every
+> command resolves config from builtin defaults → `~/.blobsy.yml` → repo root only.
+> This section describes the intended post-alpha semantics; per review round 7 (Top
+> Issue 5 / CFG-02) subdirectory configs are deferred until their merge semantics are
+> settled (tracked as bead `blobsy-4vpk`).
+
 Config files in subdirectories **replace** parent patterns (not append):
 
 ```yaml

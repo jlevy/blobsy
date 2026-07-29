@@ -205,3 +205,36 @@ Scanning data/research/...
 Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 ? 0
 ```
+
+# Directory re-track after modify clears remote_key
+
+Simulate a pushed file by recording a remote_key, then modify the payload and re-scan
+the directory: the stale key must be cleared exactly like single-file re-track, or push
+would report "already pushed" for content the remote does not have (Bugbot round 11).
+
+```console
+$ echo "remote_key: 20260101-abcdef/data/research/report.bin" >> data/research/report.bin.bref
+? 0
+```
+
+```console
+$ echo "changed report content" > data/research/report.bin
+? 0
+```
+
+```console
+$ blobsy track data/research/
+Scanning data/research/...
+  data/research/data.bin (  12 B)  -> already tracked (unchanged)
+  data/research/report.bin (  23 B)  -> updated (hash changed)
+1 file tracked, 1 unchanged.
+
+Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
+? 0
+```
+
+```console
+$ grep remote_key data/research/report.bin.bref || echo "no remote_key (cleared)"
+no remote_key (cleared)
+? 0
+```

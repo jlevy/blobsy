@@ -1059,7 +1059,18 @@ async function trackDirectory(
         continue;
       }
 
-      const newRef: Bref = { ...existingRef, hash, size: fileSize };
+      // Hash changed: clear remote_key and compression fields, same as the
+      // single-file path — the old key points to the old content, and keeping
+      // it would make push report "already pushed" for content the remote
+      // does not have (Bugbot round 11).
+      const newRef: Bref = {
+        ...existingRef,
+        hash,
+        size: fileSize,
+        remote_key: undefined,
+        compressed: undefined,
+        compressed_size: undefined,
+      };
       await writeBref(refPath, newRef);
       const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
       await writeCacheEntry(cacheDir, cacheEntry);
