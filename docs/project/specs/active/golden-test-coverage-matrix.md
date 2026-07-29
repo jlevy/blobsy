@@ -1,6 +1,6 @@
 # Golden Test Coverage Matrix
 
-**Generated:** 2026-02-21, updated 2026-07-28
+**Generated:** 2026-02-21, updated 2026-07-29
 
 CLI commands from `blobsy --help` (help.tryscript.md).
 Test files from `packages/blobsy/tests/golden/`.
@@ -107,6 +107,18 @@ Test files from `packages/blobsy/tests/golden/`.
 | untrack-rm-json.tryscript.md | untrack --json, rm --json |
 | verify-json.tryscript.md | verify --json |
 
+### rclone-backend/ (1 file)
+
+| File | Description |
+| --- | --- |
+| rclone-lifecycle.tryscript.md | Full lifecycle (track, push, pull, sync, verify, doctor) through the real rclone binary with a local remote |
+
+### s3-backend/ (1 file)
+
+| File | Description |
+| --- | --- |
+| aws-cli-lifecycle.tryscript.md | Full lifecycle through the real aws CLI against a hermetic local S3 endpoint (`rclone serve s3`) |
+
 ### workflows/ (8 files)
 
 | File | Description |
@@ -120,6 +132,6 @@ Test files from `packages/blobsy/tests/golden/`.
 | multi-file-sync.tryscript.md | Multi-directory track, push, verify, sync |
 | two-user-conflict.tryscript.md | Conflicting pushes, --force resolution |
 
-**Total:** 70 golden test files (count: `ls tests/golden/*/*.tryscript.md | wc -l`). The
+**Total:** 71 golden test files (count: `ls tests/golden/*/*.tryscript.md | wc -l`). The
 authoritative list is the directory tree; naming and elision conventions are enforced by
 `scripts/check-golden-coverage.sh` in CI.
