@@ -281,6 +281,23 @@ describe('rm command with --remote flag', () => {
     });
   });
 
+  describe('dry-run', () => {
+    it('refuses untracked paths in dry-run just like the real run', async () => {
+      await writeFile(join(testDir, 'untracked.bin'), 'data');
+
+      const result = await blobsy(['--dry-run', 'rm', 'untracked.bin'], {
+        cwd: testDir,
+        reject: false,
+      });
+
+      // Dry-run must mirror the real refusal, not print a plan the real
+      // command would reject (CLI-02 truthful-dry-run contract).
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/Not tracked/);
+      expect(existsSync(join(testDir, 'untracked.bin'))).toBe(true);
+    });
+  });
+
   describe('backend errors', () => {
     it('exits 1 if backend deletion fails, after completing local cleanup', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');

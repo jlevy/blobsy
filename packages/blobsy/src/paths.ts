@@ -101,21 +101,7 @@ export function resolveFilePath(inputPath: string, cwd?: string): string {
 export function resolveRepoPath(inputPath: string, repoRoot: string, cwd?: string): string {
   const resolved = resolve(cwd ?? process.cwd(), inputPath);
   const root = realpathSync(resolve(repoRoot));
-
-  let effective: string;
-  try {
-    effective = realpathSync(resolved);
-  } catch {
-    // Path doesn't exist yet (e.g. a mv destination): check containment on
-    // the deepest existing ancestor plus the remaining lexical tail.
-    let dir = dirname(resolved);
-    const tail: string[] = [basename(resolved)];
-    while (!existsSync(dir) && dir !== dirname(dir)) {
-      tail.unshift(basename(dir));
-      dir = dirname(dir);
-    }
-    effective = existsSync(dir) ? join(realpathSync(dir), ...tail) : resolved;
-  }
+  const effective = realpathDeep(resolved);
 
   if (effective !== root && !effective.startsWith(root + sep)) {
     throw new ValidationError(`Path is outside the repository: ${inputPath}`, [
@@ -123,6 +109,27 @@ export function resolveRepoPath(inputPath: string, repoRoot: string, cwd?: strin
     ]);
   }
   return resolved;
+}
+
+/**
+ * Resolve symlinks in a path that may not fully exist: realpath the path
+ * itself, or — for not-yet-created paths (a mv destination, an unwritten
+ * remote key) — realpath the deepest existing ancestor and append the
+ * remaining lexical tail. Non-existent trailing components cannot be
+ * symlinks, so the result is the real filesystem location the path denotes.
+ */
+export function realpathDeep(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    let dir = dirname(path);
+    const tail: string[] = [basename(path)];
+    while (!existsSync(dir) && dir !== dirname(dir)) {
+      tail.unshift(basename(dir));
+      dir = dirname(dir);
+    }
+    return existsSync(dir) ? join(realpathSync(dir), ...tail) : path;
+  }
 }
 
 /** Check if a path is a directory. */

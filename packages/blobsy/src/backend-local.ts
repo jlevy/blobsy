@@ -14,6 +14,7 @@ import type { Backend } from './types.js';
 import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
+import { realpathDeep } from './paths.js';
 
 export class LocalBackend implements Backend {
   readonly type = 'local' as const;
@@ -38,14 +39,28 @@ export class LocalBackend implements Backend {
     // root itself, and push/pull/delete on the root corrupts or exposes the
     // backend layout (Bugbot r6).
     if (!resolved.startsWith(root + sep)) {
-      throw new BlobsyError(
-        `Invalid remote_key escapes the backend directory: ${JSON.stringify(remoteKey)}`,
-        'validation',
-        1,
-        ['The .bref file may be corrupted or malicious. Inspect it before retrying.'],
-      );
+      this.throwEscape(remoteKey);
+    }
+    // The lexical check alone is not enough: a symlink inside the store can
+    // point outside it, and push/pull/exists/delete would follow the link
+    // past the boundary. Resolve symlinks — via the deepest existing
+    // ancestor for not-yet-created keys, same policy as resolveRepoPath
+    // (SEC-02) — and re-check containment (Bugbot r13).
+    const realRoot = realpathDeep(root);
+    const effective = realpathDeep(resolved);
+    if (!effective.startsWith(realRoot + sep)) {
+      this.throwEscape(remoteKey);
     }
     return resolved;
+  }
+
+  private throwEscape(remoteKey: string): never {
+    throw new BlobsyError(
+      `Invalid remote_key escapes the backend directory: ${JSON.stringify(remoteKey)}`,
+      'validation',
+      1,
+      ['The .bref file may be corrupted or malicious. Inspect it before retrying.'],
+    );
   }
 
   async push(localPath: string, remoteKey: string): Promise<void> {

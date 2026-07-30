@@ -129,5 +129,47 @@ describe('local backend', () => {
       await expect(backend.push(srcPath, '')).rejects.toThrow(/escapes the backend/);
       await expect(backend.delete('.')).rejects.toThrow(/escapes the backend/);
     });
+
+    it('rejects keys traversing a symlinked directory that points outside (Bugbot r13)', async () => {
+      const { mkdir, symlink } = await import('node:fs/promises');
+      const outsideDir = join(tmpDir, 'outside');
+      await mkdir(outsideDir, { recursive: true });
+      await writeFile(join(outsideDir, 'secret.bin'), 'secret');
+      await symlink(outsideDir, join(remoteDir, 'link'), 'dir');
+
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('link/secret.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('link/secret.bin')).rejects.toThrow(/escapes the backend/);
+      const srcPath = join(tmpDir, 'src2.bin');
+      await writeFile(srcPath, 'x');
+      await expect(backend.push(srcPath, 'link/new.bin')).rejects.toThrow(/escapes the backend/);
+    });
+
+    it('rejects a key that is itself a symlink pointing outside (Bugbot r13)', async () => {
+      const { symlink } = await import('node:fs/promises');
+      const outsideFile = join(tmpDir, 'target.bin');
+      await writeFile(outsideFile, 'secret');
+      await symlink(outsideFile, join(remoteDir, 'sneaky.bin'), 'file');
+
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('sneaky.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.pull('sneaky.bin', join(tmpDir, 'out.bin'))).rejects.toThrow(
+        /escapes the backend/,
+      );
+    });
+
+    it('still allows normal keys when the store root itself is a symlink', async () => {
+      const { mkdir, symlink } = await import('node:fs/promises');
+      const realStore = join(tmpDir, 'real-store');
+      await mkdir(realStore, { recursive: true });
+      const linkedStore = join(tmpDir, 'store-link');
+      await symlink(realStore, linkedStore, 'dir');
+
+      const backend = new LocalBackend(linkedStore);
+      const srcPath = join(tmpDir, 'src3.bin');
+      await writeFile(srcPath, 'ok');
+      await backend.push(srcPath, 'sub/file.bin');
+      expect(await backend.exists('sub/file.bin')).toBe(true);
+    });
   });
 });

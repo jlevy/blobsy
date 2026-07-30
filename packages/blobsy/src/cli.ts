@@ -1438,6 +1438,16 @@ async function rmFile(
   const fileName = basename(absPath);
   const fileDir = dirname(absPath);
 
+  // Every rm variant requires the file to be tracked BEFORE touching the
+  // payload — `rm --local somefile` used to unlink untracked files, which
+  // is unrecoverable since blobsy holds no copy (review finding CLI-05).
+  // Checked ahead of --dry-run so the dry run mirrors the real refusal
+  // instead of printing a plan the real command would reject (CLI-02
+  // truthful-dry-run contract; Bugbot r13).
+  if (!existsSync(refPath)) {
+    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
+  }
+
   if (globalOpts.dryRun) {
     const action = localOnly ? `delete local file ${relPath}` : `remove ${relPath}`;
     if (globalOpts.json) {
@@ -1446,13 +1456,6 @@ async function rmFile(
       console.log(formatDryRun(action));
     }
     return;
-  }
-
-  // Every rm variant requires the file to be tracked BEFORE touching the
-  // payload — `rm --local somefile` used to unlink untracked files, which
-  // is unrecoverable since blobsy holds no copy (review finding CLI-05).
-  if (!existsSync(refPath)) {
-    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
   }
 
   if (localOnly) {
