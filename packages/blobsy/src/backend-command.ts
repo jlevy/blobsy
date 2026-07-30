@@ -16,6 +16,7 @@ import type { Backend } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
 import { binaryLookupCommand, ensureDir } from './fs-utils.js';
+import { advisoryWarningsSuppressed } from './format.js';
 
 /** Timeout for exists check commands (shorter than push/pull) */
 const EXISTS_CHECK_TIMEOUT_MS = 30000;
@@ -191,8 +192,9 @@ export class CommandBackend implements Backend {
   exists(remoteKey: string, relativePath?: string): Promise<boolean> {
     if (!this.config.existsCommand) {
       // Without exists_command every blob looks absent, so pushes always
-      // re-upload — say why once instead of silently degrading (L-13).
-      if (!CommandBackend.warnedNoExistsCommand) {
+      // re-upload — say why once instead of silently degrading (L-13),
+      // unless --quiet/--json asked for clean output (Bugbot r16).
+      if (!CommandBackend.warnedNoExistsCommand && !advisoryWarningsSuppressed()) {
         CommandBackend.warnedNoExistsCommand = true;
         console.warn(
           'Note: command backend has no exists_command configured; remote blobs ' +

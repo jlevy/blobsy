@@ -46,6 +46,7 @@ import {
   formatJsonDryRun,
   formatJsonError,
   formatJsonMessage,
+  setSuppressAdvisoryWarnings,
   formatSize,
   OUTPUT_SYMBOLS,
 } from './format.js';
@@ -436,6 +437,7 @@ function wrapAction(handler: ActionHandler): ActionHandler {
         if (g.quiet && g.verbose) {
           throw new ValidationError('--quiet and --verbose cannot be used together.');
         }
+        setSuppressAdvisoryWarnings(Boolean(g.quiet || g.json));
       }
       await handler(...args);
     } catch (err) {

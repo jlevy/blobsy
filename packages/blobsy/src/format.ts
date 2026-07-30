@@ -63,6 +63,22 @@ export function initColors(mode: 'always' | 'never' | 'auto'): void {
   c.muted = pc.gray;
 }
 
+// --quiet/--json must reach advisory warnings emitted deep in backend code,
+// where threading GlobalOptions through every backend constructor isn't
+// worth it; wrapAction records the flags here once per invocation, same
+// per-invocation module-state pattern as initColors (Bugbot r16).
+let advisoryWarningsOff = false;
+
+/** Record whether advisory warnings should be suppressed (--quiet/--json). */
+export function setSuppressAdvisoryWarnings(on: boolean): void {
+  advisoryWarningsOff = on;
+}
+
+/** True when advisory warnings must not be emitted (--quiet/--json). */
+export function advisoryWarningsSuppressed(): boolean {
+  return advisoryWarningsOff;
+}
+
 /** Format a file state line for status output. */
 export function formatFileState(
   symbol: FileStateSymbol,

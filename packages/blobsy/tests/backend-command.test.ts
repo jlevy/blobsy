@@ -1,7 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseAndExpandCommand, commandBlobExists } from '../src/backend-command.js';
+import {
+  CommandBackend,
+  parseAndExpandCommand,
+  commandBlobExists,
+} from '../src/backend-command.js';
 import type { CommandTemplateVars } from '../src/backend-command.js';
+import { setSuppressAdvisoryWarnings } from '../src/format.js';
+
+describe('exists without exists_command', () => {
+  it('suppresses the advisory warning under --quiet/--json', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {
+      /* capture only */
+    });
+    try {
+      setSuppressAdvisoryWarnings(true);
+      const backend = new CommandBackend({ pushCommand: 'true {local}' });
+      expect(await backend.exists('some-key')).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      setSuppressAdvisoryWarnings(false);
+      warnSpy.mockRestore();
+    }
+  });
+});
 
 describe('parseAndExpandCommand', () => {
   const vars: CommandTemplateVars = {
