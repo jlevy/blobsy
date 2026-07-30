@@ -41,6 +41,7 @@ import { readBref, writeBref } from './ref.js';
 import { createCacheEntry, getMergeBase, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
 import { isAwsCliAvailable } from './backend-aws-cli.js';
+import { probeBinaryFor } from './backend-command.js';
 import { isRcloneAvailable } from './backend-rclone.js';
 import { parseBackendUrl } from './backend-url.js';
 import {
@@ -1313,7 +1314,10 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
         for (const field of ['push_command', 'pull_command', 'exists_command'] as const) {
           const cmd = resolved[field];
           if (cmd) {
-            const binary = cmd.split(/\s+/)[0];
+            // Probe the expanded argv[0], matching CommandBackend.healthCheck
+            // — a template starting with $TOOL must probe the tool it
+            // resolves to, not the literal token (BE-09; Bugbot r17).
+            const binary = probeBinaryFor(cmd, resolved.bucket);
             if (binary) {
               try {
                 execFileSync(binaryLookupCommand(), [binary], { stdio: 'pipe' });
@@ -1758,14 +1762,27 @@ async function checkHooks(
     } catch {
       if (fix) {
         // Await: a failed chmod was reported "fixed" (review finding CLI-03).
-        await chmod(hookPath, 0o755);
-        issues.push({
-          type: 'hooks',
-          severity: 'warning',
-          message: `${hook.name} hook made executable`,
-          fixed: true,
-          fixable: true,
-        });
+        // And catch: a chmod rejection (read-only fs, not the owner) must
+        // become a recorded failure, not an aborted doctor run (Bugbot r17).
+        try {
+          await chmod(hookPath, 0o755);
+          issues.push({
+            type: 'hooks',
+            severity: 'warning',
+            message: `${hook.name} hook made executable`,
+            fixed: true,
+            fixable: true,
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          issues.push({
+            type: 'hooks',
+            severity: 'warning',
+            message: `${hook.name} hook still not executable (chmod failed: ${message})`,
+            fixed: false,
+            fixable: false,
+          });
+        }
       } else {
         issues.push({
           type: 'hooks',

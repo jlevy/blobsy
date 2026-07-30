@@ -103,6 +103,25 @@ export function parseAndExpandCommand(template: string, vars: CommandTemplateVar
   });
 }
 
+/**
+ * Best-effort argv[0] of a command template for PATH probing: expand the
+ * template with empty transfer vars so `$TOOL`-style prefixes resolve to
+ * the real binary, falling back to the raw first token when expansion
+ * fails on undefined env vars (review finding BE-09; Bugbot r17).
+ */
+export function probeBinaryFor(command: string, bucket?: string): string | undefined {
+  try {
+    return parseAndExpandCommand(command, {
+      local: '',
+      remote: '',
+      relative_path: '',
+      bucket: bucket ?? '',
+    })[0];
+  } catch {
+    return command.split(/\s+/).find(Boolean);
+  }
+}
+
 function validateExpandedToken(token: string, context: string): void {
   if (!SAFE_TOKEN_PATTERN.test(token)) {
     const unsafeChars = [...new Set([...token].filter((c) => !SAFE_TOKEN_PATTERN.test(c)))];
@@ -226,20 +245,7 @@ export class CommandBackend implements Backend {
     // — a raw `$TOOL`-style template would probe the literal string — and
     // use a platform-aware lookup (review finding BE-09).
     const command = this.config.pushCommand ?? this.config.pullCommand!;
-    let binary: string | undefined;
-    try {
-      const argv = parseAndExpandCommand(command, {
-        local: '',
-        remote: '',
-        relative_path: '',
-        bucket: this.config.bucket ?? '',
-      });
-      binary = argv[0];
-    } catch {
-      // Template expansion may fail on undefined env vars during a health
-      // check; fall back to the raw first token.
-      binary = command.split(/\s+/).find(Boolean);
-    }
+    const binary = probeBinaryFor(command, this.config.bucket);
     if (!binary) {
       throw new ValidationError('Command template is empty.');
     }
