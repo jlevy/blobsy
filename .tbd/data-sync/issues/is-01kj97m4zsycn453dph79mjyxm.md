@@ -3,9 +3,9 @@ type: is
 id: is-01kj97m4zsycn453dph79mjyxm
 title: "Create backend-rclone.ts: RcloneBackend class implementing Backend interface (push/pull/exists/delete/healthCheck via rclone copyto/lsf/deletefile)"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 4
+version: 5
 spec_path: docs/project/specs/active/plan-2026-02-24-rclone-backend-support.md
 labels: []
 dependencies:
@@ -17,5 +17,7 @@ dependencies:
     target: is-01kj97m5tdtfzynp77567q1d5n
 parent_id: is-01kj97kjr8gt7y1ysxpdp9a3vm
 created_at: 2026-02-25T01:46:39.992Z
-updated_at: 2026-02-25T01:46:52.610Z
+updated_at: 2026-07-29T02:13:23.596Z
+closed_at: 2026-07-29T02:13:23.596Z
+close_reason: "Done: src/backend-rclone.ts implements RcloneBackend (push/pull/exists/delete/healthCheck)"
 ---

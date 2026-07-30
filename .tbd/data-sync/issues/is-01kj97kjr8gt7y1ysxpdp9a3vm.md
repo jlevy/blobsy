@@ -3,9 +3,9 @@ type: is
 id: is-01kj97kjr8gt7y1ysxpdp9a3vm
 title: "Spec: Native rclone backend support"
 kind: epic
-status: open
+status: closed
 priority: 2
-version: 14
+version: 15
 spec_path: docs/project/specs/active/plan-2026-02-24-rclone-backend-support.md
 labels: []
 dependencies: []
@@ -24,5 +24,7 @@ child_order_hints:
   - is-01kj97m6c2xmdx817722jpatzv
   - is-01kj97m6gkf3vnjcagc4ga933k
 created_at: 2026-02-25T01:46:21.315Z
-updated_at: 2026-02-25T01:46:41.554Z
+updated_at: 2026-07-29T02:18:00.296Z
+closed_at: 2026-07-29T02:18:00.296Z
+close_reason: "Epic complete: all children closed — rclone backend implemented, tested (unit + golden lifecycle), wired into CI, and documented"
 ---

@@ -3,9 +3,9 @@ type: is
 id: is-01kj97m5d5ghy9es8rfm06vh6r
 title: "Wire RcloneBackend into createBackend() in transfer.ts: replace gcs/azure stub (line 132-134), add rclone as S3 fallback"
 kind: task
-status: open
+status: closed
 priority: 2
-version: 5
+version: 6
 spec_path: docs/project/specs/active/plan-2026-02-24-rclone-backend-support.md
 labels: []
 dependencies:
@@ -19,5 +19,7 @@ dependencies:
     target: is-01kj97m633qt21zk0de38gtat8
 parent_id: is-01kj97kjr8gt7y1ysxpdp9a3vm
 created_at: 2026-02-25T01:46:40.420Z
-updated_at: 2026-02-25T01:46:52.844Z
+updated_at: 2026-07-29T02:13:25.128Z
+closed_at: 2026-07-29T02:13:25.127Z
+close_reason: "Done: RcloneBackend wired into createBackend, transfer.ts:233 (gcs/azure) and :265 (s3 fallback)"
 ---
