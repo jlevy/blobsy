@@ -2041,6 +2041,15 @@ async function handlePreCommitHook(repoRoot: string): Promise<void> {
 }
 
 async function handlePrePushHook(repoRoot: string): Promise<void> {
+  // Scope: this hook guards the data-loss window this machine can create —
+  // a committed .bref whose blob was never uploaded, which is exactly the
+  // set with no remote_key (remote_key is only ever written after a
+  // successful upload; see pushFile's refUpdates). It deliberately does NOT
+  // re-verify that blobs behind existing remote_keys still exist: that costs
+  // one network round-trip per tracked file on every `git push` and would
+  // break offline pushes, to detect remote-side deletion or a backend
+  // switch — drift this clone didn't cause. `pre-push-check` is the
+  // authoritative audit for that and runs in CI (Bugbot r12).
   const config = await resolveConfig(repoRoot, repoRoot);
   const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const unpushed: string[] = [];

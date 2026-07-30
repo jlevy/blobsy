@@ -282,7 +282,7 @@ describe('rm command with --remote flag', () => {
   });
 
   describe('backend errors', () => {
-    it('should warn if backend deletion fails but continue', async () => {
+    it('exits 1 if backend deletion fails, after completing local cleanup', async () => {
       await writeFile(join(testDir, 'file.bin'), 'test content');
       await blobsy(['track', 'file.bin'], { cwd: testDir });
       await blobsy(['push', 'file.bin'], { cwd: testDir });
@@ -301,15 +301,16 @@ describe('rm command with --remote flag', () => {
         reject: false,
       });
 
-      // Should succeed (local cleanup worked) but warn about backend
-      expect(result.exitCode).toBe(0);
+      // The destructive half of --remote --force did not happen, so the
+      // command must fail overall — automation reads the exit code.
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/Failed to delete from backend/);
+      expect(result.stderr).toMatch(/Remote blob still exists/);
 
-      // Should contain warning about backend deletion failure
-      const output = result.stdout + result.stderr;
-      expect(output).toMatch(/warning|failed|backend/i);
-
-      // Local file should still be removed
+      // Local cleanup still completes: partial state is reported, not
+      // rolled back.
       expect(existsSync(join(testDir, 'file.bin'))).toBe(false);
+      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(false);
     });
   });
 

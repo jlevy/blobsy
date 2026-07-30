@@ -1497,12 +1497,21 @@ async function rmFile(
           }
         }
       } catch (err: unknown) {
-        // Don't fail the whole rm operation if backend deletion fails
-        // Local cleanup already succeeded
-        console.warn(
-          `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
-            `  Remote blob may still exist: ${bref.remote_key}`,
-        );
+        // Local cleanup already succeeded and the remaining steps below must
+        // still run, but the destructive half of `rm --remote --force` did
+        // NOT happen — automation must see a failure exit, not a warning
+        // that scrolls past while the command reports success (Bugbot r12).
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (globalOpts.json) {
+          console.error(formatJsonError(error));
+        } else {
+          console.error(
+            `Error: Failed to delete from backend: ${error.message}\n` +
+              `  Remote blob still exists: ${bref.remote_key}\n` +
+              `  Local tracking was removed; delete the remote object manually if needed.`,
+          );
+        }
+        process.exitCode = 1;
       }
     } else if (!globalOpts.quiet) {
       console.log(`Note: File was never pushed (no remote_key), skipping backend deletion`);
