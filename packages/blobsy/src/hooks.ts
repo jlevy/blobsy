@@ -12,7 +12,7 @@ import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { HOOK_MANAGED_MARKER } from './types.js';
-import { ensureDir } from './fs-utils.js';
+import { binaryLookupCommand, ensureDir } from './fs-utils.js';
 
 export const HOOK_TYPES = [
   { name: 'pre-commit', gitEvent: 'pre-commit', bypassCmd: 'git commit --no-verify' },
@@ -21,9 +21,17 @@ export const HOOK_TYPES = [
 
 export type HookType = (typeof HOOK_TYPES)[number];
 
-/** True when the user has opted out of git hooks via BLOBSY_NO_HOOKS. */
+/**
+ * True when the user has opted out of git hooks via BLOBSY_NO_HOOKS.
+ *
+ * Explicit negatives ('', '0', 'false') read as NOT opted out — a user
+ * re-enabling hooks after a parent-shell export sets BLOBSY_NO_HOOKS=0,
+ * which must not act as the kill switch the docs describe as `=1`
+ * (Bugbot r14).
+ */
 export function hooksDisabledByEnv(): boolean {
-  return Boolean(process.env.BLOBSY_NO_HOOKS);
+  const value = process.env.BLOBSY_NO_HOOKS?.trim().toLowerCase();
+  return value !== undefined && value !== '' && value !== '0' && value !== 'false';
 }
 
 /**
@@ -54,7 +62,11 @@ export function detectBlobsyPath(): string {
     return execPath;
   }
   try {
-    return execFileSync('which', ['blobsy'], { encoding: 'utf-8' }).trim();
+    // `where` (Windows) can print multiple matches, one per line; the
+    // first is the one PATH resolution would pick.
+    const output = execFileSync(binaryLookupCommand(), ['blobsy'], { encoding: 'utf-8' });
+    const first = output.split(/\r?\n/).find((line) => line.trim());
+    return first ? first.trim() : 'blobsy';
   } catch {
     return 'blobsy';
   }

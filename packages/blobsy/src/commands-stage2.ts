@@ -25,7 +25,7 @@ import {
   parseSize,
   resolveConfig,
 } from './config.js';
-import { ensureDir } from './fs-utils.js';
+import { binaryLookupCommand, ensureDir } from './fs-utils.js';
 import { addGitignoreEntry, readBlobsyBlock, removeGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
@@ -1316,7 +1316,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
             const binary = cmd.split(/\s+/)[0];
             if (binary) {
               try {
-                execFileSync('which', [binary], { stdio: 'pipe' });
+                execFileSync(binaryLookupCommand(), [binary], { stdio: 'pipe' });
                 if (verbose) {
                   backendIssues.push({
                     type: 'backend',
@@ -2136,7 +2136,7 @@ export async function handleHook(
   _opts: Record<string, unknown>,
   _cmd: Command,
 ): Promise<void> {
-  if (process.env.BLOBSY_NO_HOOKS) return;
+  if (hooksDisabledByEnv()) return;
 
   const repoRoot = findRepoRoot();
 

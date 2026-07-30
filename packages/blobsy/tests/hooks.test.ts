@@ -259,6 +259,20 @@ describe('BLOBSY_NO_HOOKS opt-out consistency', () => {
     expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(false);
     expect(existsSync(join(testDir, '.git', 'hooks', 'pre-push'))).toBe(false);
   });
+
+  it('explicit negatives (0, false) do not act as the kill switch', async () => {
+    // A user re-enabling hooks after a parent-shell export sets the
+    // variable to "0" or "false"; only affirmative values may opt out.
+    for (const value of ['0', 'false']) {
+      const result = await blobsy(['hooks', 'install'], {
+        cwd: testDir,
+        env: { BLOBSY_NO_HOOKS: value },
+      });
+      expect(result.stdout).not.toMatch(/BLOBSY_NO_HOOKS is set/);
+      expect(existsSync(join(testDir, '.git', 'hooks', 'pre-commit'))).toBe(true);
+      await blobsy(['hooks', 'uninstall'], { cwd: testDir });
+    }
+  });
 });
 
 describe('worktree and core.hooksPath support (HK-04)', () => {

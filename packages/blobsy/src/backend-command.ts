@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import type { Backend } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
-import { ensureDir } from './fs-utils.js';
+import { binaryLookupCommand, ensureDir } from './fs-utils.js';
 
 /** Timeout for exists check commands (shorter than push/pull) */
 const EXISTS_CHECK_TIMEOUT_MS = 30000;
@@ -241,9 +241,8 @@ export class CommandBackend implements Backend {
     if (!binary) {
       throw new ValidationError('Command template is empty.');
     }
-    const lookup = process.platform === 'win32' ? 'where' : 'which';
     try {
-      execFileSync(lookup, [binary], { stdio: 'pipe' });
+      execFileSync(binaryLookupCommand(), [binary], { stdio: 'pipe' });
     } catch {
       throw new BlobsyError(
         `Command not found: ${binary}. Ensure it is installed and in your PATH.`,
