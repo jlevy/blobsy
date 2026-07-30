@@ -296,6 +296,28 @@ describe('rm command with --remote flag', () => {
       expect(result.stderr).toMatch(/Not tracked/);
       expect(existsSync(join(testDir, 'untracked.bin'))).toBe(true);
     });
+
+    it('previews the remote blob deletion for --remote --force', async () => {
+      await writeFile(join(testDir, 'file.bin'), 'test content');
+      await blobsy(['track', 'file.bin'], { cwd: testDir });
+      await blobsy(['push', 'file.bin'], { cwd: testDir });
+
+      const brefContent = await readFile(join(testDir, 'file.bin.bref'), 'utf-8');
+      const bref = parseYaml(brefContent) as { remote_key?: string };
+
+      const result = await blobsy(['--dry-run', 'rm', 'file.bin', '--remote', '--force'], {
+        cwd: testDir,
+      });
+
+      // The plan must show BOTH halves of the destructive operation.
+      expect(result.stdout).toMatch(/remove file\.bin/);
+      expect(result.stdout).toContain(`delete remote blob ${bref.remote_key!}`);
+
+      // And touch nothing.
+      expect(existsSync(join(testDir, 'file.bin'))).toBe(true);
+      expect(existsSync(join(testDir, 'file.bin.bref'))).toBe(true);
+      expect(existsSync(join(backendDir, bref.remote_key!))).toBe(true);
+    });
   });
 
   describe('backend errors', () => {

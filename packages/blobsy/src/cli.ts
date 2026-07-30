@@ -1449,11 +1449,24 @@ async function rmFile(
   }
 
   if (globalOpts.dryRun) {
-    const action = localOnly ? `delete local file ${relPath}` : `remove ${relPath}`;
+    const actions = [localOnly ? `delete local file ${relPath}` : `remove ${relPath}`];
+    // The history-breaking half of --remote --force must appear in the
+    // preview — a plan that hides the remote deletion is worse than no
+    // plan (CLI-02 truthful-dry-run contract; Bugbot r15). handleRm
+    // refuses --remote without --force before this point, so reaching
+    // here with deleteRemote means the real run would delete.
+    if (deleteRemote) {
+      const bref = await readBref(refPath);
+      if (bref.remote_key) {
+        actions.push(`delete remote blob ${bref.remote_key}`);
+      }
+    }
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([action]));
+      console.log(formatJsonDryRun(actions));
     } else {
-      console.log(formatDryRun(action));
+      for (const action of actions) {
+        console.log(formatDryRun(action));
+      }
     }
     return;
   }
