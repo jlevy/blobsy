@@ -2,7 +2,8 @@
 
 **Status:** Active review — design decision requested
 
-**Date:** 2026-07-30
+**Date:** 2026-07-30 (grounding update 2026-07-31: cross-checked against the trading
+repo; corrections marked inline, additions under §1.3)
 
 **Scope:** How blobsy should support the “agent-driven run storage” workflow class:
 agents (and humans) manually syncing bulk process output — pipeline runs, cohorts, logs,
@@ -24,6 +25,13 @@ of what the workflow actually does — arguably better than the doc, since it sh
 shipped behavior — but intent statements in `docs/run-storage.md` should be
 cross-checked when repo access is available.
 Blobsy-side claims were verified against the PR #4 head (`0122276`).
+
+*(Grounding update, 2026-07-31: a session with the `finterm-ai/trading` repo attached
+has now cross-checked this review against `docs/run-storage.md` and
+`scripts/sync_runs.py`, closing the gap flagged above.
+Corrections are marked inline — the bucket-only inference understated the trading tool
+in two places (§1.1, §5 table) — and requirements the bucket state could not reveal are
+added as R10–R12 in §1.3.)*
 
 ## Verdict
 
@@ -101,6 +109,30 @@ So the loop is: pipeline writes to `runs/local/<cohort>/` inside the repo workin
 stamps `.synced-to-gcs.yaml`; status tooling generates `RUN-STATUS.{yaml,md}`, which are
 small enough to commit and are what humans and agents actually monitor.
 
+*(Corrected/expanded 2026-07-31, from the repo.)* The tool is more than
+mirror-and-stamp, and the loop is governed by a registry doc (`docs/run-storage.md`)
+with eight invariants:
+
+- **Transfers are byte-verified**: both directions run `rclone copy --checksum` then
+  `rclone check --one-way --checksum`; a transfer only counts as done after the check
+  passes. The marker’s `verified_at` records a real verification, not just a timestamp —
+  though nothing durable *re-verifies* later (the receipt gap, R4, stands).
+- **Copy-only, never deletes remote**: the only deletion anywhere is local
+  (`push --prune`), gated on a passing verify and on an active-writer guard (`pgrep`
+  against the local process table — machine-local, see R11).
+- **A pull story exists**: `pull` hydrates a working dir with the same checksum
+  verification (no refusal semantics — it will overwrite local modifications).
+- **Discovery without pulling**: `list` / `cat` / `find` verbs read `RUN-STATUS.yaml`
+  straight from the bucket, locate a run across partitions, and print a ready-to-run
+  `pull`.
+- **A second storage class** rides the same tool: shared tool caches
+  (`tool-caches/<tool>/<source>/`) with union-merge semantics (see R10).
+
+The registry’s rules line up almost one-for-one with this review’s direction: one
+registered prefix per workflow, GCS as source of truth with local as scratch, copy-only
+verified transfers, prune-after-verify, self-describing partitions, manifests traveling
+with data, no laptop mounts, one shared tool.
+
 ### 1.2 Three more conventions in the same org
 
 - `gs://metaproc-runs/tool-caches/fintool/trends-serpapi/` — a shared tool cache, synced
@@ -135,10 +167,41 @@ excludes (hence `.DS_Store` in a production bucket), and no pull story.
   must be mirrored, not fought.
 - **R6 — layouts are lightly customized per project** (cohorts vs `raw/processed` vs
   server runs) — a template for dest prefixes, not hardcoded structure.
-- **R7 — monitoring means regenerating small committed files**, not querying the store.
+- **R7 — monitoring means regenerating small manifest files that travel with the data.**
+  *(Corrected 2026-07-31: in practice `RUN-STATUS.{yaml,md}` are not committed to git —
+  they are re-pushed to the prefix and read from the store without pulling, via
+  `cat`/`find` verbs. Receipts and manifests must stay bucket-readable; committing them
+  to git is an option, not the practice.)*
 - **R8 — excludes are needed by default** (`.DS_Store` is in prod).
 - **R9 — remote browsability matters.** Humans navigate these buckets by ticker/cohort
   in the console; keys must stay path-shaped, not hash-shaped.
+
+*Grounding additions (2026-07-31) — requirements the bucket state could not reveal:*
+
+- **R10 — a second storage class exists: shared tool caches**
+  (`tool-caches/<tool>/<source>/`), synced by the same tool with different rules:
+  derived, add-only, safe to lose; union-merged in both directions (same content-keyed
+  entry ⇒ same content, so multi-machine push/pull never conflicts); never pruned;
+  growth bounded by a GCS lifecycle rule (90 days), not tooling.
+  Receipts as designed (a final tree digest) do not fit an always-growing tree — mirror
+  mode should either offer an add-only/union attach-point flavor or scope caches out
+  explicitly.
+- **R11 — producers are relocating to GCP VMs**, with the working tree possibly on a
+  kernel-NFS Filestore mount, so the tool must run identically under ADC on a VM — and
+  cross-machine safety becomes real: the trading tool’s active-writer guard is `pgrep`
+  against the local process table, which goes blind on a shared mount.
+  **Receipt-verified prune** ("local digest matches receipt and remote verifies → safe
+  to reclaim") is the correct replacement, and is a genuine argument *for* Option C
+  beyond archival trust.
+- **R12 — remote-side deletion is forbidden, not just optional.** The trading registry’s
+  rule 3 makes transfers copy-only in both directions; the only deletion anywhere is
+  *local* prune after verify.
+  Mirror mode’s deletion story should default to this stricter stance: `push` never
+  deletes remote objects, with any propagation an explicit, separately-guarded verb.
+- Answers to the open questions in §6.3: retention is indefinite for run partitions
+  (lifecycle rules exist only on `tool-caches/`); access is uniform bucket-level IAM
+  over ADC; and no two-way merge cases are planned — the trading side rejects two-way
+  explicitly, matching non-goal 1.
 
 ## 2. Where current blobsy fits and misfits
 
@@ -286,6 +349,14 @@ pull) for the cases that want LFS-grade integrity without per-file brefs.
   no hooks, no brefs).
   It is also the piece that makes agents trustworthy: an agent can always answer “is
   this run archived?” by reading one file and can re-verify with one command.
+  *(Grounding addition, 2026-07-31:)* receipt-verified **prune** — local digest matches
+  receipt and remote verifies, therefore safe to reclaim — is also the only
+  cross-machine-safe disk-reclaim protocol; the trading tool’s `pgrep`-based
+  active-writer guard is machine-local and goes blind once the working tree sits on a
+  shared Filestore mount (their cloud-locus plan, R11). One design note from their
+  practice: still-active trees get interim pushes (manifest refreshes mid-run), so a
+  receipt must either be skipped or explicitly marked non-final for those — a receipt
+  should assert only verified, complete trees.
 - *Cons:* alone it is not a tool — it needs Option B’s mapping to know *where* to
   mirror. B and C are two halves of one design.
 
@@ -339,11 +410,17 @@ Why this passes the “simpler than both” bar:
 | --- | --- | --- | --- |
 | unit of sync | directory (per-project script) | file | directory (declared attach point) |
 | git footprint per run | marker + status (ad hoc) | N brefs or N small files | receipt (+ optional manifest) |
-| verification | none (timestamp only) | per-file hash | size/hash check + tree digest |
-| pull story | none observed | per-file | mirror down w/ refusal semantics |
+| verification | transfer-time `rclone check --checksum`; no durable receipt¹ | per-file hash | size/hash check + tree digest |
+| pull story | checksum-verified pull; no refusal semantics¹ | per-file | mirror down w/ refusal semantics |
 | excludes | none (`.DS_Store` in prod) | n/a | default set + per-attach |
 | state machinery | 3 divergent marker schemas | stat cache + hooks + brefs | receipts only |
 | new concepts for an agent | read N scripts | track/bref lifecycle | `mirrors:` stanza + push/pull/status |
+
+¹ *Corrected 2026-07-31 after reading `scripts/sync_runs.py`: the original cells,
+written from bucket state alone, understated the trading tool — its transfers are
+byte-verified and it has a pull.
+The mirror-mode advantage over it is narrower but real: durable re-verifiable receipts,
+default excludes, pull refusal semantics, and one schema org-wide.*
 
 Impact on open design decisions (all three currently awaiting jlevy on PR #4):
 
@@ -374,10 +451,20 @@ For jlevy:
 2. If approved: close `blobsy-4vpk` as “drop nested configs,” repoint `blobsy-aad8` at
    mirror mode (or close it and open a fresh epic), and confirm the non-goals list (§5,
    items 1–5) as hard boundaries.
-3. Follow-up grounding: read `finterm-ai/trading` `docs/run-storage.md` and
-   `scripts/sync_runs.py` against §1 (this review saw the storage, not the doc; a
-   session with that repo attached can close the gap and check for requirements the
-   bucket state doesn’t reveal — e.g. retention, permissions, or planned two-way cases).
+3. Follow-up grounding — **done 2026-07-31.** Corrections are inline (§1.1, R7, §5
+   table); new requirements are R10–R12 (tool-cache class, cloud-locus producers +
+   receipt-verified prune, no-remote-deletion); retention/permissions/two-way are
+   answered under R12’s note.
+   Notably, the trading repo’s own storage research
+   (`docs/project/research/research-2026-04-19-filestore-mount-alternatives.md`, Option
+   G) independently endorses the B+C direction and takes a **contract-first** stance: it
+   plans to upgrade its `.synced-to-gcs.yaml` to a `blobsy-receipt/0.1`-compatible
+   schema inside its existing tool now — becoming the schema’s first live consumer — and
+   to revisit converging on mirror mode once it ships (their stated bar: mirror mode
+   built, rclone/GCS backend validated, alpha blockers closed, batched transfer for
+   thousands-of-small-files trees).
+   Sizing implication: the receipt schema is the highest-leverage piece to stabilize
+   first; it delivers value to reference users before any mirror-mode code lands.
 4. Independent of the decision: PF-1 (default excludes) and PF-3 (machine-readable
    status) are worth doing in any future.
 
@@ -395,3 +482,9 @@ directory expansion), `packages/blobsy/src/types.ts` (`Bref` fields),
 `packages/blobsy/src/config-schema.ts` (config surface), beads `blobsy-aad8`,
 `blobsy-4vpk`, `blobsy-pqyt`, and the Round 7 review findings cited inline (DS-01/02/03,
 CFG-02/03, HK-01/03, CLI-07).
+
+Grounding update (2026-07-31): the repo-access limitation above is now partially
+superseded — `finterm-ai/trading` `docs/run-storage.md`, `scripts/sync_runs.py`, and
+`docs/project/research/research-2026-04-19-filestore-mount-alternatives.md` (its
+F12/F13/Option F/Option G analysis of this same design space) were read directly, and
+this document’s bucket-only inferences corrected where marked.
