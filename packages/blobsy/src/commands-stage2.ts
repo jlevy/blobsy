@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { appendFile, chmod, readdir, readFile, unlink } from 'node:fs/promises';
-import { basename, dirname, join, isAbsolute } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { Command } from 'commander';
 
@@ -25,22 +25,23 @@ import {
   parseSize,
   resolveConfig,
 } from './config.js';
-import { ensureDir } from './fs-utils.js';
+import { binaryLookupCommand, ensureDir } from './fs-utils.js';
 import { addGitignoreEntry, readBlobsyBlock, removeGitignoreEntry } from './gitignore.js';
 import { computeHash } from './hash.js';
 import {
   findRepoRoot,
   findBrefFiles,
   isDirectory,
-  resolveFilePath,
+  resolveRepoPath,
   stripBrefExtension,
   toRepoRelative,
   brefPath,
 } from './paths.js';
 import { readBref, writeBref } from './ref.js';
-import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
+import { createCacheEntry, getMergeBase, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
 import { pushFile, pullFile, blobExists, runHealthCheck, resolveBackend } from './transfer.js';
 import { isAwsCliAvailable } from './backend-aws-cli.js';
+import { probeBinaryFor } from './backend-command.js';
 import { isRcloneAvailable } from './backend-rclone.js';
 import { parseBackendUrl } from './backend-url.js';
 import {
@@ -69,7 +70,21 @@ import type {
   GlobalOptions,
   TransferResult,
 } from './types.js';
-import { ValidationError, BREF_EXTENSION, BREF_FORMAT, FILE_STATE_SYMBOLS } from './types.js';
+import {
+  ValidationError,
+  BREF_EXTENSION,
+  BREF_FORMAT,
+  FILE_STATE_SYMBOLS,
+  HOOK_MANAGED_MARKER,
+} from './types.js';
+import {
+  HOOK_TYPES,
+  detectBlobsyPath,
+  gitHooksDir,
+  hooksDisabledByEnv,
+  installHook,
+  wouldInstallHook,
+} from './hooks.js';
 
 export function getGlobalOpts(cmd: Command): GlobalOptions {
   const root = cmd.parent ?? cmd;
@@ -82,12 +97,19 @@ export function getGlobalOpts(cmd: Command): GlobalOptions {
   };
 }
 
+/**
+ * Expand user-supplied paths (files, directories, or none = whole repo)
+ * into the tracked files they cover, as repo-relative + absolute + .bref
+ * path triples.
+ */
 export function resolveTrackedFiles(
   paths: string[],
   repoRoot: string,
 ): { relPath: string; absPath: string; refPath: string }[] {
   const targetPaths =
-    paths.length > 0 ? paths.map((p) => resolveFilePath(stripBrefExtension(p))) : [repoRoot];
+    paths.length > 0
+      ? paths.map((p) => resolveRepoPath(stripBrefExtension(p), repoRoot))
+      : [repoRoot];
 
   const files: { relPath: string; absPath: string; refPath: string }[] = [];
   for (const tp of targetPaths) {
@@ -168,6 +190,10 @@ async function getFileState(
   return { symbol: FILE_STATE_SYMBOLS.new, state: 'new', details: 'not pushed', size: ref.size };
 }
 
+/**
+ * Compute the sync-state symbol/details for each tracked file (synced,
+ * modified, new, missing, corrupt .bref) as shown by status and doctor.
+ */
 export async function computeFileStates(
   files: { absPath: string; refPath: string; relPath: string }[],
 ): Promise<FileStateResult[]> {
@@ -179,6 +205,11 @@ export async function computeFileStates(
   return results;
 }
 
+/**
+ * `blobsy push` — upload tracked blobs to the configured backend.
+ * Refuses modified-since-track content without --force (DS-03); dry-run
+ * mirrors the real plan including refusals and exit codes (CLI-02).
+ */
 export async function handlePush(
   paths: string[],
   opts: Record<string, unknown>,
@@ -201,12 +232,36 @@ export async function handlePush(
   }
 
   if (globalOpts.dryRun) {
+    // Mirror the real plan including the DS-03 hash checks (dry-run is the
+    // primary trust mechanism for agents; it must not promise a push the
+    // real run would refuse).
     const needsPush = [];
+    let wouldTransfer = 0;
+    let wouldBlock = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (!ref.remote_key || opts.force) {
-        needsPush.push(`push ${file.relPath}`);
+      // Missing payload with nothing pushed: the real run fails in
+      // pushFile — don't promise a push that cannot happen (Bugbot r5).
+      if (!ref.remote_key && !existsSync(file.absPath)) {
+        needsPush.push(`error ${file.relPath} (local file missing; nothing to push)`);
+        wouldBlock++;
+        continue;
       }
+      const modified = existsSync(file.absPath) && (await computeHash(file.absPath)) !== ref.hash;
+      if (ref.remote_key && !opts.force) {
+        if (modified) {
+          needsPush.push(`warn ${file.relPath} (modified since last push; would not upload)`);
+          wouldBlock++;
+        }
+        continue;
+      }
+      if (modified && !opts.force) {
+        needsPush.push(`refuse ${file.relPath} (changed since track; would need --force)`);
+        wouldBlock++;
+        continue;
+      }
+      needsPush.push(`push ${file.relPath}`);
+      wouldTransfer++;
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(needsPush));
@@ -214,28 +269,65 @@ export async function handlePush(
       for (const a of needsPush) {
         console.log(formatDryRun(a));
       }
-      console.log(formatDryRun(`push ${formatCount(needsPush.length, 'file')}`));
+      console.log(formatDryRun(`push ${formatCount(wouldTransfer, 'file')}`));
+    }
+    // Dry-run reports the exit code the real run would produce — scripts
+    // gate on it (Bugbot round 4).
+    if (wouldBlock > 0) {
+      process.exitCode = 1;
     }
     return;
   }
 
   const results: TransferResult[] = [];
+  const warnings: string[] = [];
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
 
     if (ref.remote_key && !opts.force) {
+      // Not silently "already pushed" if the payload changed since the last
+      // push — say so, or the user believes the remote has their edits.
+      let note = 'already pushed';
+      if (existsSync(file.absPath)) {
+        const currentHash = await computeHash(file.absPath);
+        if (currentHash !== ref.hash) {
+          note = 'modified since last push (run `blobsy sync` or `blobsy push --force`)';
+          warnings.push(`${file.relPath}: ${note}`);
+        }
+      }
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${file.relPath}  already pushed`));
+        if (note === 'already pushed') {
+          console.log(c.muted(`  ${file.relPath}  ${note}`));
+        } else {
+          console.error(`  ${OUTPUT_SYMBOLS.warn} ${file.relPath}  ${note}`);
+        }
       }
       continue;
     }
 
-    if (opts.force && existsSync(file.absPath)) {
+    if (existsSync(file.absPath)) {
       const currentHash = await computeHash(file.absPath);
       if (currentHash !== ref.hash) {
-        ref.hash = currentHash;
-        ref.size = statSync(file.absPath).size;
+        if (opts.force) {
+          ref.hash = currentHash;
+          ref.size = statSync(file.absPath).size;
+        } else {
+          // Push sanity check (review finding DS-03): the design forbids
+          // uploading new bytes under the stale hash recorded at track time —
+          // the key would claim a sha256 the content doesn't have, and every
+          // subsequent pull fails verification for everyone.
+          results.push({
+            path: file.relPath,
+            success: false,
+            action: 'push',
+            error:
+              'local file changed since it was tracked (hash mismatch); ' +
+              'run `blobsy track` to re-track, `blobsy pull --force` to restore, ' +
+              'or `blobsy push --force` to push the current content',
+          });
+          continue;
+        }
       }
     }
 
@@ -257,10 +349,19 @@ export async function handlePush(
   const failed = results.filter((r) => !r.success);
 
   if (globalOpts.json) {
+    // warnings must be countable in the summary: a warning-only blocked push
+    // exits 1, and JSON automation reads the summary, not stderr (Bugbot
+    // round 4).
     console.log(
       formatJson({
         pushed: results,
-        summary: { total: results.length, succeeded: succeeded.length, failed: failed.length },
+        warnings,
+        summary: {
+          total: results.length,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          warnings: warnings.length,
+        },
       }),
     );
   } else if (!globalOpts.quiet) {
@@ -275,11 +376,17 @@ export async function handlePush(
     );
   }
 
-  if (failed.length > 0) {
+  // A blocked push (modified since last push, upload skipped) must be
+  // visible to automation, not read as success.
+  if (failed.length > 0 || warnings.length > 0) {
     process.exitCode = 1;
   }
 }
 
+/**
+ * `blobsy pull` — download blobs for tracked files. Refuses to overwrite
+ * locally modified files without --force; dry-run mirrors the plan.
+ */
 export async function handlePull(
   paths: string[],
   opts: Record<string, unknown>,
@@ -302,12 +409,27 @@ export async function handlePull(
   }
 
   if (globalOpts.dryRun) {
+    // Mirror the real per-file plan (review finding CLI-02): count only files
+    // that would actually transfer, and surface refusals.
     const needsPull = [];
+    let wouldTransfer = 0;
+    let wouldRefuse = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (ref.remote_key) {
-        needsPull.push(`pull ${file.relPath}`);
+      if (!ref.remote_key) {
+        continue;
       }
+      if (existsSync(file.absPath) && !opts.force) {
+        const currentHash = await computeHash(file.absPath);
+        if (currentHash === ref.hash) {
+          continue;
+        }
+        needsPull.push(`refuse ${file.relPath} (locally modified; would need --force)`);
+        wouldRefuse++;
+        continue;
+      }
+      needsPull.push(`pull ${file.relPath}`);
+      wouldTransfer++;
     }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(needsPull));
@@ -315,19 +437,32 @@ export async function handlePull(
       for (const a of needsPull) {
         console.log(formatDryRun(a));
       }
-      console.log(formatDryRun(`pull ${formatCount(needsPull.length, 'file')}`));
+      console.log(formatDryRun(`pull ${formatCount(wouldTransfer, 'file')}`));
+    }
+    // Dry-run reports the exit code the real run would produce — refusals
+    // exit with the conflict code (Bugbot round 4).
+    if (wouldRefuse > 0) {
+      process.exitCode = CONFLICT_EXIT_CODE;
     }
     return;
   }
 
   const results: TransferResult[] = [];
+  let refused = 0;
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
 
     if (!ref.remote_key) {
+      // Not necessarily "not pushed": with the pre-push hook flow the blob may
+      // exist remotely while the .bref update recording remote_key is still
+      // uncommitted on the pusher's machine (Bugbot round 10).
       if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${file.relPath}  not pushed yet (no remote_key)`));
+        console.log(
+          c.muted(
+            `  ${file.relPath}  no remote_key (not pushed, or pusher hasn't committed the .bref update)`,
+          ),
+        );
       }
       continue;
     }
@@ -340,6 +475,16 @@ export async function handlePull(
         }
         continue;
       }
+      // Local file modified: never silently overwrite it (review finding
+      // DS-02 — the design mandates refusal with exit code 2).
+      refused++;
+      if (!globalOpts.quiet) {
+        console.error(
+          `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - local file modified; ` +
+            'use `blobsy pull --force` to overwrite (or `blobsy push` to keep local)',
+        );
+      }
+      continue;
     }
 
     const result = await pullFile(ref, file.absPath, config, repoRoot);
@@ -359,7 +504,12 @@ export async function handlePull(
     console.log(
       formatJson({
         pulled: results,
-        summary: { total: results.length, succeeded: succeeded.length, failed: failed.length },
+        summary: {
+          total: results.length,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          refused,
+        },
       }),
     );
   } else if (!globalOpts.quiet) {
@@ -369,16 +519,102 @@ export async function handlePull(
     for (const r of failed) {
       console.error(formatTransferFail(r.path, r.error ?? 'unknown error'));
     }
+    const refusedNote = refused > 0 ? `, ${refused} refused (locally modified)` : '';
     console.log(
-      `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}.`,
+      `Done: ${succeeded.length} pulled${failed.length > 0 ? `, ${failed.length} failed` : ''}${refusedNote}.`,
     );
   }
 
-  if (failed.length > 0) {
+  if (refused > 0) {
+    process.exitCode = CONFLICT_EXIT_CODE;
+  } else if (failed.length > 0) {
     process.exitCode = 1;
   }
 }
 
+/**
+ * Per-file three-way sync decision (blobsy-stat-cache-design.md decision table).
+ *
+ * The stat cache supplies the merge base — the last hash this machine knew was
+ * in sync. Without consulting it, sync cannot tell "user edited the file" from
+ * ".bref updated by git pull" and destroys one side (review finding DS-01).
+ */
+type SyncDecision =
+  | { action: 'push_new' }
+  | { action: 'missing_local' }
+  | { action: 'pull_missing' }
+  | { action: 'up_to_date'; localHash: string }
+  | { action: 'pull' }
+  | { action: 'push'; localHash: string }
+  | { action: 'conflict'; localHash: string; baseHash: string; refHash: string }
+  | { action: 'ambiguous'; localHash: string }
+  | { action: 'refuse_modified'; localHash: string };
+
+async function decideSyncAction(
+  file: { relPath: string; absPath: string; refPath: string },
+  ref: { hash: string; remote_key?: string | undefined },
+  cacheDir: string,
+): Promise<SyncDecision> {
+  if (!ref.remote_key) {
+    // No local payload and nothing ever pushed: there is nothing to push
+    // AND nothing to pull — report clearly instead of planning a push that
+    // can only fail (Bugbot round 4).
+    if (!existsSync(file.absPath)) {
+      return { action: 'missing_local' };
+    }
+    // Payload changed since track: `blobsy push` refuses this state
+    // (DS-03) and sync must not become the bypass that silently uploads
+    // re-hashed content (Bugbot r9).
+    const localHash = await computeHash(file.absPath);
+    if (localHash !== ref.hash) {
+      return { action: 'refuse_modified', localHash };
+    }
+    return { action: 'push_new' };
+  }
+  if (!existsSync(file.absPath)) {
+    return { action: 'pull_missing' };
+  }
+
+  const localHash = await computeHash(file.absPath);
+  if (localHash === ref.hash) {
+    return { action: 'up_to_date', localHash };
+  }
+
+  const baseHash = await getMergeBase(cacheDir, file.relPath);
+  if (!baseHash) {
+    return { action: 'ambiguous', localHash };
+  }
+  if (localHash === baseHash && ref.hash !== baseHash) {
+    return { action: 'pull' };
+  }
+  if (localHash !== baseHash && ref.hash === baseHash) {
+    return { action: 'push', localHash };
+  }
+  return { action: 'conflict', localHash, baseHash, refHash: ref.hash };
+}
+
+/** Exit code for conflict-class outcomes (matches ConflictError). */
+const CONFLICT_EXIT_CODE = 2;
+
+const SYNC_CONFLICT_HELP =
+  'resolve with an explicit choice: `blobsy push --force` (keep local) or `blobsy pull --force` (take remote)';
+
+const SYNC_AMBIGUOUS_HELP =
+  'no merge base to tell a local edit from a git pull; run `blobsy push` or `blobsy pull` explicitly';
+
+const SYNC_MISSING_LOCAL_HELP =
+  'local file missing and no remote_key recorded (no known remote copy to pull); ' +
+  'if a teammate pushed this file, they still need to commit the updated .bref; ' +
+  'otherwise restore the file or run `blobsy untrack` to stop tracking it';
+
+const SYNC_REFUSE_MODIFIED_HELP =
+  'changed since track; re-track with `blobsy track <path>` then `blobsy push --force`';
+
+/**
+ * `blobsy sync` — bidirectional: push unpushed, pull missing/outdated.
+ * Conflicts and tracking ambiguity exit 2 (CONFLICT_EXIT_CODE); transfer
+ * errors exit 1.
+ */
 export async function handleSync(
   paths: string[],
   opts: Record<string, unknown>,
@@ -406,13 +642,42 @@ export async function handleSync(
   const files = resolveTrackedFiles(paths, repoRoot);
 
   if (globalOpts.dryRun) {
+    // Dry-run must run the same per-file decision logic as the real sync
+    // (review finding CLI-02) — it previously omitted the modified→push and
+    // conflict cases entirely, reporting "Everything up to date".
     const actions = [];
+    let wouldConflict = 0;
+    let wouldError = 0;
     for (const file of files) {
       const ref = await readBref(file.refPath);
-      if (!ref.remote_key) {
-        actions.push(`push ${file.relPath}`);
-      } else if (!existsSync(file.absPath)) {
-        actions.push(`pull ${file.relPath}`);
+      const decision = await decideSyncAction(file, ref, cacheDir);
+      switch (decision.action) {
+        case 'push_new':
+        case 'push':
+          actions.push(`push ${file.relPath}`);
+          break;
+        case 'missing_local':
+          actions.push(`error ${file.relPath} (${SYNC_MISSING_LOCAL_HELP})`);
+          wouldError++;
+          break;
+        case 'refuse_modified':
+          actions.push(`refuse ${file.relPath} (${SYNC_REFUSE_MODIFIED_HELP})`);
+          wouldError++;
+          break;
+        case 'pull_missing':
+        case 'pull':
+          actions.push(`pull ${file.relPath}`);
+          break;
+        case 'conflict':
+          actions.push(`conflict ${file.relPath} (would error; ${SYNC_CONFLICT_HELP})`);
+          wouldConflict++;
+          break;
+        case 'ambiguous':
+          actions.push(`error ${file.relPath} (${SYNC_AMBIGUOUS_HELP})`);
+          wouldConflict++;
+          break;
+        case 'up_to_date':
+          break;
       }
     }
     if (globalOpts.json) {
@@ -425,85 +690,172 @@ export async function handleSync(
         console.log(c.muted('Everything up to date.'));
       }
     }
+    // Dry-run reports the exit code the real run would produce — scripts
+    // gate on it (Bugbot round 4).
+    if (wouldConflict > 0) {
+      process.exitCode = CONFLICT_EXIT_CODE;
+    } else if (wouldError > 0) {
+      process.exitCode = 1;
+    }
     return;
   }
 
   let pushed = 0;
   let pulled = 0;
   let errors = 0;
+  let conflicts = 0;
+
+  const pushModified = async (
+    file: { relPath: string; absPath: string; refPath: string },
+    ref: Awaited<ReturnType<typeof readBref>>,
+    localHash: string,
+  ): Promise<void> => {
+    const modifiedRef = {
+      ...ref,
+      hash: localHash,
+      size: statSync(file.absPath).size,
+      remote_key: undefined,
+    };
+    const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
+    if (result.success && result.refUpdates) {
+      const updatedRef = { ...modifiedRef, ...result.refUpdates };
+      await writeBref(file.refPath, updatedRef);
+      const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
+      await writeCacheEntry(cacheDir, entry);
+      pushed++;
+      if (!globalOpts.quiet && !globalOpts.json) {
+        console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
+      }
+    } else {
+      errors++;
+      if (!globalOpts.quiet) {
+        console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
+      }
+    }
+  };
 
   for (const file of files) {
     const ref = await readBref(file.refPath);
+    const decision = await decideSyncAction(file, ref, cacheDir);
 
-    if (!ref.remote_key) {
-      const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
-      if (result.success && result.refUpdates) {
-        const updatedRef = { ...ref, ...result.refUpdates };
-        await writeBref(file.refPath, updatedRef);
-        if (existsSync(file.absPath)) {
-          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
-          await writeCacheEntry(cacheDir, entry);
-        }
-        pushed++;
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
-        }
-      } else {
-        errors++;
-        if (!globalOpts.quiet) {
-          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`);
-        }
-      }
-    } else if (!existsSync(file.absPath)) {
-      const result = await pullFile(ref, file.absPath, config, repoRoot);
-      if (result.success) {
-        const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
-        await writeCacheEntry(cacheDir, entry);
-        pulled++;
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled`);
-        }
-      } else {
-        errors++;
-        if (!globalOpts.quiet) {
-          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`);
-        }
-      }
-    } else {
-      const currentHash = await computeHash(file.absPath);
-      if (currentHash !== ref.hash) {
-        const modifiedRef = {
-          ...ref,
-          hash: currentHash,
-          size: statSync(file.absPath).size,
-          remote_key: undefined,
-        };
-        const result = await pushFile(file.absPath, file.relPath, modifiedRef, config, repoRoot);
+    switch (decision.action) {
+      case 'push_new': {
+        // First push of a tracked file. decideSyncAction has verified the
+        // payload still matches the .bref hash — a modified payload is
+        // refused (refuse_modified below) exactly like `blobsy push`
+        // (DS-03, Bugbot r9); sync must not silently re-hash and upload.
+        const result = await pushFile(file.absPath, file.relPath, ref, config, repoRoot);
         if (result.success && result.refUpdates) {
-          const updatedRef = { ...modifiedRef, ...result.refUpdates };
+          const updatedRef = { ...ref, ...result.refUpdates };
           await writeBref(file.refPath, updatedRef);
-          const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
-          await writeCacheEntry(cacheDir, entry);
+          if (existsSync(file.absPath)) {
+            const entry = await createCacheEntry(file.absPath, file.relPath, updatedRef.hash);
+            await writeCacheEntry(cacheDir, entry);
+          }
           pushed++;
           if (!globalOpts.quiet && !globalOpts.json) {
-            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed (modified)`);
+            console.log(`  ${OUTPUT_SYMBOLS.push} ${file.relPath} - pushed`);
           }
         } else {
           errors++;
+          if (!globalOpts.quiet) {
+            console.error(
+              `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push failed: ${result.error}`,
+            );
+          }
         }
-      } else if (!globalOpts.quiet && !globalOpts.json) {
-        console.log(c.muted(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`));
+        break;
+      }
+
+      case 'missing_local': {
+        errors++;
+        if (!globalOpts.quiet) {
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - ${SYNC_MISSING_LOCAL_HELP}`);
+        }
+        break;
+      }
+
+      case 'refuse_modified': {
+        errors++;
+        if (!globalOpts.quiet) {
+          console.error(
+            `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - push refused: ${SYNC_REFUSE_MODIFIED_HELP}`,
+          );
+        }
+        break;
+      }
+
+      case 'pull_missing':
+      case 'pull': {
+        const result = await pullFile(ref, file.absPath, config, repoRoot);
+        if (result.success) {
+          const entry = await createCacheEntry(file.absPath, file.relPath, ref.hash);
+          await writeCacheEntry(cacheDir, entry);
+          pulled++;
+          if (!globalOpts.quiet && !globalOpts.json) {
+            const note = decision.action === 'pull' ? ' (updated)' : '';
+            console.log(`  ${OUTPUT_SYMBOLS.pull} ${file.relPath} - pulled${note}`);
+          }
+        } else {
+          errors++;
+          if (!globalOpts.quiet) {
+            console.error(
+              `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - pull failed: ${result.error}`,
+            );
+          }
+        }
+        break;
+      }
+
+      case 'push': {
+        await pushModified(file, ref, decision.localHash);
+        break;
+      }
+
+      case 'conflict': {
+        conflicts++;
+        if (!globalOpts.quiet) {
+          console.error(
+            `  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - conflict: local and .bref both changed ` +
+              `since last sync (local ${decision.localHash.slice(0, 19)}…, ` +
+              `ref ${decision.refHash.slice(0, 19)}…); ${SYNC_CONFLICT_HELP}`,
+          );
+        }
+        break;
+      }
+
+      case 'ambiguous': {
+        conflicts++;
+        if (!globalOpts.quiet) {
+          console.error(`  ${OUTPUT_SYMBOLS.fail} ${file.relPath} - ${SYNC_AMBIGUOUS_HELP}`);
+        }
+        break;
+      }
+
+      case 'up_to_date': {
+        // Refresh the merge base so future syncs have a reliable base.
+        const entry = await createCacheEntry(file.absPath, file.relPath, decision.localHash);
+        await writeCacheEntry(cacheDir, entry);
+        if (!globalOpts.quiet && !globalOpts.json) {
+          console.log(c.muted(`  ${OUTPUT_SYMBOLS.pass} ${file.relPath} - up to date`));
+        }
+        break;
       }
     }
   }
 
   if (globalOpts.json) {
-    console.log(formatJson({ sync: { pushed, pulled, errors, total: files.length } }));
+    console.log(formatJson({ sync: { pushed, pulled, errors, conflicts, total: files.length } }));
   } else if (!globalOpts.quiet) {
-    console.log(`Sync complete: ${pushed} pushed, ${pulled} pulled, ${errors} errors.`);
+    const conflictNote = conflicts > 0 ? `, ${conflicts} conflicts` : '';
+    console.log(
+      `Sync complete: ${pushed} pushed, ${pulled} pulled, ${errors} errors${conflictNote}.`,
+    );
   }
 
-  if (errors > 0) {
+  if (conflicts > 0) {
+    process.exitCode = CONFLICT_EXIT_CODE;
+  } else if (errors > 0) {
     process.exitCode = 1;
   }
 }
@@ -516,9 +868,9 @@ export async function handleHealth(_opts: Record<string, unknown>, cmd: Command)
   try {
     await runHealthCheck(config, repoRoot);
     if (globalOpts.json) {
-      console.log(formatJson({ status: 'ok', message: 'Backend is reachable and writable.' }));
+      console.log(formatJson({ status: 'ok', message: 'Backend is reachable.' }));
     } else {
-      console.log(c.success('Backend is reachable and writable.'));
+      console.log(c.success('Backend is reachable.'));
     }
   } catch (err) {
     if (globalOpts.json) {
@@ -532,7 +884,7 @@ export async function handleHealth(_opts: Record<string, unknown>, cmd: Command)
 
 export async function handleDoctor(opts: Record<string, unknown>, cmd: Command): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const fix = Boolean(opts.fix);
   const verbose = globalOpts.verbose;
   const repoRoot = findRepoRoot();
@@ -588,7 +940,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
   }
 
   // --- CONFIGURATION section ---
-  const configIssues = checkConfig(config, repoRoot, verbose);
+  const configIssues = await checkConfig(config, repoRoot, verbose);
   renderSection('CONFIGURATION', configIssues, verbose, useJson);
   issues.push(...configIssues);
 
@@ -962,10 +1314,13 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
         for (const field of ['push_command', 'pull_command', 'exists_command'] as const) {
           const cmd = resolved[field];
           if (cmd) {
-            const binary = cmd.split(/\s+/)[0];
+            // Probe the expanded argv[0], matching CommandBackend.healthCheck
+            // — a template starting with $TOOL must probe the tool it
+            // resolves to, not the literal token (BE-09; Bugbot r17).
+            const binary = probeBinaryFor(cmd, resolved.bucket);
             if (binary) {
               try {
-                execFileSync('which', [binary], { stdio: 'pipe' });
+                execFileSync(binaryLookupCommand(), [binary], { stdio: 'pipe' });
                 if (verbose) {
                   backendIssues.push({
                     type: 'backend',
@@ -999,7 +1354,7 @@ export async function handleDoctor(opts: Record<string, unknown>, cmd: Command):
         backendIssues.push({
           type: 'backend',
           severity: 'info',
-          message: 'Backend reachable and writable',
+          message: 'Backend reachable',
           fixed: false,
           fixable: false,
         });
@@ -1116,6 +1471,7 @@ const KNOWN_CONFIG_KEYS = new Set([
   'remote',
   'sync',
   'checksum',
+  'trust_command_backends',
 ]);
 
 const VALID_COMPRESS_ALGORITHMS = new Set(['zstd', 'gzip', 'brotli', 'none']);
@@ -1160,11 +1516,11 @@ function findClosestMatch(input: string, candidates: Set<string>): string | unde
 }
 
 /** Run configuration validation checks for doctor. */
-function checkConfig(
+async function checkConfig(
   config: BlobsyConfig | null,
   repoRoot: string,
   verbose: boolean,
-): DoctorIssue[] {
+): Promise<DoctorIssue[]> {
   const issues: DoctorIssue[] = [];
 
   // 1. Config file exists
@@ -1198,8 +1554,9 @@ function checkConfig(
     const globalPath = getGlobalConfigPath();
     if (existsSync(globalPath)) {
       try {
-        // loadConfigFile is async but we only need to validate YAML parsing
-        void loadConfigFile(globalPath);
+        // Await the parse: a corrupt global config was reported "valid"
+        // because the rejected promise was discarded (review finding CLI-03).
+        await loadConfigFile(globalPath);
         if (verbose) {
           issues.push({
             type: 'config',
@@ -1332,48 +1689,29 @@ function checkConfig(
 }
 
 /** Run git hook checks for doctor. */
-/** Detect path to the blobsy executable. */
-function detectBlobsyPath(): string {
-  const execPath = process.argv[1];
-  if (execPath && isAbsolute(execPath)) {
-    return execPath;
-  }
-  try {
-    return execFileSync('which', ['blobsy'], { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'blobsy';
-  }
-}
-
-/** Install a single git hook. */
-async function installHook(repoRoot: string, hook: (typeof HOOK_TYPES)[number]): Promise<void> {
-  const hookDir = join(repoRoot, '.git', 'hooks');
-  await ensureDir(hookDir);
-  const blobsyPath = detectBlobsyPath();
-  const hookPath = join(hookDir, hook.name);
-  const hookContent = `#!/bin/sh
-# Installed by: blobsy hooks install
-# To bypass: ${hook.bypassCmd}
-exec "${blobsyPath}" hook ${hook.gitEvent}
-`;
-  const { writeFile: writeFs } = await import('node:fs/promises');
-  await writeFs(hookPath, hookContent);
-  await chmod(hookPath, 0o755);
-}
-
 async function checkHooks(
   repoRoot: string,
   fix: boolean,
   verbose: boolean,
 ): Promise<DoctorIssue[]> {
   const issues: DoctorIssue[] = [];
-  const hookDir = join(repoRoot, '.git', 'hooks');
+  const hookDir = gitHooksDir(repoRoot);
 
   for (const hook of HOOK_TYPES) {
     const hookPath = join(hookDir, hook.name);
 
     if (!existsSync(hookPath)) {
-      if (fix) {
+      if (fix && hooksDisabledByEnv()) {
+        // Setup/init honor BLOBSY_NO_HOOKS; --fix must not sneak hooks
+        // back in behind the same opt-out.
+        issues.push({
+          type: 'hooks',
+          severity: 'warning',
+          message: `${hook.name} hook not installed (BLOBSY_NO_HOOKS is set; not installing)`,
+          fixed: false,
+          fixable: false,
+        });
+      } else if (fix) {
         await installHook(repoRoot, hook);
         issues.push({
           type: 'hooks',
@@ -1394,9 +1732,11 @@ async function checkHooks(
       continue;
     }
 
-    // Hook exists — check content
+    // Hook exists — check ownership by the exact managed marker, matching
+    // install/uninstall (Bugbot r5): a user hook that merely CALLS blobsy
+    // is theirs, and doctor must not report it as blobsy-managed.
     const content = readFileSync(hookPath, 'utf-8');
-    if (!content.includes('blobsy hook')) {
+    if (!content.includes(HOOK_MANAGED_MARKER)) {
       issues.push({
         type: 'hooks',
         severity: 'warning',
@@ -1421,14 +1761,28 @@ async function checkHooks(
       }
     } catch {
       if (fix) {
-        void chmod(hookPath, 0o755);
-        issues.push({
-          type: 'hooks',
-          severity: 'warning',
-          message: `${hook.name} hook made executable`,
-          fixed: true,
-          fixable: true,
-        });
+        // Await: a failed chmod was reported "fixed" (review finding CLI-03).
+        // And catch: a chmod rejection (read-only fs, not the owner) must
+        // become a recorded failure, not an aborted doctor run (Bugbot r17).
+        try {
+          await chmod(hookPath, 0o755);
+          issues.push({
+            type: 'hooks',
+            severity: 'warning',
+            message: `${hook.name} hook made executable`,
+            fixed: true,
+            fixable: true,
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          issues.push({
+            type: 'hooks',
+            severity: 'warning',
+            message: `${hook.name} hook still not executable (chmod failed: ${message})`,
+            fixed: false,
+            fixable: false,
+          });
+        }
       } else {
         issues.push({
           type: 'hooks',
@@ -1444,11 +1798,6 @@ async function checkHooks(
   return issues;
 }
 
-const HOOK_TYPES = [
-  { name: 'pre-commit', gitEvent: 'pre-commit', bypassCmd: 'git commit --no-verify' },
-  { name: 'pre-push', gitEvent: 'pre-push', bypassCmd: 'git push --no-verify' },
-] as const;
-
 export async function handleHooks(
   action: string,
   _opts: Record<string, unknown>,
@@ -1457,8 +1806,34 @@ export async function handleHooks(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
+  if (action !== 'install' && action !== 'uninstall') {
+    throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
+  }
+
   if (globalOpts.dryRun) {
-    const actions = HOOK_TYPES.map((h) => `${action} ${h.name} hook`);
+    // Mirror the real run's per-hook decisions (BLOBSY_NO_HOOKS opt-out,
+    // ownership marker checks) instead of listing every hook — a plan that
+    // promises actions the real run would skip misleads automation
+    // (Bugbot r12).
+    const actions: string[] = [];
+    if (action === 'install' && !hooksDisabledByEnv()) {
+      for (const hook of HOOK_TYPES) {
+        if (await wouldInstallHook(repoRoot, hook)) {
+          actions.push(`install ${hook.name} hook`);
+        }
+      }
+    } else if (action === 'uninstall') {
+      const hookDir = gitHooksDir(repoRoot);
+      for (const hook of HOOK_TYPES) {
+        const hookPath = join(hookDir, hook.name);
+        if (
+          existsSync(hookPath) &&
+          (await readFile(hookPath, 'utf-8')).includes(HOOK_MANAGED_MARKER)
+        ) {
+          actions.push(`uninstall ${hook.name} hook`);
+        }
+      }
+    }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
     } else {
@@ -1470,6 +1845,15 @@ export async function handleHooks(
   }
 
   if (action === 'install') {
+    if (hooksDisabledByEnv()) {
+      // Same opt-out setup/init honor; an explicit install must not
+      // silently override it (Bugbot: env flag inconsistently honored).
+      if (!globalOpts.quiet) {
+        console.log('BLOBSY_NO_HOOKS is set; not installing hooks.');
+      }
+      return;
+    }
+
     const blobsyPath = detectBlobsyPath();
 
     if (blobsyPath === 'blobsy' && !globalOpts.quiet) {
@@ -1481,36 +1865,44 @@ export async function handleHooks(
     }
 
     for (const hook of HOOK_TYPES) {
-      await installHook(repoRoot, hook);
+      const installed = await installHook(repoRoot, hook);
       if (!globalOpts.quiet) {
-        console.log(`Installed ${hook.name} hook.`);
+        if (installed) {
+          console.log(`Installed ${hook.name} hook.`);
+        } else {
+          console.log(
+            `Existing ${hook.name} hook found (not managed by blobsy); left in place. ` +
+              `Add manually: blobsy hook ${hook.gitEvent}`,
+          );
+        }
       }
     }
 
     if (!globalOpts.quiet && blobsyPath !== 'blobsy') {
       console.log(`  Using executable: ${blobsyPath}`);
     }
-  } else if (action === 'uninstall') {
+  } else {
+    const hookDir = gitHooksDir(repoRoot);
     for (const hook of HOOK_TYPES) {
-      const hookPath = join(repoRoot, '.git', 'hooks', hook.name);
+      const hookPath = join(hookDir, hook.name);
       if (existsSync(hookPath)) {
         const content = await readFile(hookPath, 'utf-8');
-        if (content.includes('blobsy')) {
+        // Delete only hooks carrying the exact managed marker — a user
+        // hook that merely calls blobsy is theirs (review finding HK-03).
+        if (content.includes(HOOK_MANAGED_MARKER)) {
           await unlink(hookPath);
           if (!globalOpts.quiet) {
             console.log(`Uninstalled ${hook.name} hook.`);
           }
         } else if (!globalOpts.quiet) {
           console.log(
-            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy.`,
+            `${hook.name.charAt(0).toUpperCase() + hook.name.slice(1)} hook not managed by blobsy; leaving it in place.`,
           );
         }
       } else if (!globalOpts.quiet) {
         console.log(`No ${hook.name} hook found.`);
       }
     }
-  } else {
-    throw new ValidationError(`Unknown hooks action: ${action}. Use 'install' or 'uninstall'.`);
   }
 }
 
@@ -1560,6 +1952,7 @@ export async function handlePrePushCheck(
 
   const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const missing: string[] = [];
+  const errors: { path: string; message: string }[] = [];
 
   for (const relPath of allBrefs) {
     const refPath = join(repoRoot, brefPath(relPath));
@@ -1570,27 +1963,46 @@ export async function handlePrePushCheck(
       continue;
     }
 
-    const exists = await blobExists(ref.remote_key, config, repoRoot);
+    // An invalid remote_key (or a backend failure) must be reported per-file,
+    // not crash the whole check — this runs as a pre-push hook.
+    let exists: boolean;
+    try {
+      exists = await blobExists(ref.remote_key, config, repoRoot, relPath);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ path: relPath, message });
+      continue;
+    }
     if (!exists) {
       missing.push(relPath);
     }
   }
 
+  const failures = missing.length + errors.length;
+
   if (globalOpts.json) {
-    console.log(formatJson({ missing, count: missing.length, ok: missing.length === 0 }));
+    console.log(formatJson({ missing, errors, count: failures, ok: failures === 0 }));
   } else {
-    if (missing.length === 0) {
+    if (failures === 0) {
       console.log(c.success('All refs have remote blobs. Safe to push.'));
     } else {
       for (const path of missing) {
         console.log(`  ${path}  missing remote blob`);
       }
-      console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
-      console.log('Run blobsy push first.');
+      for (const { path, message } of errors) {
+        console.log(`  ${path}  check failed: ${message}`);
+      }
+      if (missing.length > 0) {
+        console.log(`\n${formatCount(missing.length, 'file')} missing remote blobs.`);
+        console.log('Run blobsy push first.');
+      }
+      if (errors.length > 0) {
+        console.log(`\n${formatCount(errors.length, 'file')} could not be checked.`);
+      }
     }
   }
 
-  if (missing.length > 0) {
+  if (failures > 0) {
     process.exitCode = 1;
   }
 }
@@ -1646,6 +2058,15 @@ async function handlePreCommitHook(repoRoot: string): Promise<void> {
 }
 
 async function handlePrePushHook(repoRoot: string): Promise<void> {
+  // Scope: this hook guards the data-loss window this machine can create —
+  // a committed .bref whose blob was never uploaded, which is exactly the
+  // set with no remote_key (remote_key is only ever written after a
+  // successful upload; see pushFile's refUpdates). It deliberately does NOT
+  // re-verify that blobs behind existing remote_keys still exist: that costs
+  // one network round-trip per tracked file on every `git push` and would
+  // break offline pushes, to detect remote-side deletion or a backend
+  // switch — drift this clone didn't cause. `pre-push-check` is the
+  // authoritative audit for that and runs in CI (Bugbot r12).
   const config = await resolveConfig(repoRoot, repoRoot);
   const allBrefs = findBrefFiles(repoRoot, repoRoot);
   const unpushed: string[] = [];
@@ -1662,12 +2083,31 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
 
   console.log(`blobsy pre-push: uploading ${formatCount(unpushed.length, 'blob')}...`);
 
-  // Push each unpushed blob
+  // Push each unpushed blob. This hook is the design's primary prevention
+  // layer against committed-ref-without-blob data loss, so a failed upload
+  // MUST abort the git push (review finding HK-01) — never report success
+  // on a network error or missing credentials.
   const cacheDir = getStatCacheDir(repoRoot);
+  const failures: { relPath: string; error: string }[] = [];
   for (const relPath of unpushed) {
     const refPath = join(repoRoot, brefPath(relPath));
     const ref = await readBref(refPath);
     const absPath = join(repoRoot, relPath);
+
+    // Same push sanity check as explicit push (DS-03): never upload new
+    // bytes under the stale hash recorded at track time.
+    if (existsSync(absPath)) {
+      const currentHash = await computeHash(absPath);
+      if (currentHash !== ref.hash) {
+        failures.push({
+          relPath,
+          error:
+            'local file changed since it was tracked (hash mismatch); ' +
+            'run `blobsy track` to re-track, then commit and push again',
+        });
+        continue;
+      }
+    }
 
     const result = await pushFile(absPath, relPath, ref, config, repoRoot);
 
@@ -1678,10 +2118,34 @@ async function handlePrePushHook(repoRoot: string): Promise<void> {
         const entry = await createCacheEntry(absPath, relPath, updatedRef.hash);
         await writeCacheEntry(cacheDir, entry);
       }
+    } else if (!result.success) {
+      failures.push({ relPath, error: result.error ?? 'unknown error' });
     }
   }
 
+  if (failures.length > 0) {
+    for (const f of failures) {
+      console.error(`blobsy pre-push: ${OUTPUT_SYMBOLS.fail} ${f.relPath}: ${f.error}`);
+    }
+    console.error(
+      `blobsy pre-push: ${formatCount(failures.length, 'upload')} failed; aborting push. ` +
+        'Collaborators would see committed refs with no blob behind them. ' +
+        'Fix the error and retry, or bypass with `git push --no-verify`.',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   console.log('blobsy pre-push: all blobs uploaded.');
+  // The remote_key updates land in the working tree, not in the commits this
+  // push is sending (a pre-push hook cannot amend the outgoing commits), so
+  // collaborators cannot pull until a follow-up commit records them (Bugbot
+  // round 10). Say so instead of leaving the .bref changes silently dirty.
+  console.log(
+    'blobsy pre-push: remote keys were recorded in the .bref files in your ' +
+      'working tree; this push does not include them. Commit them so ' +
+      `collaborators can pull: git add '*.bref' && git commit -m 'Record blobsy remote keys'`,
+  );
 }
 
 export async function handleHook(
@@ -1689,7 +2153,7 @@ export async function handleHook(
   _opts: Record<string, unknown>,
   _cmd: Command,
 ): Promise<void> {
-  if (process.env.BLOBSY_NO_HOOKS) return;
+  if (hooksDisabledByEnv()) return;
 
   const repoRoot = findRepoRoot();
 

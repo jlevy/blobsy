@@ -19,7 +19,7 @@ $ blobsy health --json
 {
   "schema_version": "0.1",
   "status": "ok",
-  "message": "Backend is reachable and writable."
+  "message": "Backend is reachable."
 }
 ? 0
 ```

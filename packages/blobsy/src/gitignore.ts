@@ -43,7 +43,40 @@ export async function removeGitignoreEntry(directory: string, relativeName: stri
   await writeBlobsyBlock(gitignorePath, filtered);
 }
 
-/** Read the entries inside the blobsy-managed block. */
+/**
+ * Locate the last well-formed managed block: the last BLOCK_START line with
+ * a BLOCK_END somewhere after it. Merge conflicts realistically leave
+ * damaged markers behind (END before START, or START with no END); treating
+ * anything short of a well-formed pair as a block corrupts user content
+ * (review finding LIB-02).
+ */
+function locateBlock(
+  lines: string[],
+): { kind: 'none' } | { kind: 'damaged' } | { kind: 'ok'; startIdx: number; endIdx: number } {
+  let startIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i]!.trim() === BLOCK_START) {
+      startIdx = i;
+      break;
+    }
+  }
+  if (startIdx < 0) {
+    return { kind: 'none' };
+  }
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (lines[i]!.trim() === BLOCK_END) {
+      return { kind: 'ok', startIdx, endIdx: i };
+    }
+  }
+  return { kind: 'damaged' };
+}
+
+/**
+ * Read the entries inside the blobsy-managed block.
+ *
+ * Returns [] when the block markers are damaged — user lines after an
+ * unterminated START must never be absorbed into the managed block.
+ */
 export async function readBlobsyBlock(gitignorePath: string): Promise<string[]> {
   if (!existsSync(gitignorePath)) {
     return [];
@@ -51,27 +84,18 @@ export async function readBlobsyBlock(gitignorePath: string): Promise<string[]> 
 
   const content = await readFile(gitignorePath, 'utf-8');
   const lines = content.split('\n');
-
-  let inBlock = false;
-  const entries: string[] = [];
-
-  for (const line of lines) {
-    if (line.trim() === BLOCK_START) {
-      inBlock = true;
-      continue;
-    }
-    if (line.trim() === BLOCK_END) {
-      inBlock = false;
-      continue;
-    }
-    if (inBlock) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0 && !trimmed.startsWith('#')) {
-        entries.push(trimmed);
-      }
-    }
+  const block = locateBlock(lines);
+  if (block.kind !== 'ok') {
+    return [];
   }
 
+  const entries: string[] = [];
+  for (const line of lines.slice(block.startIdx + 1, block.endIdx)) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0 && !trimmed.startsWith('#')) {
+      entries.push(trimmed);
+    }
+  }
   return entries;
 }
 
@@ -79,31 +103,38 @@ export async function readBlobsyBlock(gitignorePath: string): Promise<string[]> 
  * Write the blobsy-managed block in a .gitignore file.
  *
  * Preserves any non-blobsy content. Entries are sorted and deduped.
+ * If existing markers are damaged, the file content is left untouched and a
+ * fresh block is appended (with a warning) instead of rewriting — the old
+ * behavior silently deleted everything between a stray START and EOF.
  */
 export async function writeBlobsyBlock(gitignorePath: string, entries: string[]): Promise<void> {
   const deduped = [...new Set(entries)].sort();
+  const blockLines = [BLOCK_START, ...deduped, BLOCK_END];
 
   let existingContent = '';
   if (existsSync(gitignorePath)) {
     existingContent = await readFile(gitignorePath, 'utf-8');
   }
 
-  const blockContent = [BLOCK_START, ...deduped, BLOCK_END].join('\n');
+  const lines = existingContent.split('\n');
+  const block = locateBlock(lines);
 
-  if (existingContent.includes(BLOCK_START)) {
-    // Replace existing block
-    const beforeBlock = existingContent.slice(0, existingContent.indexOf(BLOCK_START));
-    const afterBlockEnd = existingContent.indexOf(BLOCK_END);
-    const afterBlock =
-      afterBlockEnd >= 0 ? existingContent.slice(afterBlockEnd + BLOCK_END.length) : '';
-
-    const newContent = beforeBlock + blockContent + afterBlock;
-    await writeFile(gitignorePath, newContent);
-  } else {
-    // Append new block
-    const separator = existingContent.length > 0 && !existingContent.endsWith('\n') ? '\n' : '';
-    await writeFile(gitignorePath, existingContent + separator + blockContent + '\n');
+  if (block.kind === 'ok') {
+    lines.splice(block.startIdx, block.endIdx - block.startIdx + 1, ...blockLines);
+    await writeFile(gitignorePath, lines.join('\n'));
+    return;
   }
+
+  if (block.kind === 'damaged') {
+    console.warn(
+      `Warning: damaged blobsy-managed block markers in ${gitignorePath}; ` +
+        'leaving existing content in place and appending a fresh block. ' +
+        'Remove the stray marker lines to clean up.',
+    );
+  }
+
+  const separator = existingContent.length > 0 && !existingContent.endsWith('\n') ? '\n' : '';
+  await writeFile(gitignorePath, existingContent + separator + blockLines.join('\n') + '\n');
 }
 
 // --- Gitignore conflict detection and correction ---
@@ -273,9 +304,12 @@ export async function fixGitignoreForBlobsy(
   }
 
   // Compute the negation prefix from the glob pattern
-  // data/** -> !data/**/  (allow subdirectories to be traversed)
+  // data/** -> !data/**/  (allow subdirectories at EVERY depth to be
+  // traversed — a single-level !data/*/ leaves deeper directories excluded,
+  // so nested .bref files are invisible to git and collaborators never
+  // receive them; review finding LIB-01)
   const negationBase = globPattern.slice(0, -2); // strip trailing **
-  const negationDir = `!${negationBase}*/`;
+  const negationDir = `!${negationBase}**/`;
 
   const replacementLines = [
     REWRITE_COMMENT,

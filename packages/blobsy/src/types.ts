@@ -35,6 +35,15 @@ export const BREF_COMMENT_HEADER =
   '# blobsy -- https://github.com/jlevy/blobsy\n# Run: blobsy status | blobsy --help\n\n';
 export const BREF_EXTENSION = '.bref';
 
+/**
+ * Ownership marker written into every blobsy-managed git hook.
+ *
+ * Install/uninstall must only ever rewrite or delete files carrying this
+ * exact marker — substring checks like "contains blobsy" destroyed users'
+ * multi-command hooks that merely invoked blobsy (review finding HK-03).
+ */
+export const HOOK_MANAGED_MARKER = '# Installed by: blobsy hooks install';
+
 /** Per-file stat cache entry for fast change detection and three-way merge. */
 export interface StatCacheEntry {
   /** Repo-relative file path */
@@ -122,8 +131,8 @@ export interface BlobsyConfig {
   ignore?: string[] | undefined;
   /** Remote key template config */
   remote?: { key_template: string } | undefined;
-  /** Sync tool and parallelism settings */
-  sync?: { tools: string[]; parallel: number } | undefined;
+  /** Sync tool preferences. Transfers are sequential in V1 (BE-02). */
+  sync?: { tools: string[] } | undefined;
   /** Checksum algorithm config */
   checksum?: { algorithm: string } | undefined;
 }
@@ -262,9 +271,16 @@ export interface ParsedBackendUrl {
  */
 export interface Backend {
   readonly type: BackendType;
-  push(localPath: string, remoteKey: string): Promise<void>;
-  pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void>;
-  exists(remoteKey: string): Promise<boolean>;
+  /** relativePath is the repo-relative file path, for command backends'
+   * {relative_path} template variable (review finding BE-06). */
+  push(localPath: string, remoteKey: string, relativePath?: string): Promise<void>;
+  pull(
+    remoteKey: string,
+    localPath: string,
+    expectedHash?: string,
+    relativePath?: string,
+  ): Promise<void>;
+  exists(remoteKey: string, relativePath?: string): Promise<boolean>;
   delete(remoteKey: string): Promise<void>;
   healthCheck(): Promise<void>;
 }

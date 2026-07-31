@@ -14,7 +14,7 @@ before: |
 # Install hooks
 
 ```console
-$ blobsy hooks install
+$ BLOBSY_NO_HOOKS= blobsy hooks install
 Installed pre-commit hook.
 Installed pre-push hook.
   Using executable: [LOCAL_PATH]
@@ -89,20 +89,23 @@ $ chmod +x .git/hooks/pre-commit
 
 ```console
 $ blobsy hooks uninstall
-Pre-commit hook not managed by blobsy.
+Pre-commit hook not managed by blobsy; leaving it in place.
 No pre-push hook found.
 ? 0
 ```
 
 # Hook execution: install hook and verify it runs on commit
 
+The custom hook from the previous section is user-owned, so install would refuse to
+touch it (HK-03); remove it first to test a clean install.
+
 ```console
-$ mkdir -p data
+$ rm .git/hooks/pre-commit && mkdir -p data
 ? 0
 ```
 
 ```console
-$ blobsy hooks install
+$ BLOBSY_NO_HOOKS= blobsy hooks install
 Installed pre-commit hook.
 Installed pre-push hook.
   Using executable: [LOCAL_PATH]
@@ -133,5 +136,48 @@ $ BLOBSY_NO_HOOKS=0 git add -A && BLOBSY_NO_HOOKS=0 git commit -q -m "test hook"
 $ blobsy hooks uninstall
 Uninstalled pre-commit hook.
 Uninstalled pre-push hook.
+? 0
+```
+
+# Dry-run mirrors the real run: both hooks planned in a clean repo
+
+```console
+$ BLOBSY_NO_HOOKS= blobsy hooks install --dry-run
+Would install pre-commit hook
+Would install pre-push hook
+? 0
+```
+
+# Dry-run honors BLOBSY_NO_HOOKS (set for this suite): nothing planned
+
+```console
+$ blobsy hooks install --dry-run
+? 0
+```
+
+# Dry-run skips hooks blobsy doesn’t own, like the real run
+
+```console
+$ printf '#!/bin/sh\necho "custom hook"\n' > .git/hooks/pre-commit
+? 0
+```
+
+```console
+$ BLOBSY_NO_HOOKS= blobsy hooks install --dry-run
+Would install pre-push hook
+? 0
+```
+
+# Uninstall dry-run plans only blobsy-managed hooks that exist
+
+```console
+$ blobsy hooks uninstall --dry-run
+? 0
+```
+
+```console
+$ rm .git/hooks/pre-commit && BLOBSY_NO_HOOKS= blobsy hooks install >/dev/null && blobsy hooks uninstall --dry-run
+Would uninstall pre-commit hook
+Would uninstall pre-push hook
 ? 0
 ```

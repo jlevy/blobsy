@@ -20,6 +20,7 @@ import {
   UserError,
 } from './types.js';
 import { ensureDir } from './fs-utils.js';
+import { brefSchema, formatSchemaIssues, hasConflictMarkers } from './config-schema.js';
 
 /** Parse a .bref file, validate format version. */
 export async function readBref(path: string): Promise<Bref> {
@@ -45,6 +46,15 @@ export async function readBref(path: string): Promise<Bref> {
     throw new ValidationError(`Cannot read .bref file: ${path}: ${error.message}`);
   }
 
+  // A conflicted git pull leaves marker lines that YAML-parse into
+  // gibberish; report the real problem directly (review finding CFG-03).
+  if (hasConflictMarkers(content)) {
+    throw new UserError(
+      `Unresolved merge conflict markers in .bref file: ${path}`,
+      'Resolve the git conflict (look for <<<<<<< / >>>>>>> lines) and retry.',
+    );
+  }
+
   let parsed: unknown;
   try {
     parsed = parseYaml(content);
@@ -56,7 +66,7 @@ export async function readBref(path: string): Promise<Bref> {
     );
   }
 
-  if (typeof parsed !== 'object' || parsed === null) {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new ValidationError(`Invalid .bref file (not an object): ${path}`);
   }
 
@@ -68,21 +78,21 @@ export async function readBref(path: string): Promise<Bref> {
 
   validateFormatVersion(obj.format, path);
 
-  if (typeof obj.hash !== 'string') {
-    throw new ValidationError(`Missing or invalid 'hash' field in .bref file: ${path}`);
+  // Schema validation (review finding CFG-03): field-level type errors are
+  // reported with the offending key instead of surfacing later.
+  const result = brefSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new ValidationError(`Invalid .bref file: ${path}: ${formatSchemaIssues(result.error)}`);
   }
 
-  if (typeof obj.size !== 'number') {
-    throw new ValidationError(`Missing or invalid 'size' field in .bref file: ${path}`);
-  }
-
+  const bref = result.data;
   return {
-    format: obj.format,
-    hash: obj.hash,
-    size: obj.size,
-    remote_key: typeof obj.remote_key === 'string' ? obj.remote_key : undefined,
-    compressed: typeof obj.compressed === 'string' ? obj.compressed : undefined,
-    compressed_size: typeof obj.compressed_size === 'number' ? obj.compressed_size : undefined,
+    format: bref.format,
+    hash: bref.hash,
+    size: bref.size,
+    remote_key: bref.remote_key,
+    compressed: bref.compressed,
+    compressed_size: bref.compressed_size,
   };
 }
 

@@ -37,18 +37,19 @@ jobs:
 
       - run: pnpm publint
 
-      - name: Link blobsy CLI for tests
-        working-directory: packages/blobsy
-        run: pnpm link --global
-
+      # apt's rclone on ubuntu-latest is too old for `rclone serve s3` (needs
+      # v1.63+, which the s3-backend golden uses as a hermetic local endpoint),
+      # so install the current upstream build instead.
       - name: Install rclone
-        if: matrix.node-version == 24
-        run: sudo apt-get update && sudo apt-get install -y rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
 
-      - name: Run rclone golden test
-        if: matrix.node-version == 24
+      - name: Run golden test suite
         working-directory: packages/blobsy
-        run: npx tryscript run tests/golden/rclone-backend/rclone-lifecycle.tryscript.md
+        run: pnpm test:golden
+
+      - name: Check golden coverage conventions
+        working-directory: packages/blobsy
+        run: bash scripts/check-golden-coverage.sh
 
       - run: pnpm test:coverage
 

@@ -28,6 +28,7 @@ $ blobsy sync --json
     "pushed": 2,
     "pulled": 0,
     "errors": 0,
+    "conflicts": 0,
     "total": 2
   }
 }
@@ -49,6 +50,7 @@ $ blobsy sync --json
     "pushed": 0,
     "pulled": 0,
     "errors": 0,
+    "conflicts": 0,
     "total": 2
   }
 }

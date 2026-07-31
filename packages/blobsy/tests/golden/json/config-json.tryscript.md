@@ -60,8 +60,7 @@ $ blobsy config --json
       "tools": [
         "aws-cli",
         "rclone"
-      ],
-      "parallel": 8
+      ]
     },
     "checksum": {
       "algorithm": "sha256"

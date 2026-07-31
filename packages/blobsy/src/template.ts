@@ -7,7 +7,7 @@
 
 import { basename, dirname } from 'node:path';
 
-import { formatWarning } from './format.js';
+import { ValidationError } from './types.js';
 import { parseHash } from './hash.js';
 import { normalizePath } from './paths.js';
 
@@ -28,6 +28,12 @@ export interface TemplateVars {
  * Sanitize a string for safe use as an S3 key component.
  * Replaces characters that are problematic in S3/GCS/R2 keys
  * while preserving forward slashes for path structure.
+ *
+ * Known collision (review finding L-09): leading dots are stripped per
+ * segment, so `.hidden.csv` and `hidden.csv` map to the same remote key.
+ * Acceptable because keys are content-addressed under a hash directory —
+ * two different payloads never share a full key — but flat custom
+ * key_templates without `{content_sha256_short}` could collide.
  */
 export function sanitizeKeyComponent(value: string): string {
   return (
@@ -72,8 +78,14 @@ export function evaluateTemplate(template: string, vars: TemplateVars): string {
     if (key in replacements) {
       return replacements[key]!;
     }
-    console.warn(formatWarning(`unknown template variable {${key}} in key template`));
-    return `{${key}}`;
+    // Hard error: warn-and-continue put a literal "{var}" into remote keys
+    // and wrote unstructured stderr into --json output streams (review
+    // finding LIB-03).
+    throw new ValidationError(`Unknown template variable {${key}} in key template.`, [
+      `Known variables: ${Object.keys(replacements)
+        .map((k) => `{${k}}`)
+        .join(', ')}`,
+    ]);
   });
 }
 

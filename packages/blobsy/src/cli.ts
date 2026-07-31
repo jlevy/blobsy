@@ -9,7 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,7 @@ import {
   formatJsonDryRun,
   formatJsonError,
   formatJsonMessage,
+  setSuppressAdvisoryWarnings,
   formatSize,
   OUTPUT_SYMBOLS,
 } from './format.js';
@@ -63,7 +64,7 @@ import {
   findTrackableFiles,
   isDirectory,
   normalizePath,
-  resolveFilePath,
+  resolveRepoPath,
   stripBrefExtension,
   toRepoRelative,
   brefPath,
@@ -83,10 +84,18 @@ import {
   resolveTrackedFiles,
   computeFileStates,
 } from './commands-stage2.js';
-import { createCacheEntry, getStatCacheDir, writeCacheEntry } from './stat-cache.js';
+import {
+  createCacheEntry,
+  deleteCacheEntry,
+  getStatCacheDir,
+  writeCacheEntry,
+} from './stat-cache.js';
+import { createBackend, resolveBackend } from './transfer.js';
+import { parse as parseYamlDoc, stringify as stringifyYamlDoc } from 'yaml';
 import { SKILL_TEXT } from './skill-text.js';
 import type { BlobsyConfig, FileStateSymbol, GlobalOptions, Bref } from './types.js';
 import { BlobsyError, BREF_FORMAT, ValidationError, UserError } from './types.js';
+import { HOOK_TYPES, hooksDisabledByEnv, installHook, wouldInstallHook } from './hooks.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -138,7 +147,7 @@ function createProgram(): Command {
     .action(wrapAction(handleSetup));
 
   program
-    .command('init')
+    .command('init', { hidden: true })
     .description('Initialize blobsy config (low-level; prefer setup --auto)')
     .argument('<url>', 'Backend URL (e.g. s3://bucket/prefix/, local:../path)')
     .option('--region <region>', 'AWS region (for S3 backends)')
@@ -157,7 +166,7 @@ function createProgram(): Command {
     .action(wrapAction(handleAdd));
 
   program
-    .command('track')
+    .command('track', { hidden: true })
     .description('Start tracking files or directories with .bref pointers')
     .argument('<path...>', 'Files or directories to track')
     .option(
@@ -179,7 +188,10 @@ function createProgram(): Command {
     .description('Remove tracked files: delete local + move .bref to trash')
     .argument('<path...>', 'Files or directories to remove')
     .option('--local', 'Delete local file only, keep .bref and remote')
-    .option('--remote', 'Also delete blob from backend (requires confirmation)')
+    .option(
+      '--remote',
+      'DANGER: also delete the blob from the backend (breaks git history; requires --force)',
+    )
     .option('--force', 'Skip confirmation prompts')
     .option('--recursive', 'Required for directory removal')
     .action(wrapAction(handleRm));
@@ -189,6 +201,7 @@ function createProgram(): Command {
     .description('Rename or move tracked files or directories (updates .bref + .gitignore)')
     .argument('<source>', 'Source tracked file or directory')
     .argument('<dest>', 'Destination path')
+    .option('--force', 'Overwrite an existing destination file or tracking metadata')
     .action(wrapAction(handleMv));
 
   program
@@ -216,14 +229,12 @@ function createProgram(): Command {
     .command('status')
     .description('Show sync state of tracked files')
     .argument('[path...]', 'Files or directories (default: all tracked)')
-    .option('--json', 'Structured JSON output')
     .action(wrapAction(handleStatus));
 
   program
     .command('verify')
     .description('Verify local files match their .bref hashes')
     .argument('[path...]', 'Files or directories (default: all tracked)')
-    .option('--json', 'Structured JSON output')
     .action(wrapAction(handleVerify));
 
   program
@@ -237,7 +248,7 @@ function createProgram(): Command {
     .action(wrapAction(handleConfig));
 
   program
-    .command('health')
+    .command('health', { hidden: true })
     .description('Test backend connectivity and permissions')
     .action(wrapAction(handleHealth));
 
@@ -245,8 +256,6 @@ function createProgram(): Command {
     .command('doctor')
     .description('Run diagnostics and optionally auto-fix issues')
     .option('--fix', 'Attempt to automatically fix detected issues')
-    .option('--json', 'Structured JSON output')
-    .option('--verbose', 'Show detailed diagnostic logs')
     .action(wrapAction(handleDoctor));
 
   program
@@ -256,12 +265,12 @@ function createProgram(): Command {
     .action(wrapAction(handleHooks));
 
   program
-    .command('check-unpushed')
+    .command('check-unpushed', { hidden: true })
     .description('List committed .bref files whose blobs are not yet pushed')
     .action(wrapAction(handleCheckUnpushed));
 
   program
-    .command('pre-push-check')
+    .command('pre-push-check', { hidden: true })
     .description('CI guard: fail if any .bref is missing its remote blob')
     .action(wrapAction(handlePrePushCheck));
 
@@ -272,7 +281,7 @@ function createProgram(): Command {
     .action(wrapAction(handleHook));
 
   program
-    .command('readme')
+    .command('readme', { hidden: true })
     .description('Display the blobsy README')
     .action(
       wrapAction(async (opts: Record<string, unknown>) => {
@@ -289,9 +298,24 @@ function createProgram(): Command {
     .argument('[topic]', 'Section to display (e.g. "compression", "backends")')
     .option('--list', 'List available sections')
     .option('--brief', 'Condensed version')
+    .option('--readme', 'Display the blobsy README')
+    .option('--skill', 'Output blobsy skill documentation (for AI agents)')
     .action(
       wrapAction(async (topic: string | undefined, opts: Record<string, unknown>) => {
         const interactive = isInteractive(opts);
+
+        // CLI-07: readme and skill fold into docs; the standalone commands
+        // remain as hidden aliases.
+        if (opts.readme) {
+          const readme = await loadBundledDoc('README.md');
+          const rendered = renderMarkdown(readme, interactive);
+          await paginateOutput(rendered, interactive);
+          return;
+        }
+        if (opts.skill) {
+          console.log(SKILL_TEXT);
+          return;
+        }
 
         if (opts.brief) {
           const brief = await loadBundledDoc('blobsy-docs-brief.md');
@@ -328,7 +352,7 @@ function createProgram(): Command {
     );
 
   program
-    .command('skill')
+    .command('skill', { hidden: true })
     .description('Output blobsy skill documentation (for AI agents)')
     .action(
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -413,6 +437,7 @@ function wrapAction(handler: ActionHandler): ActionHandler {
         if (g.quiet && g.verbose) {
           throw new ValidationError('--quiet and --verbose cannot be used together.');
         }
+        setSuppressAdvisoryWarnings(Boolean(g.quiet || g.json));
       }
       await handler(...args);
     } catch (err) {
@@ -586,7 +611,28 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     if (!existsSync(configPath)) {
       actions.push(`create ${normalizePath(toRepoRelative(configPath, repoRoot))}`);
     }
-    actions.push('install pre-commit hook');
+    // Mirror the real path's hook opt-outs (--no-hooks, BLOBSY_NO_HOOKS,
+    // hook managers) and per-hook ownership checks — the installer skips
+    // existing hooks it doesn't manage — so the plan matches what would
+    // actually run (Bugbot r8/r11).
+    const hooksEnabled =
+      opts.hooks !== false &&
+      !hooksDisabledByEnv() &&
+      !existsSync(join(repoRoot, 'lefthook.yml')) &&
+      !existsSync(join(repoRoot, '.husky'));
+    if (hooksEnabled) {
+      const plannedHooks: string[] = [];
+      for (const hook of HOOK_TYPES) {
+        if (await wouldInstallHook(repoRoot, hook)) {
+          plannedHooks.push(hook.name);
+        }
+      }
+      if (plannedHooks.length > 0) {
+        actions.push(
+          `install ${plannedHooks.join(' and ')} hook${plannedHooks.length > 1 ? 's' : ''}`,
+        );
+      }
+    }
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
     } else {
@@ -667,21 +713,16 @@ async function handleInit(url: string, opts: Record<string, unknown>, cmd: Comma
     }
   }
 
-  // Install git hooks (pre-commit and pre-push)
-  if (!opts.noHooks) {
+  // Install git hooks (pre-commit and pre-push). Commander maps --no-hooks
+  // to opts.hooks === false (NOT opts.noHooks — that key never exists, so
+  // checking it made the flag a no-op; review finding CLI-01).
+  if (opts.hooks !== false) {
     await installHooks(repoRoot, globalOpts);
   }
 }
 
-const HOOKS = [
-  { name: 'pre-commit', gitEvent: 'pre-commit' },
-  { name: 'pre-push', gitEvent: 'pre-push' },
-] as const;
-
 async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promise<void> {
-  if (process.env.BLOBSY_NO_HOOKS) return;
-
-  const hookDir = join(repoRoot, '.git', 'hooks');
+  if (hooksDisabledByEnv()) return;
 
   // Check for hook managers
   if (existsSync(join(repoRoot, 'lefthook.yml')) || existsSync(join(repoRoot, '.husky'))) {
@@ -693,30 +734,20 @@ async function installHooks(repoRoot: string, globalOpts: GlobalOptions): Promis
     return;
   }
 
-  await ensureDir(hookDir);
-  const { writeFile: writeFs, chmod } = await import('node:fs/promises');
-
-  for (const hook of HOOKS) {
-    const hookPath = join(hookDir, hook.name);
-
-    if (existsSync(hookPath)) {
-      const content = await readFile(hookPath, 'utf-8');
-      if (!content.includes('blobsy')) {
-        if (!globalOpts.quiet && !globalOpts.json) {
-          console.log(
-            `Existing ${hook.name} hook found. Add manually: blobsy hook ${hook.gitEvent}`,
-          );
-        }
-        continue;
-      }
-    }
-
-    const hookContent = `#!/bin/sh\n# Installed by: blobsy hooks install\n# To bypass: git ${hook.name === 'pre-commit' ? 'commit' : 'push'} --no-verify\nexec blobsy hook ${hook.gitEvent}\n`;
-    await writeFs(hookPath, hookContent);
-    await chmod(hookPath, 0o755);
+  for (const hook of HOOK_TYPES) {
+    // Shared installer (review finding HK-02): marker-based ownership
+    // check (HK-03) and worktree-safe hooks dir (HK-04).
+    const installed = await installHook(repoRoot, hook);
 
     if (!globalOpts.quiet && !globalOpts.json) {
-      console.log(`Installed ${hook.name} hook.`);
+      if (installed) {
+        console.log(`Installed ${hook.name} hook.`);
+      } else {
+        console.log(
+          `Existing ${hook.name} hook found (not managed by blobsy). ` +
+            `Add manually: blobsy hook ${hook.gitEvent}`,
+        );
+      }
     }
   }
 }
@@ -733,7 +764,7 @@ async function handleTrack(
   const minSizeOverride = opts.minSize as string | undefined;
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
     if (isDirectory(absPath)) {
       await trackDirectory(absPath, repoRoot, cacheDir, config, globalOpts, minSizeOverride);
@@ -763,7 +794,7 @@ async function handleAdd(
   const allFilesToStage: string[] = [];
 
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
     let result: TrackResult;
     if (isDirectory(absPath)) {
       result = await trackDirectory(
@@ -1030,7 +1061,18 @@ async function trackDirectory(
         continue;
       }
 
-      const newRef: Bref = { ...existingRef, hash, size: fileSize };
+      // Hash changed: clear remote_key and compression fields, same as the
+      // single-file path — the old key points to the old content, and keeping
+      // it would make push report "already pushed" for content the remote
+      // does not have (Bugbot round 11).
+      const newRef: Bref = {
+        ...existingRef,
+        hash,
+        size: fileSize,
+        remote_key: undefined,
+        compressed: undefined,
+        compressed_size: undefined,
+      };
       await writeBref(refPath, newRef);
       const cacheEntry = await createCacheEntry(absFilePath, relFilePath, hash);
       await writeCacheEntry(cacheDir, cacheEntry);
@@ -1085,7 +1127,7 @@ async function handleStatus(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const repoRoot = findRepoRoot();
 
   const files = resolveTrackedFiles(paths, repoRoot);
@@ -1140,7 +1182,7 @@ async function handleVerify(
   cmd: Command,
 ): Promise<void> {
   const globalOpts = getGlobalOpts(cmd);
-  const useJson = Boolean(opts.json) || globalOpts.json;
+  const useJson = globalOpts.json;
   const repoRoot = findRepoRoot();
 
   const files = resolveTrackedFiles(paths, repoRoot);
@@ -1241,7 +1283,7 @@ async function handleUntrack(
     }
   } else {
     for (const inputPath of inputPaths) {
-      const absPath = resolveFilePath(stripBrefExtension(inputPath));
+      const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
       if (isDirectory(absPath)) {
         if (!recursive) {
@@ -1291,18 +1333,13 @@ async function untrackFile(
     return;
   }
 
-  // Move .bref to trash
-  const trashDir = join(repoRoot, '.blobsy', 'trash');
-  await ensureDir(trashDir);
-  const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
-  await rename(refPath, trashPath);
+  await moveBrefToTrash(repoRoot, refPath);
 
   // Remove from gitignore
   await removeGitignoreEntry(fileDir, fileName);
 
   // Clean stat cache
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
 
   // Stage the modified .gitignore
@@ -1353,8 +1390,26 @@ async function handleRm(
     throw new ValidationError('Cannot use both --local and --remote flags');
   }
 
+  // Refuse remote deletion up front, before any local mutation, so a refusal
+  // never leaves the repo half-cleaned (review finding DS-04). Remote
+  // deletion is history-breaking: a .bref is a durable pointer in git
+  // history, and deleting the object can break older commits, tags, other
+  // branches, other clones sharing the backend, or another .bref sharing a
+  // CAS key. No prompt can make that safe (and the design forbids prompts);
+  // reachability-aware cleanup is the deferred GC's job. This flag stays
+  // only as emergency plumbing: explicit --force, never influenced by
+  // --quiet.
+  if (deleteRemote && !force) {
+    throw new ValidationError(
+      'rm --remote permanently deletes the blob for ALL git history — older ' +
+        'commits, tags, and other clones that reference it will break. ' +
+        'If you are sure, re-run with --force. ' +
+        'To stop tracking without destroying history, use rm without --remote.',
+    );
+  }
+
   for (const inputPath of paths) {
-    const absPath = resolveFilePath(stripBrefExtension(inputPath));
+    const absPath = resolveRepoPath(stripBrefExtension(inputPath), repoRoot);
 
     if (isDirectory(absPath)) {
       if (!recursive) {
@@ -1385,12 +1440,35 @@ async function rmFile(
   const fileName = basename(absPath);
   const fileDir = dirname(absPath);
 
+  // Every rm variant requires the file to be tracked BEFORE touching the
+  // payload — `rm --local somefile` used to unlink untracked files, which
+  // is unrecoverable since blobsy holds no copy (review finding CLI-05).
+  // Checked ahead of --dry-run so the dry run mirrors the real refusal
+  // instead of printing a plan the real command would reject (CLI-02
+  // truthful-dry-run contract; Bugbot r13).
+  if (!existsSync(refPath)) {
+    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
+  }
+
   if (globalOpts.dryRun) {
-    const action = localOnly ? `delete local file ${relPath}` : `remove ${relPath}`;
+    const actions = [localOnly ? `delete local file ${relPath}` : `remove ${relPath}`];
+    // The history-breaking half of --remote --force must appear in the
+    // preview — a plan that hides the remote deletion is worse than no
+    // plan (CLI-02 truthful-dry-run contract; Bugbot r15). handleRm
+    // refuses --remote without --force before this point, so reaching
+    // here with deleteRemote means the real run would delete.
+    if (deleteRemote) {
+      const bref = await readBref(refPath);
+      if (bref.remote_key) {
+        actions.push(`delete remote blob ${bref.remote_key}`);
+      }
+    }
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([action]));
+      console.log(formatJsonDryRun(actions));
     } else {
-      console.log(formatDryRun(action));
+      for (const action of actions) {
+        console.log(formatDryRun(action));
+      }
     }
     return;
   }
@@ -1410,76 +1488,48 @@ async function rmFile(
     return;
   }
 
-  if (!existsSync(refPath)) {
-    throw new ValidationError(`Not tracked: ${relPath} (no .bref file found)`);
-  }
+  const trashPath = await moveBrefToTrash(repoRoot, refPath);
 
-  // Move .bref to trash
-  const trashDir = join(repoRoot, '.blobsy', 'trash');
-  await ensureDir(trashDir);
-  const trashPath = join(trashDir, `${basename(refPath)}.${Date.now()}`);
-  await rename(refPath, trashPath);
-
-  // Delete from backend if --remote flag set
+  // Delete from backend if --remote --force (handleRm refuses --remote
+  // without --force before any local mutation; see the DS-04 rationale
+  // there). No prompt: prompts are forbidden by design, and --quiet must
+  // never influence a safety decision.
   if (deleteRemote) {
     const bref = await readBref(trashPath); // Read from trash copy
 
     if (bref.remote_key) {
-      // Confirmation prompt (unless --force)
-      if (!force && !globalOpts.quiet) {
-        const { createInterface } = await import('node:readline/promises');
-        const rl = createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-
-        const answer = await rl.question(
-          `Delete blob from backend?\n` +
-            `  File: ${relPath}\n` +
-            `  Remote key: ${bref.remote_key}\n` +
-            `  This cannot be undone. Continue? (y/N): `,
-        );
-
-        rl.close();
-
-        if (answer.toLowerCase() !== 'y') {
-          if (!globalOpts.quiet) {
-            console.log(
-              'Remote deletion cancelled. Local file and .bref removed, remote blob kept.',
-            );
-          }
-          // Still continue with local cleanup below
-          deleteRemote = false; // Skip backend deletion
+      try {
+        const config = await resolveConfig(repoRoot, repoRoot);
+        if (!config.backends) {
+          throw new ValidationError('No backend configured');
         }
-      }
+        const resolvedBackend = resolveBackend(config);
+        const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+        await backend.delete(bref.remote_key);
 
-      // Delete from backend if confirmed or --force
-      if (deleteRemote) {
-        try {
-          const config = await resolveConfig(repoRoot, repoRoot);
-          const { createBackend, resolveBackend } = await import('./transfer.js');
-          if (!config.backends) {
-            throw new ValidationError('No backend configured');
+        if (!globalOpts.quiet) {
+          if (globalOpts.json) {
+            console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
+          } else {
+            console.log(`Deleted from backend: ${bref.remote_key}`);
           }
-          const resolvedBackend = resolveBackend(config);
-          const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
-          await backend.delete(bref.remote_key);
-
-          if (!globalOpts.quiet) {
-            if (globalOpts.json) {
-              console.log(formatJsonMessage(`Deleted from backend: ${bref.remote_key}`));
-            } else {
-              console.log(`Deleted from backend: ${bref.remote_key}`);
-            }
-          }
-        } catch (err: unknown) {
-          // Don't fail the whole rm operation if backend deletion fails
-          // Local cleanup already succeeded
-          console.warn(
-            `Warning: Failed to delete from backend: ${(err as Error).message}\n` +
-              `  Remote blob may still exist: ${bref.remote_key}`,
+        }
+      } catch (err: unknown) {
+        // Local cleanup already succeeded and the remaining steps below must
+        // still run, but the destructive half of `rm --remote --force` did
+        // NOT happen — automation must see a failure exit, not a warning
+        // that scrolls past while the command reports success (Bugbot r12).
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (globalOpts.json) {
+          console.error(formatJsonError(error));
+        } else {
+          console.error(
+            `Error: Failed to delete from backend: ${error.message}\n` +
+              `  Remote blob still exists: ${bref.remote_key}\n` +
+              `  Local tracking was removed; delete the remote object manually if needed.`,
           );
         }
+        process.exitCode = 1;
       }
     } else if (!globalOpts.quiet) {
       console.log(`Note: File was never pushed (no remote_key), skipping backend deletion`);
@@ -1496,7 +1546,6 @@ async function rmFile(
 
   // Clean stat cache
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, relPath);
 
   // Stage the modified .gitignore
@@ -1540,11 +1589,13 @@ async function handleMv(
   const globalOpts = getGlobalOpts(cmd);
   const repoRoot = findRepoRoot();
 
-  const srcAbs = resolveFilePath(stripBrefExtension(source));
-  const destAbs = resolveFilePath(stripBrefExtension(dest));
+  const srcAbs = resolveRepoPath(stripBrefExtension(source), repoRoot);
+  const destAbs = resolveRepoPath(stripBrefExtension(dest), repoRoot);
+
+  const force = Boolean(opts.force);
 
   if (isDirectory(srcAbs)) {
-    await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts);
+    await handleMvDirectory(srcAbs, destAbs, repoRoot, globalOpts, force);
     return;
   }
 
@@ -1555,7 +1606,7 @@ async function handleMv(
     throw new ValidationError(`Not tracked: ${srcRel} (no .bref file found)`);
   }
 
-  await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts);
+  await mvSingleFile(srcAbs, destAbs, repoRoot, globalOpts, force);
 }
 
 async function handleMvDirectory(
@@ -1563,6 +1614,7 @@ async function handleMvDirectory(
   destDir: string,
   repoRoot: string,
   globalOpts: GlobalOptions,
+  force: boolean,
 ): Promise<void> {
   const brefFiles = findBrefFiles(srcDir, repoRoot);
   if (brefFiles.length === 0) {
@@ -1570,11 +1622,11 @@ async function handleMvDirectory(
   }
 
   if (globalOpts.dryRun) {
-    const actions = brefFiles.map((rel) => {
-      const filePath = rel.replace(/\.bref$/, '');
-      const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+    // findBrefFiles returns payload-relative paths (no .bref suffix) — L-04.
+    const actions = brefFiles.map((relPath) => {
+      const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), relPath);
       const destPath = join(toRepoRelative(destDir, repoRoot), relFromSrc);
-      return `move ${filePath} -> ${destPath}`;
+      return `move ${relPath} -> ${destPath}`;
     });
     if (globalOpts.json) {
       console.log(formatJsonDryRun(actions));
@@ -1586,13 +1638,12 @@ async function handleMvDirectory(
     return;
   }
 
-  for (const relBref of brefFiles) {
-    const filePath = relBref.replace(/\.bref$/, '');
-    const srcFileAbs = join(repoRoot, filePath);
-    const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), filePath);
+  for (const relPath of brefFiles) {
+    const srcFileAbs = join(repoRoot, relPath);
+    const relFromSrc = relative(toRepoRelative(srcDir, repoRoot), relPath);
     const destFileAbs = join(destDir, relFromSrc);
 
-    await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts);
+    await mvSingleFile(srcFileAbs, destFileAbs, repoRoot, globalOpts, force);
   }
 }
 
@@ -1601,6 +1652,7 @@ async function mvSingleFile(
   destAbs: string,
   repoRoot: string,
   globalOpts: GlobalOptions,
+  force: boolean,
 ): Promise<void> {
   const srcRel = toRepoRelative(srcAbs, repoRoot);
   const destRel = toRepoRelative(destAbs, repoRoot);
@@ -1608,20 +1660,50 @@ async function mvSingleFile(
   const srcRefPath = brefPath(srcAbs);
   const destRefPath = brefPath(destAbs);
 
+  // Refuse to clobber an existing destination (review finding CLI-04):
+  // overwriting dest.bref silently destroys that file's tracking metadata
+  // and leaves a dangling gitignore entry.
+  const destBlocked =
+    !force && (existsSync(destRefPath) || (existsSync(destAbs) && !isDirectory(destAbs)));
+
   if (globalOpts.dryRun) {
+    const action = destBlocked
+      ? `refuse ${srcRel} -> ${destRel} (destination exists; would need --force)`
+      : `move ${srcRel} -> ${destRel}`;
     if (globalOpts.json) {
-      console.log(formatJsonDryRun([`move ${srcRel} -> ${destRel}`]));
+      console.log(formatJsonDryRun([action]));
     } else {
-      console.log(formatDryRun(`move ${srcRel} -> ${destRel}`));
+      console.log(formatDryRun(action));
+    }
+    if (destBlocked) {
+      process.exitCode = 1;
     }
     return;
+  }
+
+  if (destBlocked) {
+    throw new ValidationError(
+      `Destination already exists: ${existsSync(destRefPath) ? `${destRel}.bref` : destRel}`,
+      ['Use --force to overwrite, or pick a different destination.'],
+    );
   }
 
   const ref = await readBref(srcRefPath);
 
   if (existsSync(srcAbs)) {
     await ensureDir(dirname(destAbs));
-    await rename(srcAbs, destAbs);
+    try {
+      await rename(srcAbs, destAbs);
+    } catch (err) {
+      // rename() cannot cross filesystems; fall back to copy + unlink
+      // (review finding CLI-04).
+      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+        await copyFile(srcAbs, destAbs);
+        await unlink(srcAbs);
+      } else {
+        throw err;
+      }
+    }
   }
 
   await ensureDir(dirname(destRefPath));
@@ -1632,7 +1714,6 @@ async function mvSingleFile(
   await addGitignoreEntry(dirname(destAbs), basename(destAbs));
 
   const cacheDir = getStatCacheDir(repoRoot);
-  const { deleteCacheEntry } = await import('./stat-cache.js');
   await deleteCacheEntry(cacheDir, srcRel);
   if (existsSync(destAbs)) {
     const entry = await createCacheEntry(destAbs, destRel, ref.hash);
@@ -1799,7 +1880,7 @@ async function handleConfig(
       return;
     }
 
-    const { parse: parseYaml } = await import('yaml');
+    const parseYaml = parseYamlDoc;
     const content = await readFile(configPath, 'utf-8');
     const config = (parseYaml(content) as Record<string, unknown>) ?? {};
 
@@ -1853,7 +1934,7 @@ async function handleConfig(
     const content = await readFile(configPath, 'utf-8');
     if (globalOpts.json) {
       if (useGlobal) {
-        const { parse: parseYaml } = await import('yaml');
+        const parseYaml = parseYamlDoc;
         const config = parseYaml(content) as Record<string, unknown>;
         console.log(formatJson({ config }));
       } else if (repoRoot) {
@@ -1873,7 +1954,7 @@ async function handleConfig(
       if (!existsSync(configPath)) {
         val = undefined;
       } else {
-        const { parse: parseYaml } = await import('yaml');
+        const parseYaml = parseYamlDoc;
         const content = await readFile(configPath, 'utf-8');
         const config = parseYaml(content) as Record<string, unknown>;
         val = getNestedValue(config, key);
@@ -1889,7 +1970,7 @@ async function handleConfig(
       if (val === undefined) {
         console.log(`(not set)`);
       } else if (typeof val === 'object') {
-        const { stringify } = await import('yaml');
+        const stringify = stringifyYamlDoc;
         console.log(stringify(val).trimEnd());
       } else {
         console.log(`${val as string | number | boolean}`);
@@ -1917,7 +1998,7 @@ async function handleConfig(
     return;
   }
 
-  const { parse: parseYaml } = await import('yaml');
+  const parseYaml = parseYamlDoc;
   const content = await readFile(configPath, 'utf-8');
   const config = (parseYaml(content) as Record<string, unknown>) ?? {};
   setNestedValue(config, key, value);
@@ -1960,8 +2041,23 @@ function formatConfigPath(filePath: string, repoRoot?: string): string {
   return filePath;
 }
 
+/**
+ * Reject key segments that traverse into the prototype chain.
+ *
+ * `blobsy config __proto__.x 1` would otherwise pollute Object.prototype for
+ * the running process (review finding SEC-01).
+ */
+export function assertSafeKeyPath(parts: string[]): void {
+  for (const part of parts) {
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      throw new ValidationError(`Invalid config key segment: ${part}`);
+    }
+  }
+}
+
 function getNestedValue(obj: object, path: string): unknown {
   const parts = path.split('.');
+  assertSafeKeyPath(parts);
   let current: unknown = obj;
   for (const part of parts) {
     if (typeof current !== 'object' || current === null) {
@@ -1972,6 +2068,28 @@ function getNestedValue(obj: object, path: string): unknown {
   return current;
 }
 
+/**
+ * Move a `.bref` to `.blobsy/trash/`, preserving its repo-relative path
+ * (the design's path-preserving layout — review finding L-01). A numeric
+ * suffix avoids overwriting when the same path is trashed repeatedly.
+ */
+async function moveBrefToTrash(repoRoot: string, refPath: string): Promise<string> {
+  const rel = toRepoRelative(refPath, repoRoot);
+  const trashRoot = join(repoRoot, '.blobsy', 'trash');
+  let trashPath = join(trashRoot, rel);
+  await ensureDir(dirname(trashPath));
+  for (let n = 1; existsSync(trashPath); n++) {
+    trashPath = join(trashRoot, `${rel}.${n}`);
+  }
+  await rename(refPath, trashPath);
+  return trashPath;
+}
+
+/**
+ * Coerce a `blobsy config` value string to boolean/number where unambiguous.
+ * Only plain decimal numbers coerce — `Number()` also accepted hex and
+ * `Infinity` (review finding L-03).
+ */
 function coerceConfigValue(value: string): string | number | boolean {
   if (value === 'true') {
     return true;
@@ -1979,15 +2097,15 @@ function coerceConfigValue(value: string): string | number | boolean {
   if (value === 'false') {
     return false;
   }
-  const num = Number(value);
-  if (!Number.isNaN(num) && value.trim().length > 0) {
-    return num;
+  if (/^-?\d+(\.\d+)?$/.test(value.trim()) && value.trim().length > 0) {
+    return Number(value);
   }
   return value;
 }
 
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string): void {
   const parts = path.split('.');
+  assertSafeKeyPath(parts);
   let current = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]!;

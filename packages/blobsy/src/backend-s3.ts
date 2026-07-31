@@ -6,24 +6,34 @@
  * sync.tools: [aws-sdk] in .blobsy.yml.
  */
 
-import { existsSync } from 'node:fs';
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import {
   S3Client,
-  PutObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import type { S3ClientConfig } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 
 import type { Backend, ErrorCategory } from './types.js';
 import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
+import { normalizePrefix } from './backend-url.js';
+
+/** Multipart part size. 8 MiB parts allow objects up to ~78 GiB (10k parts). */
+const UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
+
+/** Concurrent part uploads per file. */
+const UPLOAD_PART_CONCURRENCY = 4;
 
 export interface S3BackendConfig {
   bucket: string;
@@ -40,7 +50,9 @@ export class BuiltinS3Backend implements Backend {
 
   constructor(config: S3BackendConfig) {
     this.bucket = config.bucket;
-    this.prefix = config.prefix ?? '';
+    // Normalize here instead of relying on parseBackendUrl's undocumented
+    // trailing-slash invariant (review finding L-12).
+    this.prefix = normalizePrefix(config.prefix);
 
     const clientConfig: S3ClientConfig = {};
     if (config.region) {
@@ -63,33 +75,34 @@ export class BuiltinS3Backend implements Backend {
     }
 
     const key = this.fullKey(remoteKey);
-    let body: Buffer;
+
+    // Streaming multipart upload (review finding BE-04): buffering the whole
+    // file OOMs multi-GB payloads, and even a streamed single PutObject caps
+    // at 5 GB. lib-storage's Upload streams parts and aborts the multipart
+    // upload on error (leavePartsOnError: false) so failed transfers don't
+    // strand billable parts.
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: key,
+        Body: createReadStream(localPath),
+      },
+      partSize: UPLOAD_PART_SIZE_BYTES,
+      queueSize: UPLOAD_PART_CONCURRENCY,
+      leavePartsOnError: false,
+    });
 
     try {
-      body = await readFile(localPath);
+      await upload.done();
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;
-
       if (error.code === 'EACCES') {
         throw new UserError(
           `Permission denied reading file: ${localPath}`,
           `Check file permissions`,
         );
       }
-
-      throw error; // Re-throw unexpected errors
-    }
-
-    try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          Body: body,
-          ContentLength: body.length,
-        }),
-      );
-    } catch (err) {
       throw this.wrapError(err, `push to s3://${this.bucket}/${key}`);
     }
   }
@@ -112,12 +125,9 @@ export class BuiltinS3Backend implements Backend {
         throw new BlobsyError(`Empty response from S3 for key: ${key}`, 'not_found');
       }
 
-      // Stream to temp file
-      const chunks: Buffer[] = [];
-      for await (const chunk of response.Body as AsyncIterable<Buffer>) {
-        chunks.push(chunk);
-      }
-      await writeFile(tmpPath, Buffer.concat(chunks));
+      // Stream to temp file — never accumulate the object in memory
+      // (review finding BE-04: chunk accumulation held ~2× file size).
+      await pipeline(response.Body as Readable, createWriteStream(tmpPath));
 
       if (expectedHash) {
         const actualHash = await computeHash(tmpPath);
@@ -171,8 +181,16 @@ export class BuiltinS3Backend implements Backend {
       );
       return true;
     } catch (err) {
-      const name = (err as { name?: string }).name;
-      if (name === 'NotFound' || name === 'NoSuchKey') {
+      // Not-found comes in several shapes across SDK versions and S3
+      // implementations: error name, NoSuchBucket, or a bare 404 status
+      // (review finding BE-09).
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (
+        e.name === 'NotFound' ||
+        e.name === 'NoSuchKey' ||
+        e.name === 'NoSuchBucket' ||
+        e.$metadata?.httpStatusCode === 404
+      ) {
         return false;
       }
       throw this.wrapError(err, `check existence of s3://${this.bucket}/${key}`);
@@ -180,21 +198,11 @@ export class BuiltinS3Backend implements Backend {
   }
 
   async healthCheck(): Promise<void> {
-    const healthKey = this.fullKey(`.blobsy-health-check-${randomBytes(4).toString('hex')}`);
+    // HeadBucket only: a put+delete probe fails for read-only credentials
+    // (common for pull-only CI) and a failed delete strands probe objects
+    // (review finding BE-07).
     try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: healthKey,
-          Body: 'health-check',
-        }),
-      );
-      await this.client.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: healthKey,
-        }),
-      );
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch (err) {
       throw this.wrapError(err, `health check on s3://${this.bucket}`);
     }

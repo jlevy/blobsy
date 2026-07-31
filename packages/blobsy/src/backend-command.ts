@@ -9,18 +9,17 @@
 
 import { execFileSync } from 'node:child_process';
 import { rename, unlink } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type { Backend } from './types.js';
 import { BlobsyError, ValidationError } from './types.js';
 import { computeHash } from './hash.js';
+import { binaryLookupCommand, ensureDir } from './fs-utils.js';
+import { advisoryWarningsSuppressed } from './format.js';
 
 /** Timeout for exists check commands (shorter than push/pull) */
 const EXISTS_CHECK_TIMEOUT_MS = 30000;
-
-/** Timeout for push/pull commands */
-const TRANSFER_COMMAND_TIMEOUT_MS = 60000;
 
 export interface CommandTemplateVars {
   local: string;
@@ -104,6 +103,25 @@ export function parseAndExpandCommand(template: string, vars: CommandTemplateVar
   });
 }
 
+/**
+ * Best-effort argv[0] of a command template for PATH probing: expand the
+ * template with empty transfer vars so `$TOOL`-style prefixes resolve to
+ * the real binary, falling back to the raw first token when expansion
+ * fails on undefined env vars (review finding BE-09; Bugbot r17).
+ */
+export function probeBinaryFor(command: string, bucket?: string): string | undefined {
+  try {
+    return parseAndExpandCommand(command, {
+      local: '',
+      remote: '',
+      relative_path: '',
+      bucket: bucket ?? '',
+    })[0];
+  } catch {
+    return command.split(/\s+/).find(Boolean);
+  }
+}
+
 function validateExpandedToken(token: string, context: string): void {
   if (!SAFE_TOKEN_PATTERN.test(token)) {
     const unsafeChars = [...new Set([...token].filter((c) => !SAFE_TOKEN_PATTERN.test(c)))];
@@ -118,6 +136,7 @@ function validateExpandedToken(token: string, context: string): void {
 }
 
 export class CommandBackend implements Backend {
+  private static warnedNoExistsCommand = false;
   readonly type = 'command' as const;
   private readonly config: CommandBackendConfig;
 
@@ -125,56 +144,88 @@ export class CommandBackend implements Backend {
     this.config = config;
   }
 
-  push(localPath: string, remoteKey: string): Promise<void> {
+  // Without a bucket, "${bucket}/${key}" yielded a corrupting leading
+  // slash in user command paths (review finding BE-08).
+  private remoteFor(remoteKey: string): string {
+    return this.config.bucket ? `${this.config.bucket}/${remoteKey}` : remoteKey;
+  }
+
+  push(localPath: string, remoteKey: string, relativePath?: string): Promise<void> {
     if (!this.config.pushCommand) {
       throw new ValidationError('No push_command configured for command backend.');
     }
     const vars: CommandTemplateVars = {
       local: resolve(localPath),
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
-      relative_path: '',
+      remote: this.remoteFor(remoteKey),
+      // Threaded from the coordinator so {relative_path} templates work as
+      // documented instead of expanding to '' (review finding BE-06).
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
     commandPush(this.config.pushCommand, vars);
     return Promise.resolve();
   }
 
-  async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
+  async pull(
+    remoteKey: string,
+    localPath: string,
+    expectedHash?: string,
+    relativePath?: string,
+  ): Promise<void> {
     if (!this.config.pullCommand) {
       throw new ValidationError('No pull_command configured for command backend.');
     }
     const tmpSuffix = randomBytes(8).toString('hex');
     const tempPath = `${localPath}.blobsy-cmd-${tmpSuffix}`;
+    // Match the other backends: ensure the target directory exists and never
+    // leak the temp file on failure (review finding BE-05).
+    await ensureDir(dirname(localPath));
     const vars: CommandTemplateVars = {
       local: resolve(tempPath),
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
-      relative_path: '',
+      remote: this.remoteFor(remoteKey),
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
-    commandPull(this.config.pullCommand, vars, tempPath);
+    try {
+      commandPull(this.config.pullCommand, vars, tempPath);
 
-    if (expectedHash) {
-      const actualHash = await computeHash(tempPath);
-      if (actualHash !== expectedHash) {
-        await unlink(tempPath);
-        throw new BlobsyError(
-          `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
-          'validation',
-        );
+      if (expectedHash) {
+        const actualHash = await computeHash(tempPath);
+        if (actualHash !== expectedHash) {
+          throw new BlobsyError(
+            `Hash mismatch on pull: expected ${expectedHash}, got ${actualHash}`,
+            'validation',
+          );
+        }
       }
-    }
 
-    await rename(tempPath, localPath);
+      await rename(tempPath, localPath);
+    } catch (err) {
+      await unlink(tempPath).catch(() => {
+        // Temp file may not exist if the command failed before writing it.
+      });
+      throw err;
+    }
   }
 
-  exists(remoteKey: string): Promise<boolean> {
+  exists(remoteKey: string, relativePath?: string): Promise<boolean> {
     if (!this.config.existsCommand) {
+      // Without exists_command every blob looks absent, so pushes always
+      // re-upload — say why once instead of silently degrading (L-13),
+      // unless --quiet/--json asked for clean output (Bugbot r16).
+      if (!CommandBackend.warnedNoExistsCommand && !advisoryWarningsSuppressed()) {
+        CommandBackend.warnedNoExistsCommand = true;
+        console.warn(
+          'Note: command backend has no exists_command configured; remote blobs ' +
+            'are assumed absent and pushes always re-upload.',
+        );
+      }
       return Promise.resolve(false);
     }
     const vars: CommandTemplateVars = {
       local: '',
-      remote: `${this.config.bucket ?? ''}/${remoteKey}`,
-      relative_path: '',
+      remote: this.remoteFor(remoteKey),
+      relative_path: relativePath ?? '',
       bucket: this.config.bucket ?? '',
     };
     return Promise.resolve(commandBlobExists(this.config.existsCommand, vars));
@@ -190,14 +241,16 @@ export class CommandBackend implements Backend {
     if (!this.config.pushCommand && !this.config.pullCommand) {
       throw new ValidationError('Command backend has no push or pull commands configured.');
     }
-    // Verify the command binary exists in PATH
+    // Verify the command binary exists in PATH. Probe the EXPANDED argv[0]
+    // — a raw `$TOOL`-style template would probe the literal string — and
+    // use a platform-aware lookup (review finding BE-09).
     const command = this.config.pushCommand ?? this.config.pullCommand!;
-    const binary = command.split(/\s+/)[0];
+    const binary = probeBinaryFor(command, this.config.bucket);
     if (!binary) {
       throw new ValidationError('Command template is empty.');
     }
     try {
-      execFileSync('which', [binary], { stdio: 'pipe' });
+      execFileSync(binaryLookupCommand(), [binary], { stdio: 'pipe' });
     } catch {
       throw new BlobsyError(
         `Command not found: ${binary}. Ensure it is installed and in your PATH.`,
@@ -271,9 +324,10 @@ function executeCommandDirect(
     throw new ValidationError('Command template produced no command.');
   }
   try {
+    // No timeout: transfers of large files legitimately run for many minutes
+    // (review finding BE-01). Exists checks keep their short timeout.
     execFileSync(command, cmdArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: TRANSFER_COMMAND_TIMEOUT_MS,
       env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
     });
   } catch (err) {

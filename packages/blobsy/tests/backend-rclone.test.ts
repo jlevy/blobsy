@@ -49,7 +49,7 @@ describe('RcloneBackend', () => {
         expect(mockExecFileSync).toHaveBeenCalledWith(
           'rclone',
           ['copyto', expect.stringContaining('test.bin'), 'my-gcs:my-bucket/data/model.bin'],
-          expect.objectContaining({ timeout: 60000 }),
+          expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
         );
       } finally {
         if (tmpDir) {
@@ -89,7 +89,7 @@ describe('RcloneBackend', () => {
         expect(mockExecFileSync).toHaveBeenCalledWith(
           'rclone',
           ['copyto', 'my-gcs:my-bucket/data/model.bin', expect.stringContaining('.blobsy-rclone-')],
-          expect.objectContaining({ timeout: 60000 }),
+          expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
         );
       } finally {
         if (tmpDir) {
@@ -110,7 +110,7 @@ describe('RcloneBackend', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
         ['lsf', 'my-gcs:my-bucket/data/model.bin'],
-        expect.objectContaining({ timeout: 60000 }),
+        expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
       );
     });
 
@@ -151,7 +151,7 @@ describe('RcloneBackend', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
         ['deletefile', 'my-gcs:my-bucket/data/model.bin'],
-        expect.objectContaining({ timeout: 60000 }),
+        expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
       );
     });
   });
@@ -166,7 +166,7 @@ describe('RcloneBackend', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
         ['lsf', 'my-gcs:my-bucket/data/', '--max-depth', '1'],
-        expect.objectContaining({ timeout: 60000 }),
+        expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
       );
     });
 
@@ -180,7 +180,7 @@ describe('RcloneBackend', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'rclone',
         ['lsf', 'my-gcs:my-bucket/', '--max-depth', '1'],
-        expect.objectContaining({ timeout: 60000 }),
+        expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
       );
     });
   });

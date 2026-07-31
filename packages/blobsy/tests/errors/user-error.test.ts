@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execa } from 'execa';
+import { blobsy } from '../helpers/cli.js';
 import { UserError } from '../../src/types.js';
 
 describe('UserError class', () => {
@@ -54,7 +55,7 @@ describe('CLI error messages', () => {
     await execa('git', ['config', 'user.name', 'Test User'], { cwd: testDir });
 
     // Initialize blobsy
-    await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+    await blobsy(['init', 'local:../backend'], { cwd: testDir });
   });
 
   afterEach(async () => {
@@ -67,7 +68,7 @@ describe('CLI error messages', () => {
   describe('push command errors', () => {
     it('should show user-friendly error for untracked file', async () => {
       // Try to push a file that was never tracked
-      const result = await execa('blobsy', ['push', 'untracked.bin'], {
+      const result = await blobsy(['push', 'untracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -82,7 +83,7 @@ describe('CLI error messages', () => {
     });
 
     it('should suggest blobsy track in error hint', async () => {
-      const result = await execa('blobsy', ['push', 'untracked.bin'], {
+      const result = await blobsy(['push', 'untracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -94,7 +95,7 @@ describe('CLI error messages', () => {
 
   describe('pull command errors', () => {
     it('should show user-friendly error for file never tracked', async () => {
-      const result = await execa('blobsy', ['pull', 'never-tracked.bin'], {
+      const result = await blobsy(['pull', 'never-tracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -109,7 +110,7 @@ describe('CLI error messages', () => {
 
   describe('rm command errors', () => {
     it('should show user-friendly error when file not tracked', async () => {
-      const result = await execa('blobsy', ['rm', 'never-tracked.bin'], {
+      const result = await blobsy(['rm', 'never-tracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -127,7 +128,7 @@ describe('CLI error messages', () => {
       // Create a file but don't track it
       await writeFile(join(testDir, 'untracked.bin'), 'test content');
 
-      const result = await execa('blobsy', ['verify', 'untracked.bin'], {
+      const result = await blobsy(['verify', 'untracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -153,7 +154,7 @@ describe('CLI error messages', () => {
       ];
 
       for (const cmd of commands) {
-        const result = await execa('blobsy', cmd, {
+        const result = await blobsy(cmd, {
           cwd: testDir,
           reject: false,
         });
@@ -174,7 +175,7 @@ describe('CLI error messages', () => {
     });
 
     it('should not show stack traces for user errors', async () => {
-      const result = await execa('blobsy', ['push', 'untracked.bin'], {
+      const result = await blobsy(['push', 'untracked.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -198,7 +199,7 @@ describe('CLI error messages', () => {
       // Create a file and track it
       const testFile = join(testDir, 'readonly.bin');
       await writeFile(testFile, 'test content');
-      await execa('blobsy', ['track', 'readonly.bin'], { cwd: testDir });
+      await blobsy(['track', 'readonly.bin'], { cwd: testDir });
 
       // Make the .bref file read-only
       const brefFile = join(testDir, 'readonly.bin.bref');
@@ -210,7 +211,7 @@ describe('CLI error messages', () => {
 
       try {
         // Try to track again (will try to update read-only .bref)
-        const result = await execa('blobsy', ['track', 'readonly.bin'], {
+        const result = await blobsy(['track', 'readonly.bin'], {
           cwd: testDir,
           reject: false,
         });
@@ -235,8 +236,8 @@ describe('CLI error messages', () => {
     it('should show user-friendly error when backend is not accessible', async () => {
       // Create a tracked and pushed file
       await writeFile(join(testDir, 'test.bin'), 'test content');
-      await execa('blobsy', ['track', 'test.bin'], { cwd: testDir });
-      await execa('blobsy', ['push', 'test.bin'], { cwd: testDir });
+      await blobsy(['track', 'test.bin'], { cwd: testDir });
+      await blobsy(['push', 'test.bin'], { cwd: testDir });
 
       // Remove local file to test pull
       await rm(join(testDir, 'test.bin'));
@@ -245,7 +246,7 @@ describe('CLI error messages', () => {
       await rm(backendDir, { recursive: true, force: true });
 
       // Try to pull - should fail since backend is gone
-      const result = await execa('blobsy', ['pull', 'test.bin'], {
+      const result = await blobsy(['pull', 'test.bin'], {
         cwd: testDir,
         reject: false,
       });
@@ -258,7 +259,7 @@ describe('CLI error messages', () => {
       }
 
       // Recreate backend for cleanup
-      await execa('blobsy', ['init', 'local:../backend'], { cwd: testDir });
+      await blobsy(['init', 'local:../backend'], { cwd: testDir });
     });
   });
 });

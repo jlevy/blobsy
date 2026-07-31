@@ -56,7 +56,7 @@ blob exists
 ```console
 $ blobsy push
   data/model.bin  already pushed
-  ↑  data/dataset.csv (32 B)
+  ↑  data/dataset.csv (21 B)
 Done: 1 pushed.
 ? 0
 ```

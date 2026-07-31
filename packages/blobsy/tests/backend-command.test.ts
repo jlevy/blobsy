@@ -1,7 +1,47 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseAndExpandCommand, commandBlobExists } from '../src/backend-command.js';
+import {
+  CommandBackend,
+  parseAndExpandCommand,
+  probeBinaryFor,
+  commandBlobExists,
+} from '../src/backend-command.js';
 import type { CommandTemplateVars } from '../src/backend-command.js';
+import { setSuppressAdvisoryWarnings } from '../src/format.js';
+
+describe('probeBinaryFor', () => {
+  it('expands env-var prefixes to the real binary', () => {
+    process.env.BLOBSY_TEST_PROBE_TOOL = 'mytool';
+    try {
+      expect(probeBinaryFor('$BLOBSY_TEST_PROBE_TOOL cp {local} {remote}')).toBe('mytool');
+    } finally {
+      delete process.env.BLOBSY_TEST_PROBE_TOOL;
+    }
+  });
+
+  it('falls back to the raw first token when expansion fails', () => {
+    expect(probeBinaryFor('$BLOBSY_UNDEFINED_VAR_XYZ cp {local}')).toBe(
+      '$BLOBSY_UNDEFINED_VAR_XYZ',
+    );
+  });
+});
+
+describe('exists without exists_command', () => {
+  it('suppresses the advisory warning under --quiet/--json', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {
+      /* capture only */
+    });
+    try {
+      setSuppressAdvisoryWarnings(true);
+      const backend = new CommandBackend({ pushCommand: 'true {local}' });
+      expect(await backend.exists('some-key')).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      setSuppressAdvisoryWarnings(false);
+      warnSpy.mockRestore();
+    }
+  });
+});
 
 describe('parseAndExpandCommand', () => {
   const vars: CommandTemplateVars = {

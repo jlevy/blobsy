@@ -7,7 +7,7 @@
 
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
 import picomatch from 'picomatch';
@@ -87,6 +87,51 @@ export function resolveFilePath(inputPath: string, cwd?: string): string {
   return resolve(cwd ?? process.cwd(), inputPath);
 }
 
+/**
+ * Resolve a user-supplied path and refuse anything outside the repository.
+ *
+ * "The caller supplied the path" is not a safety boundary for an
+ * agent-driven CLI (review finding SEC-02): without containment,
+ * `rm`/`untrack`/`mv` mutate or delete files outside the repo and
+ * `track`/`add` scatter `.bref`/`.gitignore` files across the filesystem.
+ * Symlinks are resolved (via the deepest existing ancestor for
+ * not-yet-created paths) so a link inside the repo cannot smuggle an
+ * operation outside it.
+ */
+export function resolveRepoPath(inputPath: string, repoRoot: string, cwd?: string): string {
+  const resolved = resolve(cwd ?? process.cwd(), inputPath);
+  const root = realpathSync(resolve(repoRoot));
+  const effective = realpathDeep(resolved);
+
+  if (effective !== root && !effective.startsWith(root + sep)) {
+    throw new ValidationError(`Path is outside the repository: ${inputPath}`, [
+      `blobsy operations are confined to the repo root: ${repoRoot}`,
+    ]);
+  }
+  return resolved;
+}
+
+/**
+ * Resolve symlinks in a path that may not fully exist: realpath the path
+ * itself, or — for not-yet-created paths (a mv destination, an unwritten
+ * remote key) — realpath the deepest existing ancestor and append the
+ * remaining lexical tail. Non-existent trailing components cannot be
+ * symlinks, so the result is the real filesystem location the path denotes.
+ */
+export function realpathDeep(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    let dir = dirname(path);
+    const tail: string[] = [basename(path)];
+    while (!existsSync(dir) && dir !== dirname(dir)) {
+      tail.unshift(basename(dir));
+      dir = dirname(dir);
+    }
+    return existsSync(dir) ? join(realpathSync(dir), ...tail) : path;
+  }
+}
+
 /** Check if a path is a directory. */
 export function isDirectory(path: string): boolean {
   try {
@@ -114,6 +159,11 @@ export function findBrefFiles(dir: string, repoRoot: string): string[] {
  * Find all non-bref, non-hidden files in a directory for tracking.
  * Returns absolute paths. Applies ignore patterns to skip directories and files.
  * Optional onSymlink callback is invoked with the path of each skipped symlink.
+ *
+ * Dotfiles (and dot-directories) are skipped by design (review finding
+ * L-10): hidden files are overwhelmingly config/state (.git, .env, .DS_Store)
+ * that must not be externalized to a blob store. Track one explicitly by
+ * naming it: `blobsy track .hidden.bin`.
  */
 export function findTrackableFiles(
   dir: string,

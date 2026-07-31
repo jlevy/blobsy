@@ -2,6 +2,7 @@
 sandbox: true
 env:
   BLOBSY_BACKEND_URL: ""
+  BLOBSY_TRUST_COMMAND_BACKEND: "1"
 fixtures:
   - ../fixtures/small-file.txt
   - ../fixtures/echo-backend.ts

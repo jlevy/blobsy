@@ -54,7 +54,7 @@ Stage with: blobsy add <path> (or manually: git add *.bref .gitignore)
 
 ```console
 $ blobsy push data/results.csv
-  ↑  data/results.csv (32 B)
+  ↑  data/results.csv (21 B)
 Done: 1 pushed.
 ? 0
 ```

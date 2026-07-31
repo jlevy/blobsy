@@ -24,37 +24,25 @@ Options:
 Commands:
   setup [options] <url>           Set up blobsy in a git repo (wraps init +
                                   agent integration)
-  init [options] <url>            Initialize blobsy config (low-level; prefer
-                                  setup --auto)
   add [options] <path...>         Track files and stage changes to git
                                   (recommended)
-  track [options] <path...>       Start tracking files or directories with .bref
-                                  pointers
   untrack [options] [path...]     Stop tracking files (keeps local files, moves
                                   .bref to trash)
   rm [options] <path...>          Remove tracked files: delete local + move
                                   .bref to trash
-  mv <source> <dest>              Rename or move tracked files or directories
+  mv [options] <source> <dest>    Rename or move tracked files or directories
                                   (updates .bref + .gitignore)
   push [options] [path...]        Upload local blobs to the configured backend
   pull [options] [path...]        Download blobs from the configured backend
   sync [options] [path...]        Bidirectional sync: push unpushed + pull
                                   missing
-  status [options] [path...]      Show sync state of tracked files
-  verify [options] [path...]      Verify local files match their .bref hashes
+  status [path...]                Show sync state of tracked files
+  verify [path...]                Verify local files match their .bref hashes
   config [options] [key] [value]  Show, get, or set .blobsy.yml values
-  health                          Test backend connectivity and permissions
   doctor [options]                Run diagnostics and optionally auto-fix issues
   hooks <action>                  Install or uninstall blobsy git hooks
                                   (pre-commit, pre-push)
-  check-unpushed                  List committed .bref files whose blobs are not
-                                  yet pushed
-  pre-push-check                  CI guard: fail if any .bref is missing its
-                                  remote blob
-  readme                          Display the blobsy README
   docs [options] [topic]          Display blobsy user documentation
-  skill                           Output blobsy skill documentation (for AI
-                                  agents)
   help [command]                  display help for command
 
 Get started:
@@ -164,7 +152,6 @@ Arguments:
   path            Files or directories (default: all tracked)
 
 Options:
-  --json          Structured JSON output
   -h, --help      Display help for command
 
 Global Options:
@@ -216,7 +203,6 @@ Arguments:
   path            Files or directories (default: all tracked)
 
 Options:
-  --json          Structured JSON output
   -h, --help      Display help for command
 
 Global Options:
@@ -243,7 +229,8 @@ Arguments:
 
 Options:
   --local         Delete local file only, keep .bref and remote
-  --remote        Also delete blob from backend (requires confirmation)
+  --remote        DANGER: also delete the blob from the backend (breaks git
+                  history; requires --force)
   --force         Skip confirmation prompts
   --recursive     Required for directory removal
   -h, --help      Display help for command
@@ -269,8 +256,6 @@ Run diagnostics and optionally auto-fix issues
 
 Options:
   --fix           Attempt to automatically fix detected issues
-  --json          Structured JSON output
-  --verbose       Show detailed diagnostic logs
   -h, --help      Display help for command
 
 Global Options:
@@ -352,6 +337,7 @@ Arguments:
   dest            Destination path
 
 Options:
+  --force         Overwrite an existing destination file or tracking metadata
   -h, --help      Display help for command
 
 Global Options:
@@ -521,6 +507,8 @@ Arguments:
 Options:
   --list          List available sections
   --brief         Condensed version
+  --readme        Display the blobsy README
+  --skill         Output blobsy skill documentation (for AI agents)
   -h, --help      Display help for command
 
 Global Options:

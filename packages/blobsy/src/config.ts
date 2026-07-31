@@ -7,7 +7,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 import { writeFile } from 'atomically';
@@ -16,6 +16,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { BlobsyConfig, ExternalizeConfig, CompressConfig } from './types.js';
 import { ValidationError } from './types.js';
 import { ensureDir } from './fs-utils.js';
+import { blobsyConfigSchema, formatSchemaIssues, hasConflictMarkers } from './config-schema.js';
 
 const CONFIG_FILENAME = '.blobsy.yml';
 
@@ -50,7 +51,6 @@ export function getBuiltinDefaults(): BlobsyConfig {
     },
     sync: {
       tools: ['aws-cli', 'rclone'],
-      parallel: 8,
     },
     checksum: {
       algorithm: 'sha256',
@@ -78,6 +78,12 @@ export async function loadConfigFile(filePath: string): Promise<BlobsyConfig> {
     throw new ValidationError(`Cannot read config file: ${filePath}: ${(err as Error).message}`);
   }
 
+  if (hasConflictMarkers(content)) {
+    throw new ValidationError(`Unresolved merge conflict markers in config file: ${filePath}`, [
+      'Resolve the git conflict (look for <<<<<<< / >>>>>>> lines) and retry.',
+    ]);
+  }
+
   let parsed: unknown;
   try {
     parsed = parseYaml(content);
@@ -92,26 +98,53 @@ export async function loadConfigFile(filePath: string): Promise<BlobsyConfig> {
     return {};
   }
 
-  if (typeof parsed !== 'object') {
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new ValidationError(`Invalid config file (not an object): ${filePath}`);
   }
 
-  validateConfigFields(parsed as Record<string, unknown>, filePath);
+  // Schema validation (review finding CFG-03). Unknown keys pass through —
+  // doctor reports those with suggestions rather than hard-failing.
+  const result = blobsyConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new ValidationError(`Invalid config in ${filePath}: ${formatSchemaIssues(result.error)}`);
+  }
 
   return parsed as BlobsyConfig;
 }
 
+/** Sections merged one level deep instead of replaced wholesale (CFG-02). */
+const SECTION_KEYS = new Set(['externalize', 'compress', 'remote', 'sync', 'checksum', 'backends']);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
- * Shallow merge: override replaces entire keys, no deep-merge.
+ * Merge an override config onto a base config.
  *
- * If a subdirectory specifies `externalize.always: ["*.parquet"]`, it completely
- * replaces the parent's `always` list.
+ * Section objects (externalize, compress, remote, sync, checksum, backends)
+ * merge one level deep: a subdir setting only `externalize.always` keeps the
+ * parent's `min_size` and `never` — wholesale replacement silently discarded
+ * them (review finding CFG-02). Values inside a section (including arrays
+ * and individual backend definitions) still replace entirely.
  */
 export function mergeConfigs(base: BlobsyConfig, override: Partial<BlobsyConfig>): BlobsyConfig {
   const result = { ...base };
 
   for (const [key, value] of Object.entries(override)) {
-    if (value !== undefined) {
+    if (value === undefined) {
+      continue;
+    }
+    const baseValue = (result as Record<string, unknown>)[key];
+    if (SECTION_KEYS.has(key) && isPlainObject(value) && isPlainObject(baseValue)) {
+      const merged: Record<string, unknown> = { ...baseValue };
+      for (const [subKey, subValue] of Object.entries(value)) {
+        if (subValue !== undefined) {
+          merged[subKey] = subValue;
+        }
+      }
+      (result as Record<string, unknown>)[key] = merged;
+    } else {
       (result as Record<string, unknown>)[key] = value;
     }
   }
@@ -139,7 +172,10 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
   let dir = targetDir;
   const repoRootResolved = resolve(repoRoot);
 
-  while (dir.startsWith(repoRootResolved)) {
+  // Separator-suffixed compare: without it /home/u/project-data "starts
+  // with" repo root /home/u/project and config discovery walks outside the
+  // repo (review finding CFG-01).
+  while (dir === repoRootResolved || dir.startsWith(repoRootResolved + sep)) {
     const configPath = join(dir, CONFIG_FILENAME);
     if (existsSync(configPath)) {
       configFiles.unshift(configPath);
@@ -153,11 +189,31 @@ export async function resolveConfig(targetPath: string, repoRoot: string): Promi
 
   // Apply in order: repo root first, deepest subdirectory last
   for (const configPath of configFiles) {
-    const override = await loadConfigFile(configPath);
+    const override = stripInRepoTrustGrant(await loadConfigFile(configPath), configPath);
     config = mergeConfigs(config, override);
   }
 
   return config;
+}
+
+/**
+ * The command-backend trust grant must come from OUTSIDE the repository
+ * (SEC-03) — a committed grant would let any clone self-authorize running
+ * repo-controlled commands. Accepting the key in a repo .blobsy.yml but
+ * silently ignoring it made a repo-only grant look valid while every
+ * transfer still refused (Bugbot r7): warn and strip instead.
+ */
+function stripInRepoTrustGrant(override: BlobsyConfig, configPath: string): BlobsyConfig {
+  if (!('trust_command_backends' in override)) {
+    return override;
+  }
+  console.warn(
+    `Warning: ignoring trust_command_backends in ${configPath}: ` +
+      'the trust grant must come from outside the repository (~/.blobsy.yml ' +
+      'or BLOBSY_TRUST_COMMAND_BACKEND).',
+  );
+  const { trust_command_backends: _ignored, ...rest } = override as Record<string, unknown>;
+  return rest as BlobsyConfig;
 }
 
 export type ConfigOrigin = 'builtin' | 'global' | 'repo' | 'subdir';
@@ -195,7 +251,10 @@ export async function resolveConfigWithOrigins(
   let dir = targetDir;
   const repoRootResolved = resolve(repoRoot);
 
-  while (dir.startsWith(repoRootResolved)) {
+  // Separator-suffixed compare: without it /home/u/project-data "starts
+  // with" repo root /home/u/project and config discovery walks outside the
+  // repo (review finding CFG-01).
+  while (dir === repoRootResolved || dir.startsWith(repoRootResolved + sep)) {
     const configPath = join(dir, CONFIG_FILENAME);
     if (existsSync(configPath)) {
       configFiles.unshift(configPath);
@@ -209,7 +268,7 @@ export async function resolveConfigWithOrigins(
 
   // Apply in order: repo root first, deepest subdirectory last
   for (const configPath of configFiles) {
-    const override = await loadConfigFile(configPath);
+    const override = stripInRepoTrustGrant(await loadConfigFile(configPath), configPath);
     const isRepoRoot = configPath === join(repoRootResolved, CONFIG_FILENAME);
     const origin: ConfigOrigin = isRepoRoot ? 'repo' : 'subdir';
     recordOrigins(override as Record<string, unknown>, origin, configPath, origins);
@@ -254,6 +313,12 @@ function recordOrigins(
  */
 export function unsetNestedValue(obj: Record<string, unknown>, keyPath: string): boolean {
   const parts = keyPath.split('.');
+  // Never traverse into the prototype chain (review finding SEC-01).
+  for (const part of parts) {
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      throw new ValidationError(`Invalid config key segment: ${part}`);
+    }
+  }
   const parents: { obj: Record<string, unknown>; key: string }[] = [];
   let current = obj;
 
@@ -286,30 +351,6 @@ export function unsetNestedValue(obj: Record<string, unknown>, keyPath: string):
   }
 
   return true;
-}
-
-function validateConfigFields(parsed: Record<string, unknown>, filePath: string): void {
-  if (
-    parsed.backends !== undefined &&
-    (typeof parsed.backends !== 'object' || Array.isArray(parsed.backends))
-  ) {
-    throw new ValidationError(`Invalid "backends" in ${filePath}: expected an object`);
-  }
-  if (
-    parsed.externalize !== undefined &&
-    (typeof parsed.externalize !== 'object' || Array.isArray(parsed.externalize))
-  ) {
-    throw new ValidationError(`Invalid "externalize" in ${filePath}: expected an object`);
-  }
-  if (
-    parsed.compress !== undefined &&
-    (typeof parsed.compress !== 'object' || Array.isArray(parsed.compress))
-  ) {
-    throw new ValidationError(`Invalid "compress" in ${filePath}: expected an object`);
-  }
-  if (parsed.ignore !== undefined && !Array.isArray(parsed.ignore)) {
-    throw new ValidationError(`Invalid "ignore" in ${filePath}: expected an array`);
-  }
 }
 
 /** Write a .blobsy.yml config file. */

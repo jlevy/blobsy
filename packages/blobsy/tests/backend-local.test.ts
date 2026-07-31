@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
-import { localPush, localPull, localBlobExists, localHealthCheck } from '../src/backend-local.js';
+import { LocalBackend } from '../src/backend-local.js';
 import { computeHash } from '../src/hash.js';
 
 describe('local backend', () => {
@@ -22,12 +22,12 @@ describe('local backend', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  describe('localPush', () => {
+  describe('push', () => {
     it('copies file to remote directory', async () => {
       const srcPath = join(tmpDir, 'source.bin');
       await writeFile(srcPath, 'test content');
 
-      await localPush(srcPath, remoteDir, 'key/file.bin');
+      await new LocalBackend(remoteDir).push(srcPath, 'key/file.bin');
 
       const content = await readFile(join(remoteDir, 'key/file.bin'), 'utf-8');
       expect(content).toBe('test content');
@@ -37,13 +37,13 @@ describe('local backend', () => {
       const srcPath = join(tmpDir, 'source.bin');
       await writeFile(srcPath, 'data');
 
-      await localPush(srcPath, remoteDir, 'deep/nested/path/file.bin');
+      await new LocalBackend(remoteDir).push(srcPath, 'deep/nested/path/file.bin');
 
       expect(existsSync(join(remoteDir, 'deep/nested/path/file.bin'))).toBe(true);
     });
   });
 
-  describe('localPull', () => {
+  describe('pull', () => {
     it('copies file from remote to local', async () => {
       const remoteBlobPath = join(remoteDir, 'key/file.bin');
       const { mkdir } = await import('node:fs/promises');
@@ -51,7 +51,7 @@ describe('local backend', () => {
       await writeFile(remoteBlobPath, 'remote content');
 
       const localPath = join(tmpDir, 'pulled.bin');
-      await localPull(remoteDir, 'key/file.bin', localPath);
+      await new LocalBackend(remoteDir).pull('key/file.bin', localPath);
 
       const content = await readFile(localPath, 'utf-8');
       expect(content).toBe('remote content');
@@ -63,7 +63,7 @@ describe('local backend', () => {
       const hash = await computeHash(remoteBlobPath);
 
       const localPath = join(tmpDir, 'pulled.bin');
-      await localPull(remoteDir, 'file.bin', localPath, hash);
+      await new LocalBackend(remoteDir).pull('file.bin', localPath, hash);
 
       expect(existsSync(localPath)).toBe(true);
     });
@@ -74,8 +74,7 @@ describe('local backend', () => {
 
       const localPath = join(tmpDir, 'pulled.bin');
       await expect(
-        localPull(
-          remoteDir,
+        new LocalBackend(remoteDir).pull(
           'file.bin',
           localPath,
           'sha256:0000000000000000000000000000000000000000000000000000000000000000',
@@ -85,28 +84,92 @@ describe('local backend', () => {
 
     it('throws when remote blob is missing', async () => {
       const localPath = join(tmpDir, 'pulled.bin');
-      await expect(localPull(remoteDir, 'nonexistent.bin', localPath)).rejects.toThrow('not found');
+      await expect(new LocalBackend(remoteDir).pull('nonexistent.bin', localPath)).rejects.toThrow(
+        'not found',
+      );
     });
   });
 
-  describe('localBlobExists', () => {
+  describe('exists', () => {
     it('returns true for existing blob', async () => {
       await writeFile(join(remoteDir, 'exists.bin'), 'data');
-      expect(localBlobExists(remoteDir, 'exists.bin')).toBe(true);
+      expect(await new LocalBackend(remoteDir).exists('exists.bin')).toBe(true);
     });
 
-    it('returns false for missing blob', () => {
-      expect(localBlobExists(remoteDir, 'missing.bin')).toBe(false);
+    it('returns false for missing blob', async () => {
+      expect(await new LocalBackend(remoteDir).exists('missing.bin')).toBe(false);
     });
   });
 
-  describe('localHealthCheck', () => {
+  describe('healthCheck', () => {
     it('passes for existing writable directory', async () => {
-      await expect(localHealthCheck(remoteDir)).resolves.toBeUndefined();
+      await expect(new LocalBackend(remoteDir).healthCheck()).resolves.toBeUndefined();
     });
 
     it('throws for non-existent directory', async () => {
-      await expect(localHealthCheck(join(tmpDir, 'nonexistent'))).rejects.toThrow('not found');
+      await expect(new LocalBackend(join(tmpDir, 'nonexistent')).healthCheck()).rejects.toThrow(
+        'not found',
+      );
+    });
+  });
+
+  describe('remote_key containment (BE-03, Bugbot r6)', () => {
+    it('rejects keys that escape the backend directory', async () => {
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('../../outside.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('../outside.bin')).rejects.toThrow(/escapes the backend/);
+    });
+
+    it('rejects empty and "." keys that resolve to the store root', async () => {
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.exists('.')).rejects.toThrow(/escapes the backend/);
+      const srcPath = join(tmpDir, 'src.bin');
+      await writeFile(srcPath, 'x');
+      await expect(backend.push(srcPath, '')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('.')).rejects.toThrow(/escapes the backend/);
+    });
+
+    it('rejects keys traversing a symlinked directory that points outside (Bugbot r13)', async () => {
+      const { mkdir, symlink } = await import('node:fs/promises');
+      const outsideDir = join(tmpDir, 'outside');
+      await mkdir(outsideDir, { recursive: true });
+      await writeFile(join(outsideDir, 'secret.bin'), 'secret');
+      await symlink(outsideDir, join(remoteDir, 'link'), 'dir');
+
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('link/secret.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.delete('link/secret.bin')).rejects.toThrow(/escapes the backend/);
+      const srcPath = join(tmpDir, 'src2.bin');
+      await writeFile(srcPath, 'x');
+      await expect(backend.push(srcPath, 'link/new.bin')).rejects.toThrow(/escapes the backend/);
+    });
+
+    it('rejects a key that is itself a symlink pointing outside (Bugbot r13)', async () => {
+      const { symlink } = await import('node:fs/promises');
+      const outsideFile = join(tmpDir, 'target.bin');
+      await writeFile(outsideFile, 'secret');
+      await symlink(outsideFile, join(remoteDir, 'sneaky.bin'), 'file');
+
+      const backend = new LocalBackend(remoteDir);
+      await expect(backend.exists('sneaky.bin')).rejects.toThrow(/escapes the backend/);
+      await expect(backend.pull('sneaky.bin', join(tmpDir, 'out.bin'))).rejects.toThrow(
+        /escapes the backend/,
+      );
+    });
+
+    it('still allows normal keys when the store root itself is a symlink', async () => {
+      const { mkdir, symlink } = await import('node:fs/promises');
+      const realStore = join(tmpDir, 'real-store');
+      await mkdir(realStore, { recursive: true });
+      const linkedStore = join(tmpDir, 'store-link');
+      await symlink(realStore, linkedStore, 'dir');
+
+      const backend = new LocalBackend(linkedStore);
+      const srcPath = join(tmpDir, 'src3.bin');
+      await writeFile(srcPath, 'ok');
+      await backend.push(srcPath, 'sub/file.bin');
+      expect(await backend.exists('sub/file.bin')).toBe(true);
     });
   });
 });

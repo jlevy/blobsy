@@ -27,3 +27,7 @@ for (const filename of DOCS) {
 // Copy README.md from repo root
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf-8');
 writeFileSync(join(distDocs, 'README.md'), readme);
+
+// Ship the agent skill source so the npm package carries it (DOCS-01)
+const skill = readFileSync(join(pkgRoot, 'SKILL.md'), 'utf-8');
+writeFileSync(join(distDocs, 'SKILL.md'), skill);

@@ -5,11 +5,13 @@ Track them in Git.
 
 A simpler, more flexible, serverless alternative to Git LFS. Blobsy is a standalone CLI
 that tracks large files with lightweight `.bref` pointer files committed to Git, while
-the actual data lives in any storage backend -- S3, local directories, or custom
-commands. No special server.
-No hosting requirements.
+the actual data lives in any storage backend -- S3, Google Cloud Storage, Azure, local
+directories, or custom commands.
+No special server. No hosting requirements.
 
 ## Quick Start
+
+Requires [Node.js](https://nodejs.org/) >= 22.15.
 
 ```bash
 # Install
@@ -19,7 +21,7 @@ npm install -g blobsy
 cd my-project
 blobsy setup --auto s3://my-bucket/my-project/blobs/
 
-# Add files: externalizes large (by default >1MB) files, stages everything to git
+# Add files: externalizes large (by default >200KB) files, stages everything to git
 blobsy add data/
 ```
 
@@ -47,7 +49,8 @@ blobsy pull
 
 `blobsy add` scans a directory (or accepts specific files/subdirectories), creates
 `.bref` pointer files for large files, adds originals to `.gitignore`, and stages
-everything to git. By default, files **1 MB or larger** are externalized; smaller files
+everything to git.
+By default, files **200 KB or larger** are externalized; smaller files
 are staged directly to git.
 See [Externalization Rules](#externalization-rules) for details.
 
@@ -91,9 +94,7 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | Command | Description |
 | --- | --- |
 | `blobsy setup --auto <url>` | Set up blobsy in a git repo (recommended) |
-| `blobsy init <url>` | Initialize blobsy config (low-level) |
-| `blobsy add <path...>` | Track files and stage changes to git (recommended) |
-| `blobsy track <path...>` | Track files without git staging (low-level) |
+| `blobsy add <path...>` | Track files and stage changes to git |
 | `blobsy untrack <path...>` | Stop tracking (keep local files) |
 | `blobsy push [path...]` | Upload local blobs to remote |
 | `blobsy pull [path...]` | Download remote blobs to local |
@@ -103,12 +104,14 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `blobsy rm <path...>` | Remove from tracking and delete local file (use `--remote` to also delete from backend, `--local` to keep .bref) |
 | `blobsy mv <src> <dest>` | Rename or move a tracked file |
 | `blobsy config [key] [val]` | Get or set configuration (supports `--global`, `--show-origin`, `--unset`) |
-| `blobsy health` | Check backend connectivity |
-| `blobsy doctor [--fix]` | Diagnostics and self-repair |
+| `blobsy doctor [--fix]` | Diagnostics and self-repair (includes backend health) |
 | `blobsy hooks <action>` | Install or uninstall git hooks (pre-commit, pre-push) |
-| `blobsy check-unpushed` | List committed .bref files missing remote blobs |
-| `blobsy pre-push-check` | CI guard: fail if any .bref lacks remote blob |
-| `blobsy skill` | Output skill documentation for AI agents |
+| `blobsy docs [topic]` | User documentation (`--readme`, `--skill`, `--list`) |
+
+Hidden plumbing (kept for scripts and compatibility, folded into the commands above):
+`init` (use `setup`), `track` (use `add`; tracks without staging), `health` (use
+`doctor`), `check-unpushed` / `pre-push-check` (exit-code contracts used by CI and
+hooks), `readme` / `skill` (use `docs --readme` / `docs --skill`).
 
 ### Global Options
 
@@ -118,6 +121,15 @@ remote_key: 20260221T120000Z-e3b0c44298fc/data/model.bin
 | `--quiet` | Suppress all output except errors |
 | `--verbose` | Detailed progress output |
 | `--dry-run` | Show what would happen without doing it |
+| `--color <when>` | Color output: `always`, `never`, `auto` |
+
+## Guides
+
+- [Joining a repo that uses blobsy](docs/joining-a-blobsy-repo.md) — first-time setup
+  and recovery drills
+- [Migrating from Git LFS](docs/migrating-from-git-lfs.md)
+- [Using blobsy in GitHub Actions](docs/ci-github-actions.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ## Backend Configuration
 
@@ -140,6 +152,38 @@ backends:
     url: s3://my-bucket/prefix/
     endpoint: https://minio.example.com:9000
 ```
+
+S3 transfers use the AWS CLI when installed, falling back to the built-in AWS SDK. If
+you set `rclone_remote` (see below), [rclone](https://rclone.org/) is used as a fallback
+when the AWS CLI is unavailable.
+
+### Google Cloud Storage and Azure (via rclone)
+
+GCS and Azure backends transfer data through [rclone](https://rclone.org/), so you can
+use any rclone remote you have configured:
+
+1. Install rclone: https://rclone.org/install/
+2. Configure a remote for your provider: `rclone config` (e.g. a remote named `mygcs` of
+   type `google cloud storage`, or `myazure` of type `azureblob`)
+3. Point blobsy at the bucket/container and the rclone remote:
+
+```yaml
+backends:
+  default:
+    url: gs://my-bucket/prefix/
+    rclone_remote: mygcs
+```
+
+```yaml
+backends:
+  default:
+    url: azure://my-container/prefix/
+    rclone_remote: myazure
+```
+
+Credentials and endpoints come from your rclone remote configuration
+(`~/.config/rclone/rclone.conf`), so blobsy needs no cloud-specific setup of its own.
+`blobsy doctor` verifies that rclone is installed and the remote resolves.
 
 ### Local Directory
 
@@ -187,7 +231,7 @@ blobsy config compress.algorithm
 blobsy config compress.algorithm zstd
 
 # Set a value in global config (~/.blobsy.yml)
-blobsy config --global sync.parallel 16
+blobsy config --global sync.tools '[aws-cli]'
 
 # See where a value comes from
 blobsy config --show-origin compress.algorithm
@@ -221,14 +265,14 @@ per-file whether to externalize based on these rules (checked in order):
 
 1. **`never` patterns** (highest priority) -- matching files stay in git
 2. **`always` patterns** -- matching files are externalized regardless of size
-3. **`min_size` threshold** (default: `1mb`) -- files at or above this size are
+3. **`min_size` threshold** (default: `200kb`) -- files at or above this size are
    externalized
 
 Configure in `.blobsy.yml` at your repo root:
 
 ```yaml
 externalize:
-  min_size: 1mb           # default; accepts units like 500kb, 2mb, 1gb
+  min_size: 200kb         # default; accepts units like 500kb, 2mb, 1gb
   always:
     - "*.bin"
     - "*.onnx"
@@ -249,6 +293,13 @@ Blobsy installs two git hooks by default (via `blobsy setup --auto` or `blobsy i
 | --- | --- | --- |
 | **pre-commit** | `git commit` | Verifies staged `.bref` files match their local files (catches modifications after tracking) |
 | **pre-push** | `git push` | Auto-runs `blobsy push` to upload any unpushed blobs (ensures blobs and refs arrive together) |
+
+**Note:** when the pre-push hook uploads a blob, it records the resulting `remote_key`
+in the file’s `.bref` in your working tree.
+The push that triggered the hook does not include that update, so commit it in a
+follow-up (`git add '*.bref' && git commit -m 'Record blobsy remote keys'`) — until
+that lands, teammates see the file as not yet pullable.
+The hook prints a reminder when this applies.
 
 **Opting out:**
 

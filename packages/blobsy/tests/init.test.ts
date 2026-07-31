@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execa } from 'execa';
+import { blobsy } from './helpers/cli.js';
 
 describe('init command - auto-create directories', () => {
   let testDir: string;
@@ -36,7 +37,7 @@ describe('init command - auto-create directories', () => {
     expect(existsSync(backendDir)).toBe(false);
 
     // Run init with local backend (outside repo)
-    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
+    await blobsy(['init', `local:${backendDir}`], { cwd: testDir });
 
     // Backend directory should now exist
     expect(existsSync(backendDir)).toBe(true);
@@ -47,7 +48,7 @@ describe('init command - auto-create directories', () => {
     expect(existsSync(backendDir)).toBe(true);
 
     // Should not throw
-    await execa('blobsy', ['init', `local:${backendDir}`], { cwd: testDir });
+    await blobsy(['init', `local:${backendDir}`], { cwd: testDir });
 
     expect(existsSync(backendDir)).toBe(true);
   });
@@ -57,7 +58,7 @@ describe('init command - auto-create directories', () => {
 
     // Neither parent nor grandparent exist - should still succeed with recursive mkdir
     try {
-      await execa('blobsy', ['init', `local:../very/deeply/nested/backend`], { cwd: testDir });
+      await blobsy(['init', `local:../very/deeply/nested/backend`], { cwd: testDir });
 
       // Full nested path should be created
       expect(existsSync(nestedBackendPath)).toBe(true);
@@ -81,9 +82,9 @@ describe('init command - auto-create directories', () => {
 
     try {
       // Should fail with permission error
-      await expect(
-        execa('blobsy', ['init', 'local:../readonly/backend'], { cwd: testDir }),
-      ).rejects.toThrow(/Permission denied/);
+      await expect(blobsy(['init', 'local:../readonly/backend'], { cwd: testDir })).rejects.toThrow(
+        /Permission denied/,
+      );
     } finally {
       // Restore permissions for cleanup
       await chmod(readonlyParent, 0o755);
@@ -100,7 +101,7 @@ describe('init command - auto-create directories', () => {
     await mkdir(join(testDir, '..', 'deep'), { recursive: true });
 
     try {
-      await execa('blobsy', ['init', 'local:../deep/nested/backend'], { cwd: testDir });
+      await blobsy(['init', 'local:../deep/nested/backend'], { cwd: testDir });
 
       // Full nested path should be created
       expect(existsSync(nestedPath)).toBe(true);
@@ -115,7 +116,7 @@ describe('init command - auto-create directories', () => {
     const absoluteBackend = join(testDir, '..', 'absolute-backend');
 
     try {
-      await execa('blobsy', ['init', `local:${absoluteBackend}`], { cwd: testDir });
+      await blobsy(['init', `local:${absoluteBackend}`], { cwd: testDir });
 
       expect(existsSync(absoluteBackend)).toBe(true);
     } finally {
@@ -129,7 +130,7 @@ describe('init command - auto-create directories', () => {
     const parentBackend = join(testDir, '..', 'sibling-backend');
 
     try {
-      await execa('blobsy', ['init', 'local:../sibling-backend'], { cwd: testDir });
+      await blobsy(['init', 'local:../sibling-backend'], { cwd: testDir });
 
       expect(existsSync(parentBackend)).toBe(true);
     } finally {
@@ -141,7 +142,7 @@ describe('init command - auto-create directories', () => {
   });
 
   it('should output message about created directory', async () => {
-    const { stdout } = await execa('blobsy', ['init', 'local:../backend-msg'], { cwd: testDir });
+    const { stdout } = await blobsy(['init', 'local:../backend-msg'], { cwd: testDir });
 
     // Should mention directory creation
     expect(stdout).toMatch(/Created backend directory/);
@@ -154,7 +155,7 @@ describe('init command - auto-create directories', () => {
   });
 
   it('should not output message with --quiet flag', async () => {
-    const { stdout } = await execa('blobsy', ['init', 'local:../backend-quiet', '--quiet'], {
+    const { stdout } = await blobsy(['init', 'local:../backend-quiet', '--quiet'], {
       cwd: testDir,
     });
 

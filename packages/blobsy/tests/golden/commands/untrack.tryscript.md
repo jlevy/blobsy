@@ -53,11 +53,11 @@ $ cat data/.gitignore
 ? 0
 ```
 
-# Verify trash has the ref
+# Verify trash preserves the repo-relative path (L-01)
 
 ```console
 $ find .blobsy/trash/ -type f | sort
-.blobsy/trash/model.bin.bref.[UNIX_TS]
+.blobsy/trash/data/model.bin.bref
 ? 0
 ```
 

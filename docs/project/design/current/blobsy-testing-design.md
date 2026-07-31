@@ -258,8 +258,7 @@ Transport-specific tests use the echo backend.
 
 ```
 tests/
-  golden/
-    tryscript.config.ts                    # Shared config (patterns, path, env)
+  golden/                                  # (config lives at package root: tryscript.config.ts)
     commands/
       init.tryscript.md                    # blobsy init
       track.tryscript.md                   # blobsy track (single, directory, idempotent)
@@ -312,7 +311,7 @@ tests/
 ### Shared Config
 
 ```typescript
-// tests/golden/tryscript.config.ts
+// tryscript.config.ts (package root)
 import { defineConfig } from 'tryscript';
 
 export default defineConfig({

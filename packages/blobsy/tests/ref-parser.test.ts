@@ -122,4 +122,43 @@ compressed_size: 512
       validateFormatVersion(BREF_FORMAT);
     }).not.toThrow();
   });
+
+  it('reports unresolved merge conflict markers clearly (CFG-03)', async () => {
+    const dir = tmpDir();
+    const refPath = join(dir, 'conflicted.bref');
+    writeFileSync(
+      refPath,
+      `<<<<<<< HEAD
+format: blobsy-bref/0.1
+hash: sha256:${'a'.repeat(64)}
+size: 100
+=======
+format: blobsy-bref/0.1
+hash: sha256:${'b'.repeat(64)}
+size: 200
+>>>>>>> theirs
+`,
+    );
+
+    await expect(readBref(refPath)).rejects.toThrow(/merge conflict markers/);
+  });
+
+  it('rejects malformed hash with the offending field named (CFG-03)', async () => {
+    const dir = tmpDir();
+    const refPath = join(dir, 'badhash.bref');
+    writeFileSync(refPath, 'format: blobsy-bref/0.1\nhash: sha256:tooshort\nsize: 100\n');
+
+    await expect(readBref(refPath)).rejects.toThrow(/hash/);
+  });
+
+  it('rejects wrong-typed optional fields instead of silently dropping them (CFG-03)', async () => {
+    const dir = tmpDir();
+    const refPath = join(dir, 'badkey.bref');
+    writeFileSync(
+      refPath,
+      `format: blobsy-bref/0.1\nhash: sha256:${'e'.repeat(64)}\nsize: 100\nremote_key: 12345\n`,
+    );
+
+    await expect(readBref(refPath)).rejects.toThrow(/remote_key/);
+  });
 });

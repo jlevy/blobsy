@@ -90,7 +90,7 @@ $ blobsy doctor
 # Doctor --fix adds .blobsy/ to root .gitignore
 
 ```console
-$ blobsy doctor --fix
+$ BLOBSY_NO_HOOKS= blobsy doctor --fix
   ✓  data/model.bin  synced (13 B)
 
 1 tracked file: 1 synced

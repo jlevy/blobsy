@@ -29,11 +29,11 @@ $ blobsy push --json
       "path": "data/dataset.csv",
       "success": true,
       "action": "push",
-      "bytesTransferred": 32,
+      "bytesTransferred": 21,
       "refUpdates": {
         "remote_key": "[REMOTE_KEY]",
-        "compressed": "gzip",
-        "compressed_size": 32
+        "compressed": "zstd",
+        "compressed_size": 21
       }
     },
     {
@@ -46,10 +46,12 @@ $ blobsy push --json
       }
     }
   ],
+  "warnings": [],
   "summary": {
     "total": 2,
     "succeeded": 2,
-    "failed": 0
+    "failed": 0,
+    "warnings": 0
   }
 }
 ? 0
@@ -88,7 +90,8 @@ $ blobsy pull --json
   "summary": {
     "total": 2,
     "succeeded": 2,
-    "failed": 0
+    "failed": 0,
+    "refused": 0
   }
 }
 ? 0
@@ -101,10 +104,12 @@ $ blobsy push --json
 {
   "schema_version": "0.1",
   "pushed": [],
+  "warnings": [],
   "summary": {
     "total": 0,
     "succeeded": 0,
-    "failed": 0
+    "failed": 0,
+    "warnings": 0
   }
 }
 ? 0

@@ -43,13 +43,13 @@
     "content-addressable"
   ],
   "scripts": {
-    "build": "tsdown && node scripts/copy-docs.mjs",
+    "build": "node scripts/gen-skill-text.mjs && tsdown && node scripts/copy-docs.mjs",
     "dev": "tsdown --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:golden": "bash scripts/run-golden.sh",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run --dir tests/e2e --config vitest.e2e.config.ts",
     "publint": "publint",
     "prepack": "pnpm build"
   },
@@ -66,12 +66,14 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.995.0",
+    "@aws-sdk/lib-storage": "^3.1096.0",
     "atomically": "^2.1.1",
     "commander": "^14.0.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "picocolors": "^1.1.1",
     "picomatch": "^4.0.3",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "zod": "^4.4.3"
   }
 }

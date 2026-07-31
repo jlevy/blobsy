@@ -194,3 +194,41 @@ model.bin
 # <<< blobsy-managed <<<
 ? 0
 ```
+
+# CLI-04: mv refuses to overwrite an already-tracked destination
+
+```console
+$ blobsy mv archive/research/data.bin archive/research/model.bin 2>&1
+Error: Destination already exists: archive/research/model.bin.bref
+
+  Use --force to overwrite, or pick a different destination.
+? 1
+```
+
+# CLI-04: dry-run mirrors the refusal (exit 1, no changes)
+
+```console
+$ blobsy --dry-run mv archive/research/data.bin archive/research/model.bin
+Would refuse archive/research/data.bin -> archive/research/model.bin (destination exists; would need --force)
+? 1
+```
+
+# CLI-04: --force allows the overwrite
+
+```console
+$ blobsy mv --force archive/research/data.bin archive/research/model.bin
+Moved archive/research/data.bin -> archive/research/model.bin
+? 0
+```
+
+```console
+$ cat archive/research/model.bin
+research data
+? 0
+```
+
+```console
+$ test -f archive/research/data.bin.bref && echo "exists" || echo "gone"
+gone
+? 0
+```

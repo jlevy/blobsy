@@ -135,3 +135,23 @@ $ blobsy sync --skip-health-check
 Sync complete: 0 pushed, 0 pulled, 0 errors.
 ? 0
 ```
+
+# Sync refuses modified-since-track content, like push (DS-03)
+
+```console
+$ echo "edited after track" > data/new-file.bin && blobsy track data/new-file.bin >/dev/null 2>&1 && echo "changed again" > data/new-file.bin
+? 0
+```
+
+```console
+$ blobsy sync data/new-file.bin 2>&1
+  ✗ data/new-file.bin - push refused: changed since track; re-track with `blobsy track <path>` then `blobsy push --force`
+Sync complete: 0 pushed, 0 pulled, 1 errors.
+? 1
+```
+
+```console
+$ blobsy --dry-run sync data/new-file.bin
+Would refuse data/new-file.bin (changed since track; re-track with `blobsy track <path>` then `blobsy push --force`)
+? 1
+```

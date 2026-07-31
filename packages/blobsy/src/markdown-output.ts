@@ -7,7 +7,8 @@
 
 import { spawn } from 'node:child_process';
 
-import { marked } from 'marked';
+import { Marked } from 'marked';
+import type { MarkedExtension } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 
 const MAX_WIDTH = 88;
@@ -26,17 +27,26 @@ export function isInteractive(opts: Record<string, unknown>): boolean {
  * Render markdown to colorized terminal output.
  * Returns plain markdown when not interactive.
  */
+// marked.use() mutates global parser state, so configure a dedicated
+// Marked instance once instead of re-registering the terminal renderer on
+// every call (review finding L-08).
+let terminalMarked: Marked | undefined;
+
+function getTerminalMarked(): Marked {
+  terminalMarked ??= new Marked(
+    markedTerminal({
+      width: getTerminalWidth(),
+      reflowText: true,
+    }) as MarkedExtension,
+  );
+  return terminalMarked;
+}
+
 export function renderMarkdown(content: string, interactive: boolean): string {
   if (!interactive) {
     return content;
   }
-  marked.use(
-    markedTerminal({
-      width: getTerminalWidth(),
-      reflowText: true,
-    }) as unknown as Parameters<typeof marked.use>[0],
-  );
-  return marked.parse(content) as string;
+  return getTerminalMarked().parse(content) as string;
 }
 
 /**

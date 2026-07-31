@@ -16,7 +16,7 @@ before: |
 
 ```console
 $ blobsy health
-Backend is reachable and writable.
+Backend is reachable.
 ? 0
 ```
 

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execa } from 'execa';
+import { blobsy } from './helpers/cli.js';
 
 describe('setup command', () => {
   let testDir: string;
@@ -24,7 +25,7 @@ describe('setup command', () => {
   it('should create .blobsy.yml via init', async () => {
     const backendDir = join(testDir, '..', 'setup-backend');
     try {
-      const { stdout } = await execa('blobsy', ['setup', '--auto', 'local:../setup-backend'], {
+      const { stdout } = await blobsy(['setup', '--auto', 'local:../setup-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
@@ -41,7 +42,7 @@ describe('setup command', () => {
 
   it('should error without --auto flag', async () => {
     await expect(
-      execa('blobsy', ['setup', 'local:../backend'], {
+      blobsy(['setup', 'local:../backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       }),
@@ -54,7 +55,7 @@ describe('setup command', () => {
     const backendDir = join(testDir, '..', 'setup-claude-backend');
 
     try {
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-claude-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-claude-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
@@ -63,7 +64,7 @@ describe('setup command', () => {
       expect(existsSync(skillPath)).toBe(true);
 
       const content = await readFile(skillPath, 'utf-8');
-      expect(content).toContain('# blobsy');
+      expect(content).toContain('name: blobsy');
       expect(content).toContain('blobsy track');
       expect(content).toContain('status --json');
     } finally {
@@ -79,7 +80,7 @@ describe('setup command', () => {
     const backendDir = join(testDir, '..', 'setup-agents-backend');
 
     try {
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-agents-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-agents-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
@@ -102,11 +103,11 @@ describe('setup command', () => {
 
     try {
       // Run setup twice
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-idempotent-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-idempotent-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-idempotent-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-idempotent-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
@@ -126,7 +127,7 @@ describe('setup command', () => {
     const backendDir = join(testDir, '..', 'setup-no-agents-backend');
 
     try {
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-no-agents-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-no-agents-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
@@ -143,7 +144,7 @@ describe('setup command', () => {
     const nonGitDir = await mkdtemp(join(tmpdir(), 'blobsy-setup-nogit-'));
     try {
       await expect(
-        execa('blobsy', ['setup', '--auto', 'local:../backend'], {
+        blobsy(['setup', '--auto', 'local:../backend'], {
           cwd: nonGitDir,
           env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
         }),
@@ -154,7 +155,7 @@ describe('setup command', () => {
   });
 
   it('should create config with S3 URL', async () => {
-    const { stdout } = await execa('blobsy', ['setup', '--auto', 's3://my-test-bucket/prefix/'], {
+    const { stdout } = await blobsy(['setup', '--auto', 's3://my-test-bucket/prefix/'], {
       cwd: testDir,
       env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
     });
@@ -169,8 +170,7 @@ describe('setup command', () => {
   it('should suppress output with --quiet', async () => {
     const backendDir = join(testDir, '..', 'setup-quiet-backend');
     try {
-      const { stdout } = await execa(
-        'blobsy',
+      const { stdout } = await blobsy(
         ['setup', '--auto', '--quiet', 'local:../setup-quiet-backend'],
         {
           cwd: testDir,
@@ -188,8 +188,7 @@ describe('setup command', () => {
   });
 
   it('should show dry-run output without creating files', async () => {
-    const { stdout } = await execa(
-      'blobsy',
+    const { stdout } = await blobsy(
       ['setup', '--auto', '--dry-run', 'local:../setup-dryrun-backend'],
       {
         cwd: testDir,
@@ -212,14 +211,14 @@ describe('setup command', () => {
     const backendDir = join(testDir, '..', 'setup-skill-update-backend');
 
     try {
-      await execa('blobsy', ['setup', '--auto', 'local:../setup-skill-update-backend'], {
+      await blobsy(['setup', '--auto', 'local:../setup-skill-update-backend'], {
         cwd: testDir,
         env: { ...process.env, BLOBSY_NO_HOOKS: '1' },
       });
 
       const content = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
       // Should be updated to latest content, not 'old content'
-      expect(content).toContain('# blobsy');
+      expect(content).toContain('name: blobsy');
       expect(content).not.toBe('old content');
     } finally {
       await rm(backendDir, { recursive: true, force: true }).catch(() => {

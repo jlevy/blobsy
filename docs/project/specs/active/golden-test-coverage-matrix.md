@@ -1,6 +1,6 @@
 # Golden Test Coverage Matrix
 
-**Generated:** 2026-02-21
+**Generated:** 2026-02-21, updated 2026-07-29
 
 CLI commands from `blobsy --help` (help.tryscript.md).
 Test files from `packages/blobsy/tests/golden/`.
@@ -26,7 +26,6 @@ Test files from `packages/blobsy/tests/golden/`.
 | check-unpushed | commands/check-unpushed | json/check-unpushed-json | - | - | --json |
 | pre-push-check | commands/pre-push-check | - | - | - | - |
 | skill | commands/skill | - | - | - | --brief |
-| prime | commands/prime | - | - | - | --brief |
 | help | commands/help | - | - | - | per-command --help |
 
 ### Cross-cutting Flags Tests
@@ -43,7 +42,7 @@ Test files from `packages/blobsy/tests/golden/`.
 - **mv**: No dedicated JSON test.
 - **hooks**: No JSON test (hooks has no --json).
 - **pre-push-check**: No JSON test (pre-push-check has no --json).
-- **skill** / **prime**: No JSON tests (these commands have no --json).
+- **skill**: No JSON tests (this command has no --json).
 - **help**: No JSON or error tests (help is documentation only).
 
 ## Test File Index
@@ -63,7 +62,6 @@ Test files from `packages/blobsy/tests/golden/`.
 | init.tryscript.md | Initialize with local/s3/gs/azure, validation errors |
 | mv.tryscript.md | Rename/move tracked files and directories |
 | pre-push-check.tryscript.md | CI guard for missing remote blobs |
-| prime.tryscript.md | AI context primer output |
 | push-pull.tryscript.md | push, pull, path handling, .bref paths |
 | quiet.tryscript.md | --quiet, --quiet + --verbose error |
 | rm.tryscript.md | rm, --local, --recursive |
@@ -109,6 +107,18 @@ Test files from `packages/blobsy/tests/golden/`.
 | untrack-rm-json.tryscript.md | untrack --json, rm --json |
 | verify-json.tryscript.md | verify --json |
 
+### rclone-backend/ (1 file)
+
+| File | Description |
+| --- | --- |
+| rclone-lifecycle.tryscript.md | Full lifecycle (track, push, pull, sync, verify, doctor) through the real rclone binary with a local remote |
+
+### s3-backend/ (1 file)
+
+| File | Description |
+| --- | --- |
+| aws-cli-lifecycle.tryscript.md | Full lifecycle through the real aws CLI against a hermetic local S3 endpoint (`rclone serve s3`) |
+
 ### workflows/ (8 files)
 
 | File | Description |
@@ -122,4 +132,6 @@ Test files from `packages/blobsy/tests/golden/`.
 | multi-file-sync.tryscript.md | Multi-directory track, push, verify, sync |
 | two-user-conflict.tryscript.md | Conflicting pushes, --force resolution |
 
-**Total:** 49 golden test files.
+**Total:** 71 golden test files (count: `ls tests/golden/*/*.tryscript.md | wc -l`). The
+authoritative list is the directory tree; naming and elision conventions are enforced by
+`scripts/check-golden-coverage.sh` in CI.

@@ -7,13 +7,14 @@
 
 import { copyFile, access, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import type { Backend } from './types.js';
 import { BlobsyError, UserError } from './types.js';
 import { computeHash } from './hash.js';
 import { ensureDir } from './fs-utils.js';
+import { realpathDeep } from './paths.js';
 
 export class LocalBackend implements Backend {
   readonly type = 'local' as const;
@@ -23,13 +24,62 @@ export class LocalBackend implements Backend {
     this.remoteDir = remoteDir;
   }
 
+  /**
+   * Resolve a remote key inside the backend directory, rejecting escapes.
+   *
+   * `remote_key` comes from `.bref` files, which arrive via git from other
+   * contributors — attacker-influenceable input. A key like `../../x` must
+   * never reach read, write, or delete outside the backend directory
+   * (review finding BE-03).
+   */
+  private resolveKey(remoteKey: string): string {
+    const root = resolve(this.remoteDir);
+    const resolved = resolve(root, remoteKey);
+    // Strictly inside the root: an empty or "." key resolves to the store
+    // root itself, and push/pull/delete on the root corrupts or exposes the
+    // backend layout (Bugbot r6).
+    if (!resolved.startsWith(root + sep)) {
+      this.throwEscape(remoteKey);
+    }
+    // The lexical check alone is not enough: a symlink inside the store can
+    // point outside it, and push/pull/exists/delete would follow the link
+    // past the boundary. Resolve symlinks — via the deepest existing
+    // ancestor for not-yet-created keys, same policy as resolveRepoPath
+    // (SEC-02) — and re-check containment (Bugbot r13).
+    const realRoot = realpathDeep(root);
+    const effective = realpathDeep(resolved);
+    if (!effective.startsWith(realRoot + sep)) {
+      this.throwEscape(remoteKey);
+    }
+    return resolved;
+  }
+
+  private throwEscape(remoteKey: string): never {
+    throw new BlobsyError(
+      `Invalid remote_key escapes the backend directory: ${JSON.stringify(remoteKey)}`,
+      'validation',
+      1,
+      ['The .bref file may be corrupted or malicious. Inspect it before retrying.'],
+    );
+  }
+
   async push(localPath: string, remoteKey: string): Promise<void> {
-    const destPath = join(this.remoteDir, remoteKey);
+    const destPath = this.resolveKey(remoteKey);
     await ensureDir(dirname(destPath));
 
+    // Copy to a temp name, then rename: a direct copyFile interrupted
+    // mid-write leaves a partial blob under the final key that later reads
+    // treat as the real object (review finding BE-09).
+    const tmpPath = `${destPath}.blobsy-push-${randomBytes(8).toString('hex')}`;
     try {
-      await copyFile(localPath, destPath);
+      await copyFile(localPath, tmpPath);
+      await rename(tmpPath, destPath);
     } catch (err: unknown) {
+      try {
+        await unlink(tmpPath);
+      } catch {
+        // Temp file may not exist if the copy failed early.
+      }
       const error = err as NodeJS.ErrnoException;
 
       if (error.code === 'ENOENT') {
@@ -51,7 +101,7 @@ export class LocalBackend implements Backend {
   }
 
   async pull(remoteKey: string, localPath: string, expectedHash?: string): Promise<void> {
-    const srcPath = join(this.remoteDir, remoteKey);
+    const srcPath = this.resolveKey(remoteKey);
 
     if (!existsSync(srcPath)) {
       throw new BlobsyError(`Remote blob not found: ${remoteKey}`, 'not_found', 1, [
@@ -116,13 +166,18 @@ export class LocalBackend implements Backend {
     }
   }
 
-  exists(remoteKey: string): Promise<boolean> {
-    const blobPath = join(this.remoteDir, remoteKey);
-    return Promise.resolve(existsSync(blobPath));
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async exists(remoteKey: string): Promise<boolean> {
+    // Propagate resolveKey validation errors (as a rejection, not a sync
+    // throw) instead of reporting "blob absent": push/pull/delete reject
+    // the same traversal key loudly, and a status check must surface the
+    // malformed .bref, not hide it (Bugbot r5).
+    const blobPath = this.resolveKey(remoteKey);
+    return existsSync(blobPath);
   }
 
   async delete(remoteKey: string): Promise<void> {
-    const blobPath = join(this.remoteDir, remoteKey);
+    const blobPath = this.resolveKey(remoteKey);
     if (!existsSync(blobPath)) {
       throw new BlobsyError(`Remote blob not found: ${remoteKey}`, 'not_found', 1, [
         'The blob may have already been deleted.',
@@ -156,38 +211,4 @@ export class LocalBackend implements Backend {
       );
     }
   }
-}
-
-/**
- * Standalone helper functions used by tests.
- * New code should use LocalBackend class directly.
- */
-
-export async function localPush(
-  localPath: string,
-  remoteDir: string,
-  remoteKey: string,
-): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.push(localPath, remoteKey);
-}
-
-export async function localPull(
-  remoteDir: string,
-  remoteKey: string,
-  localPath: string,
-  expectedHash?: string,
-): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.pull(remoteKey, localPath, expectedHash);
-}
-
-export function localBlobExists(remoteDir: string, remoteKey: string): boolean {
-  const blobPath = join(remoteDir, remoteKey);
-  return existsSync(blobPath);
-}
-
-export async function localHealthCheck(remoteDir: string): Promise<void> {
-  const backend = new LocalBackend(remoteDir);
-  await backend.healthCheck();
 }

@@ -142,7 +142,8 @@ entirely).
 
 ## Backend Configuration
 
-Three backend types:
+Backend types: S3 (and S3-compatible), Google Cloud Storage, Azure Blob Storage, local
+directory, and custom command.
 
 ### S3 (and S3-compatible)
 
@@ -162,6 +163,31 @@ backends:
     endpoint: https://s3.us-west-1.backblazeb2.com
     region: us-west-1
 ```
+
+S3 transfers prefer the AWS CLI, then fall back to the built-in AWS SDK. With
+`rclone_remote` set, rclone is used as a fallback when the AWS CLI is missing.
+
+### Google Cloud Storage and Azure (via rclone)
+
+GCS and Azure transfers go through the `rclone` CLI. Install rclone, configure a remote
+with `rclone config`, then reference it with `rclone_remote`:
+
+```yaml
+backends:
+  default:
+    url: gs://my-bucket/blobs/
+    rclone_remote: mygcs
+```
+
+```yaml
+backends:
+  default:
+    url: azure://my-container/blobs/
+    rclone_remote: myazure
+```
+
+Credentials come from the rclone remote config (`~/.config/rclone/rclone.conf`).
+`blobsy doctor` checks that rclone is installed and that the named remote exists.
 
 ### Local Directory
 

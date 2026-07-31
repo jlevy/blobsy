@@ -5,10 +5,12 @@
  * handle compression, manage atomic writes, coordinate push/pull/sync.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
+
+import { parse as parseYaml } from 'yaml';
 
 import type {
   Backend,
@@ -28,7 +30,7 @@ import { AwsCliBackend, isAwsCliAvailable } from './backend-aws-cli.js';
 import { RcloneBackend, buildRcloneConfig, isRcloneAvailable } from './backend-rclone.js';
 import { evaluateTemplate, getCompressSuffix } from './template.js';
 import { compressFile, decompressFile, shouldCompress } from './compress.js';
-import { getCompressConfig } from './config.js';
+import { getCompressConfig, getGlobalConfigPath } from './config.js';
 import { normalizePath, toRepoRelative } from './paths.js';
 import { ensureDir } from './fs-utils.js';
 
@@ -37,11 +39,36 @@ export interface BackendToolAvailability {
   rclone: boolean;
 }
 
+let cachedToolAvailability: BackendToolAvailability | undefined;
+
 function detectBackendToolAvailability(): BackendToolAvailability {
-  return {
+  // Detected once per process: availability doesn't change mid-command and
+  // each probe spawns a subprocess — per-file re-detection meant O(N)
+  // spawns before any transfer started (review finding BE-02).
+  cachedToolAvailability ??= {
     awsCli: isAwsCliAvailable(),
     rclone: isRcloneAvailable(),
   };
+  return cachedToolAvailability;
+}
+
+/**
+ * Backend instances, one per distinct resolved config within a process.
+ * Transfers are documented as sequential in V1 (the dead `sync.parallel`
+ * config key was removed — review finding BE-02); reuse still matters so a
+ * 100-file push constructs one backend, not 100.
+ */
+const backendCache = new Map<string, Backend>();
+
+function getBackend(config: BlobsyConfig, repoRoot: string): Backend {
+  const resolved = resolveBackend(config);
+  const key = JSON.stringify([resolved, repoRoot, config.sync?.tools]);
+  let backend = backendCache.get(key);
+  if (!backend) {
+    backend = createBackend(resolved, repoRoot, config.sync?.tools);
+    backendCache.set(key, backend);
+  }
+  return backend;
 }
 
 /**
@@ -104,6 +131,65 @@ function resolveBackendType(backend: BackendConfig): ResolvedBackendConfig {
   ]);
 }
 
+/**
+ * Refuse to execute a repository-configured command backend without an
+ * out-of-repo trust grant (review finding SEC-03).
+ *
+ * A committed .blobsy.yml chooses the executable and arguments the command
+ * backend runs, and hooks/sync/doctor run backends automatically — so
+ * "clone, then run blobsy" would execute repository-controlled commands.
+ * The grant must come from outside the repository: the user-global config
+ * (~/.blobsy.yml `trust_command_backends`: true or a list of repo paths) or
+ * the BLOBSY_TRUST_COMMAND_BACKEND environment variable (for CI).
+ */
+function assertCommandBackendTrusted(repoRoot: string): void {
+  // Affirmative values only: a trust grant must never be conferred by
+  // BLOBSY_TRUST_COMMAND_BACKEND=0 or =false.
+  const envGrant = process.env.BLOBSY_TRUST_COMMAND_BACKEND;
+  if (envGrant === '1' || envGrant === 'true') {
+    return;
+  }
+
+  const globalPath = getGlobalConfigPath();
+  try {
+    if (existsSync(globalPath)) {
+      const raw = parseYaml(readFileSync(globalPath, 'utf-8')) as {
+        trust_command_backends?: boolean | string[];
+      } | null;
+      const grant = raw?.trust_command_backends;
+      if (grant === true) {
+        return;
+      }
+      // Compare canonical paths: a symlinked checkout must still match its
+      // allowlisted canonical path and vice versa (Bugbot round 4).
+      const canonical = (p: string): string => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      };
+      if (Array.isArray(grant) && grant.some((p) => canonical(p) === canonical(repoRoot))) {
+        return;
+      }
+    }
+  } catch {
+    // Unreadable global config -> fall through to refusal.
+  }
+
+  throw new BlobsyError(
+    'This repository configures a command backend, which executes ' +
+      'repository-controlled commands. Refusing without an out-of-repo trust grant.',
+    'validation',
+    1,
+    [
+      `Trust this repo: add to ${globalPath}:  trust_command_backends: ["${repoRoot}"]`,
+      'Trust all repos: trust_command_backends: true',
+      'Or set BLOBSY_TRUST_COMMAND_BACKEND=1 in the environment (e.g. CI).',
+    ],
+  );
+}
+
 /** Create a Backend instance from resolved config. */
 export function createBackend(
   config: ResolvedBackendConfig,
@@ -117,6 +203,7 @@ export function createBackend(
       return new LocalBackend(remotePath);
     }
     case 'command': {
+      assertCommandBackendTrusted(repoRoot);
       return new CommandBackend({
         pushCommand: config.push_command,
         pullCommand: config.pull_command,
@@ -195,8 +282,7 @@ export async function pushFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
   const compressConfig = getCompressConfig(config);
 
   // Determine compression
@@ -228,8 +314,8 @@ export async function pushFile(
       uploadPath = tempCompressedPath;
     }
 
-    // Upload
-    await backend.push(uploadPath, remoteKey);
+    // Upload (repoPath threaded for {relative_path} templates — BE-06)
+    await backend.push(uploadPath, remoteKey, repoPath);
 
     return {
       path: repoPath,
@@ -268,15 +354,17 @@ export async function pullFile(
   config: BlobsyConfig,
   repoRoot: string,
 ): Promise<TransferResult> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
 
   if (!ref.remote_key) {
     return {
       path: normalizePath(toRepoRelative(localPath, repoRoot)),
       success: false,
       action: 'pull',
-      error: 'No remote_key in .bref. File has not been pushed.',
+      error:
+        'No remote_key in .bref — either the file was never pushed, or it was ' +
+        'pushed without committing the updated .bref afterwards (push records ' +
+        'remote_key in the .bref; that update must be committed and pushed too).',
     };
   }
 
@@ -290,7 +378,7 @@ export async function pullFile(
       const tmpDecompressed = `${localPath}.blobsy-pull-${tmpSuffix}`;
 
       try {
-        await backend.pull(ref.remote_key, tmpCompressed);
+        await backend.pull(ref.remote_key, tmpCompressed, undefined, repoPath);
         await decompressFile(tmpCompressed, tmpDecompressed, ref.compressed);
 
         // Verify hash of decompressed content
@@ -317,7 +405,7 @@ export async function pullFile(
       }
     } else {
       // Download directly with hash verification
-      await backend.pull(ref.remote_key, localPath, ref.hash);
+      await backend.pull(ref.remote_key, localPath, ref.hash, repoPath);
     }
 
     return {
@@ -341,15 +429,14 @@ export async function blobExists(
   remoteKey: string,
   config: BlobsyConfig,
   repoRoot: string,
+  relativePath?: string,
 ): Promise<boolean> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
-  return backend.exists(remoteKey);
+  const backend = getBackend(config, repoRoot);
+  return backend.exists(remoteKey, relativePath);
 }
 
 /** Run a health check on the configured backend. */
 export async function runHealthCheck(config: BlobsyConfig, repoRoot: string): Promise<void> {
-  const resolvedBackend = resolveBackend(config);
-  const backend = createBackend(resolvedBackend, repoRoot, config.sync?.tools);
+  const backend = getBackend(config, repoRoot);
   await backend.healthCheck();
 }
