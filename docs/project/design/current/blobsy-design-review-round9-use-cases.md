@@ -2,84 +2,147 @@
 
 **Status:** Active review — design decisions requested (see §11)
 
-**Date:** 2026-10-22
+**Date:** 2026-10-22. A v2 was issued the same day, revised after an independent
+red-team pass (Appendix B).
 
 **Reviewed revision:** `main` @ `04a3d1a` (PR #5 merge).
 No code has changed since PR #4 (2026-07-31); PR #5 was documentation only.
-Build passes; 24 test files / 327 tests pass; 71 golden tryscripts.
+The build passes; 24 test files / 327 tests pass; there are 71 golden tryscripts.
 
 **Scope:** A full senior-engineering review of blobsy against the owner’s restated
-problem framing — five pain points (PAIN-1..5) and five use cases (UC-1..5) — covering
-design coverage, the shipped implementation and its workflows, engineering complexity,
-and the competitive landscape as of October 2026. Rounds 7 and 8 reviewed alpha
-readiness and agent run-sync respectively; this round asks whether the *design* covers
-the use cases blobsy must serve, and what the smallest coherent design that covers them
-looks like.
+problem framing: five pain points (PAIN-1..5) and five use cases (UC-1..5). It covers:
 
-**Method.** The lead reviewer read all current design docs, rounds 7–8, the open beads,
-and the source; ran the CLI on scratch repos (a 1,000-file benchmark and targeted
-reproductions); and delegated in parallel:
+- design coverage;
+- the shipped implementation and its workflows;
+- engineering complexity;
+- merge workflows per use case, compared with the new competitor Gat;
+- the implementation language;
+- the competitive landscape as of October 2026.
 
-- Four deep design reviews (one per slice): engineering complexity; UC-1 + UC-4
-  (per-file mode and merges); UC-2 (collections); UC-3 + UC-5 (trees and immutable
-  assets). Each ran its own experiments against the built CLI. Their full reports are
-  kept alongside this document in [`round9-subreviews/`](round9-subreviews/) as
-  evidence; this document is the consolidated, normative-for-discussion version.
-- Six research refreshes, committed under `docs/project/research/current/`: tool
-  landscape, object-store capabilities, tree manifests and cache patterns, a
-  source-level review of the new competitor **Gat**, other new entrants (Epic Lore,
-  git-lfs-fuse, s3lfs, Oxen, Xet), and **Jujutsu (jj)** interop.
-  Third-party sources were cloned into the gitignored `attic/` for source review.
+Rounds 7 and 8 reviewed alpha readiness and agent run-sync.
+This round asks whether the *design* covers the use cases blobsy must serve, and what
+the smallest coherent design that covers them looks like.
 
-Evidence markers: **[V]** reproduced or verified against source/primary docs this round;
-**[S]** verified by a sub-review (see its report); **[I]** inference or design judgment.
+**Method.** The lead reviewer read all current design docs, rounds 7–8, the open beads
+and the source. The lead also ran the CLI on scratch repos: a 1,000-file benchmark plus
+targeted reproductions.
+In parallel, the work was delegated as follows:
+
+- **Five deep reviews**, each with its own experiments against the built CLI:
+  - engineering complexity;
+  - UC-1 + UC-4 (per-file mode and merges);
+  - UC-2 (collections);
+  - UC-3 + UC-5 (trees and immutable assets);
+  - TypeScript vs Rust.
+
+  The full reports are kept in [`round9-subreviews/`](round9-subreviews/) as evidence.
+  Where this document and a sub-review disagree, this document wins.
+
+- **Six research refreshes** in `docs/project/research/current/`:
+  - tool landscape;
+  - object-store capabilities;
+  - tree manifests and cache patterns;
+  - a source-level and empirical review of **Gat**;
+  - other new entrants (s3lfs, git-lfs-fuse, Xet, Oxen, Epic Lore);
+  - **Jujutsu (jj)** interop.
+
+  Third-party sources were cloned into the gitignored `attic/`.
+
+- **An independent red-team pass** over the draft: 34 findings, all addressed (Appendix
+  B).
+
+Evidence markers:
+
+- **[V]**: reproduced, or verified against source or primary docs, by the lead reviewer.
+- **[S]**: verified by a sub-review or research doc (cited).
+- **[I]**: inference or design judgment.
 
 * * *
 
+## The owner’s questions, answered
+
+| Question | Answer |
+| --- | --- |
+| Is the design right, and does it cover the use cases? | The per-file core is right for UC-1. UC-2, UC-3 and UC-5 are not covered, and the design’s founding principle (“one primitive … no manifests”) is what prevents covering them. UC-4 is claimed but unsafe in practice. (§1, §3, §5) |
+| Are UC-1, UC-2 and UC-3 separate flows? | Yes. UC-1 is a **pointer** per file. UC-2 is a committed **manifest** per collection. UC-3/UC-5 is an immutable **snapshot** reached by name, with nothing in git. §4.0 shows the three flows side by side. |
+| Is it too complex? | Yes, in the wrong places. Two early choices create most of the concepts a user must learn and all three data-safety bugs. Removing them deletes roughly a fifth of the source outright. Covering all use cases will add code overall, but with fewer concepts per use case than today. §10 gives the smallest cut of each phase. (§7) |
+| How do merges work, Gat vs blobsy, per use case? | §4.3. Both reach the same per-path merge rules. Gat’s conflict handling can silently drop the other side’s changes; blobsy should write conflict markers and add a validator. Per-file pointers merge correctly on any host, including GitHub and jj. |
+| TypeScript or Rust? | Stay TypeScript through Phase 3, with a measurable rule for when to switch. The slow startup comes from eager imports, not from Node. (§7.4) |
+
 ## Verdict
 
-**The per-file core is the right foundation, but the design covers only one of the five
-use cases well, the shipped code has three data-safety bugs in normal git workflows, and
-about half of the code is accidental complexity created by two early choices.
-A smaller core plus two additional reference containers covers all five use cases with
-less total complexity than blobsy has today.**
+**The per-file core is the right foundation.
+But the design covers only one of the five use cases well, the shipped code has three
+data-safety bugs in ordinary git workflows, and two early choices generate most of the
+accidental complexity.**
 
-1. **Coverage.** UC-1 (a few files via pointers) is covered and mostly well built.
-   UC-4 (merges) is *claimed* but is unsafe in practice (§3). UC-2 (collections) is
-   served only by expanding a directory into N pointers — workable to ~50 files per
-   directory, unreviewable past a few hundred (§5.3). UC-3 (huge trees, nothing in git)
-   and UC-5 (immutable named assets) are not covered; file mode cannot even restore a
-   build tree (symlinks skipped, executable bits lost) [S]. The design doc’s founding
-   principle — “one primitive … there is no second kind of thing … there are no
-   manifests” — is what prevents covering UC-2/3/5, and it should be reworded (§6).
-2. **Safety.** Three reproduced blockers in ordinary workflows: `sync` silently
-   overwrites a tracked-but-unpushed edit after `git stash` (data loss) [V]; the
-   pre-push hook uploads based on the working tree, not the commits being pushed, so
-   pushing another branch ships pointers without blobs [S]; a plain `git mv` + `mv` +
-   `git add -A` rename commits the large payload to git (PAIN-1 violated) [S]. Plus a
-   setup bug that commits the machine-local stat cache on `git add -A` [V].
-3. **Complexity.** Two early choices generate most of the accidental complexity: a
-   push-time **timestamped key template** (non-derivable keys → `remote_key` written
-   back after push → two commits per change, bead `blobsy-pqyt`, false dedup claims) and
-   a bidirectional **`sync` with a stat-cache merge base** (a 9-state decision table, a
-   583-line design doc, and the data-loss bug).
-   Fixing both shrinks the code *and* is the prerequisite that makes UC-2 cheap: with
-   derived keys, push/pull/status become one ~60-line loop over entries regardless of
-   whether they came from one pointer or one manifest (§7).
-4. **Competition.** A direct competitor, **Gat** (Sept 2026, Rust, Apache-2.0), ships a
-   committed repo-wide lock file, a per-path merge driver, hydration hooks and a local
-   content cache — i.e. a strong UC-1/UC-2/UC-4 story — at ~150k lines of Rust.
-   It has no UC-3/UC-5 story.
-   Blobsy should adopt the parts of Gat’s design that are simply correct
-   (content-derived keys, per-path manifest merging, hook-independent correctness) and
-   differentiate on per-collection manifests, browsable/pluggable storage, immutable
-   snapshots for trees and assets, and agent UX (§9).
+1. **Coverage.**
+   - UC-1 (a few files via pointers) is covered and mostly well built.
+   - UC-4 (merges) is *claimed* but unsafe in practice (§3).
+   - UC-2 (collections) is served only by expanding a directory into N pointers.
+     That works up to ~50 files per directory and is unreviewable past a few hundred
+     (§5.3).
+   - UC-3 (huge trees, nothing in git) and UC-5 (immutable named assets) are not
+     covered. File mode cannot even restore a build tree: symlinks are skipped and exec
+     bits are lost [S].
 
-**Recommended path:** fix the safety bugs now (Phase 0); then simplify the core
-(content-derived keys, drop the merge base, wire the hash cache, delete inert features,
-create-only writes, batched transfer) before adding any new mode (Phase 1); then add
-collection manifests (UC-2) and snapshots (UC-3/UC-5) on the shared core (Phases 2–3).
-Twelve owner decisions gate this (§11).
+2. **Safety.** Three blockers reproduce in ordinary workflows:
+   - `sync` silently overwrites a tracked-but-unpushed edit after `git stash`, losing
+     data [V].
+   - The pre-push hook uploads based on the working tree, not the commits being pushed
+     [S].
+   - A plain `git mv` + `mv` + `git add -A` rename commits the large payload to git [S].
+
+3. **Complexity.** Two early choices account for most of the shipped *concepts* and for
+   all three safety bugs:
+   - A push-time **timestamped key template.** Keys can’t be derived, so `remote_key` is
+     written back after push and every change takes two commits (bead `blobsy-pqyt`).
+   - A bidirectional **`sync` with a stat-cache merge base.** This produces a 9-state
+     decision table and the data-loss bug.
+
+   Removing both deletes roughly a fifth of the source outright.
+   The rest of the mode-specific code then collapses into one loop over entries, shared
+   by pointers and manifests (§7).
+
+4. **Competition.** **Gat** (Sept 2026, Rust) has a complete UC-1/UC-2/UC-4 story in
+   ~150k lines of Rust.
+   But its merge UX is unsafe at the edges, and it has no UC-3/UC-5 story.
+   Blobsy should adopt what Gat got right: content-derived keys, per-path manifest
+   merging and a local content cache.
+   It should differentiate on safety, immutable snapshots, any-storage backends and
+   agent UX (§9).
+
+**Recommended path:**
+
+- **Phase 0:** fix the safety bugs.
+- **Phase 1:** simplify the core before adding any new mode: content-derived keys, a
+  recoverability rule instead of the merge base, the hash cache wired in, the inert
+  features deleted, and create-only writes.
+- **Phases 2–3:** add collection manifests (UC-2) and snapshots (UC-3/UC-5) on the
+  shared core. Their order is itself a decision (D14).
+
+Fourteen owner decisions gate this (§11). Four of them (D1, D2, D3, D11) gate Phase 1;
+the rest can wait.
+
+### Glossary
+
+- **Entry**: one file’s identity, `path, kind, size, sha256`. Kind is `f` (file), `x`
+  (executable), `l:<target>` (symlink) or `d` (empty directory).
+- **Pointer (`.bref`)**: a committed file holding one entry, next to its payload.
+- **Manifest (`.brefs`)**: a committed file holding many entries for one collection
+  directory.
+- **Snapshot**: an immutable, named, packed tree (or single file) in the store, with a
+  store-side manifest.
+  Git holds nothing for it, or one pin pointer.
+- **Recoverability rule**: `pull` may overwrite a local file only if its bytes are known
+  to exist remotely or were synced on this machine (§5.2).
+- **Create-only write**: an upload that fails with HTTP 412 if the key already exists
+  (S3 `If-None-Match: *`, GCS `ifGenerationMatch=0`).
+- **`tree_id`**: sha256 over a tree’s sorted entry lines.
+- **Receipt**: a small file recording that a tree was published (`tree_id`, counts,
+  destination, time).
+- **Mirror**: round 8’s path-shaped copy of a run directory.
+- **X-n**: a cross-cutting requirement (§1.3).
 
 * * *
 
@@ -101,24 +164,24 @@ Twelve owner decisions gate this (§11).
 | --- | --- | --- | --- |
 | UC-1 | A few files stored externally, versioned via per-file references; PRs show the metadata. | One pointer per file. | Unchanged. |
 | UC-2 | A collection of hundreds–thousands of files managed as a unit; git holds one manifest, not a placeholder per file. | One manifest per collection, one line per file. | The manifest must be **mergeable** and **reviewable**: a static header, one sorted line per file, no aggregates (§5.3). |
-| UC-3 | A very large tree (node_modules, cargo `target/`) synced/cached externally with **no** manifest in git. | Nothing per tree (a config stanza at most). | Two different workloads hide here: **derived caches** (identity = input hash, racing writers, safe to lose, TTL) and **run/output archives** (round 8: path-browsable, single writer, never deleted). They need different primitives (§5.4). “Sync” of a derived tree is a trap; the operations are *publish* and *restore*. |
-| UC-4 | Standard git merge workflows for externalized files; merges happen in git on the metadata (UC-1, UC-2). | — | Merges must be correct **without the network** and **without blobsy-installed hooks or drivers** (web merges, jj, fresh clones); drivers and hooks may only *improve* the result (§4). |
-| UC-5 | Fixed assets with immutable names, separate from git workflows; likely the substrate for UC-3. | Nothing, or one pin line. | Confirmed: caches (UC-3) and assets (UC-5) are **one primitive** — an immutable, named snapshot — differing only in who picks the name (derived vs chosen) and how long it lives (TTL vs forever) [S]. |
+| UC-3 | A very large tree (node_modules, cargo `target/`) synced or cached externally with **no** manifest in git. | Nothing per tree (a config stanza at most). | Two different workloads hide here (§5.4). **Derived caches**: identity = input hash, racing writers, safe to lose, they expire. **Run archives** (round 8): path-browsable, single writer, never deleted. For derived trees the operations are *publish* and *restore*, not “sync”. |
+| UC-4 | Standard git merge workflows for externalized files; merges happen in git on the metadata (UC-1, UC-2). | — | Merges must be correct **without the network** and **without hooks or drivers that blobsy installs** (GitHub merges, jj, fresh clones). Drivers and hooks may only make the result *nicer* (§4). |
+| UC-5 | Fixed assets with immutable names, separate from git workflows; likely the substrate for UC-3. | Nothing, or one pin line. | Confirmed: caches (UC-3) and assets (UC-5) are **one primitive**, an immutable named snapshot. They differ only in who picks the name (derived vs chosen) and how long it lives (expiring vs forever) [S]. |
 
 ### 1.3 Use cases and requirements the framing was missing
 
 | ID | Addition | Why it matters |
 | --- | --- | --- |
-| UC-6 | **Run/output archives** (round 8): process output trees mirrored to path-shaped prefixes, with receipts; append-mostly, single writer, never deleted remotely. | Real, grounded demand (the trading repo). Distinct from UC-3 caches on every axis that matters (identity, concurrency, lifecycle). |
-| UC-7 | **Adoption and history import**: convert existing large files *in git history* (and LFS pointers) to blobsy references. | PAIN-3/PAIN-4 are only solved going forward today. An LFS pointer is already `sha256` + size, so `import-lfs` is nearly free once keys are content-derived [S]. |
-| X-1 | **Hook-independent correctness.** | Hooks don’t run on GitHub merges, in jj, or in clones that never ran `setup`. |
+| UC-6 | **Run/output archives** (round 8): process output trees mirrored to path-shaped prefixes, with receipts; append-mostly, single writer, never deleted remotely. | Real, grounded demand (the trading repo). But that repo already has a working tool, and it asked first only for the receipt schema. See D8. |
+| UC-7 | **Adoption and history import**: convert existing large files *in git history*, and LFS pointers, to blobsy references. | PAIN-3/PAIN-4 are only solved going forward today. An LFS pointer is already `sha256` + size, so `import-lfs` is nearly free once keys are content-derived [S]. |
+| X-1 | **Hook-independent correctness.** | Hooks don’t run on GitHub merges, in jj, with `--no-verify`, or in clones that never ran `setup`. |
 | X-2 | **Partial working sets** (pull by path/glob). | Collections and assets are often larger than any one user needs. |
-| X-3 | **Local content cache** shared across worktrees/clones. | Today every worktree re-downloads; Gat, LFS and DVC all have one. |
-| X-4 | **Batched transfer**; no per-file process spawn. | Today one *synchronous* process per file — the documented 8-way parallelism is impossible by construction [S]. |
+| X-3 | **Local content cache** shared across worktrees/clones. | Today every worktree re-downloads; Gat, LFS and DVC all have a cache. |
+| X-4 | **Batched transfer and batched existence checks.** | Transfers are sequential by construction: a `for … await` loop, and the CLI backends spawn one synchronous process per file [S]. The documented 8-way parallelism cannot happen. Existence checks have the same problem at 10k entries. |
 | X-5 | **Fidelity** for trees: symlinks, exec bits, empty dirs. | Required for UC-3/UC-5; absent today [S]. |
-| X-6 | **Server-enforced immutability** (create-only writes). | Now broadly supported (S3 `If-None-Match: *`, GCS `ifGenerationMatch=0`, Azure, R2) [S]. |
-| X-7 | **Write segregation for shared caches.** | First-writer-wins caches are poisonable (CVE-2025-36852, “CREEP”) [S]. |
-| X-8 | **Retention / GC** that is explicit, dry-run first, reachability- or lifecycle-based. | PAIN-3’s other half: deleting blobs safely. |
+| X-6 | **Server-enforced immutability** (create-only writes). | Now broadly supported: S3, GCS, Azure, R2. Not supported by rclone’s GCS/Azure backends, B2, or command backends [S]. |
+| X-7 | **Write segregation for shared caches.** | Caches where the first writer wins can be poisoned (CVE-2025-36852, “CREEP”). The mitigation is credentials, not checksums (§5.6) [S]. |
+| X-8 | **Retention / GC** that is explicit, dry-run first, and based on reachability or lifecycle rules. | The other half of PAIN-3: deleting blobs safely. |
 
 * * *
 
@@ -126,191 +189,323 @@ Twelve owner decisions gate this (§11).
 
 ### 2.1 What works
 
-- The `.bref` pointer (YAML: `format`, `hash`, `size`, `remote_key`, compression
-  fields), adjacent to a gitignored payload; git versions and merges the pointer.
-- Hash-verified atomic pulls (temp + verify + rename); push refuses stale hashes
-  (DS-03); pull refuses to clobber local edits (DS-02); remote keys never overwritten.
-- Five backends (built-in S3 SDK, aws-cli, rclone for GCS/Azure, local, command) with a
-  trust gate for repo-supplied command backends, a threat model, and path containment.
-- Non-interactive CLI with `--json` everywhere; agent skill installed by `setup`.
-- Golden-test infrastructure that is unusually good for a project this size.
-- Round 7’s blockers were fixed (stat cache now read as merge base, pull refusal, push
-  sanity check, hook failure propagation, `rm --remote --force`, local-backend
-  containment).
+- **The pointer.** The `.bref` pointer (YAML: `format`, `hash`, `size`, `remote_key`,
+  compression fields) sits next to a gitignored payload; git versions and merges the
+  pointer.
+- **Safe transfers.** Pulls are hash-verified and atomic: temp file, verify, rename.
+  Push refuses stale hashes (DS-03). Pull refuses to clobber local edits (DS-02). Remote
+  keys are never overwritten.
+- **Five backends**: built-in S3 SDK, aws-cli, rclone (GCS/Azure), local, and command.
+  Command backends supplied by the repo require explicit trust.
+  There is a threat model, and path containment is enforced.
+- **Agent-friendly CLI.** It is non-interactive, with `--json` everywhere, and `setup`
+  installs an agent skill.
+- **Golden tests.** The golden-test infrastructure is unusually good for a project this
+  size.
+- **Round 7 blockers fixed.**
+  - The stat cache is now read as a merge base.
+  - Pull refuses to overwrite local edits.
+  - Push has a sanity check.
+  - Hook failures propagate.
+  - `rm --remote --force` exists.
+  - The local backend checks containment.
 
 ### 2.2 Measured behavior at collection scale [V]
 
-1,000 files × 210 KB, 10 directories, local backend:
+Setup: 1,000 files × 210 KB of random data in 10 directories, local backend, default
+config. The commands were `blobsy track data/coll`, then `push` and `sync`; the exact
+steps are in Appendix A.
 
 | Operation | Result |
 | --- | --- |
-| `track data/coll` | 16.0 s; 1,000 `.bref` + 10 `.gitignore` files (1,020 lines); commit touches 1,010 files |
-| `status` | 3.6 s (re-hashes every file every run) |
-| `push` | 23.3 s to *local disk* |
+| `track data/coll` | 16.0 s; produced 1,000 `.bref` + 10 `.gitignore` files (1,020 lines); the commit touches 1,010 files |
+| `status` | 3.6 s (re-hashes every file on every run) |
+| `push` | 23.3 s, to *local disk* |
 | no-op `sync` | 8.7 s (hashes every file) |
-| Remote layout | 1,000 distinct top-level prefixes (one per file) |
-| Compression | random `.bin` stored zstd-compressed although larger (210,012 > 210,000 bytes) |
+| Remote layout | 1,000 distinct top-level prefixes, one per file |
+| Compression | Random `.bin` files are stored zstd-compressed even though compression makes them larger (210,012 > 210,000 bytes) |
 
-At 5,000 × 4 KB files [S]: `add` 61 s, no-op `sync` 43 s, and adding 50 files to a
-5,000-file directory costs 7.3 s (the whole `.gitignore` block is rewritten per file).
-Git itself is untroubled at these sizes; the costs are blobsy’s per-file overhead and
-the human-facing PR surface.
+At 5,000 × 4 KB files [S, UC-2 sub-review]:
+
+- `add` took 61 s.
+- A no-op `sync` took 43 s.
+- Adding 50 files to a 5,000-file directory cost 7.3 s, because the whole `.gitignore`
+  block is rewritten for each file.
+
+Git itself is untroubled at these sizes.
+The costs come from blobsy’s per-file overhead and from what humans see in PRs.
 
 ### 2.3 Design doc vs implementation drift [V/S]
 
-- Three of seven documented state symbols (◐ ◑ ⊗) are never emitted; `status` never
-  consults HEAD, so the “three orthogonal states” model is unimplemented.
-- The stat cache is written in 9 places and read on one line (the sync merge base); its
-  documented performance role (`getCachedHash`) has zero callers.
-- The five-level config hierarchy is inert: all 13 `resolveConfig` call sites pass the
-  repo root (bead `blobsy-4vpk`).
-- `.blobsy/` is “committed to git” per the design doc, but `doctor` errors unless it is
-  gitignored; `setup` does neither, so `git add -A` commits the stat cache.
-  The trash directory is therefore machine-local and never read.
-- README: “identical files are never uploaded twice” — false under the default template
-  (same bytes pushed twice → two objects; same bytes at two paths → two objects) [V].
-- Bead `blobsy-aad8` points at a spec file that does not exist.
+- **State symbols.** Three of the seven documented state symbols (◐ ◑ ⊗) are never
+  emitted. `status` never consults HEAD, so the “three orthogonal states” model is not
+  implemented.
+- **Stat cache.** It is written at 12 call sites (every mutating command plus the
+  pre-push hook) but read on one line: the sync merge base.
+  Its documented performance role (`getCachedHash`) has zero callers.
+- **Config hierarchy.** The five-level hierarchy is inert: all 13 `resolveConfig` call
+  sites pass the repo root (bead `blobsy-4vpk`).
+- **`.blobsy/` directory.** The design doc says `.blobsy/` is “committed to git”, but
+  `doctor` errors unless it is gitignored, and `setup` does neither.
+  So `git add -A` commits the stat cache, and the trash directory is machine-local and
+  never read.
+- **README dedup claim.** “Identical files are never uploaded twice” is false under the
+  default template. The same bytes pushed twice produce two objects, and the same bytes
+  at two paths also produce two objects [V].
+- **Dangling spec reference.** Bead `blobsy-aad8` points at a spec file that does not
+  exist.
 
 * * *
 
 ## 3. Blocker and high-severity findings
 
-All reproduced against `04a3d1a` with the built CLI and a `local:` backend.
+All of these were reproduced against `04a3d1a` with the built CLI and a `local:`
+backend. The table summarizes them; the blockers get details below it.
 
-| ID | Severity | Finding | Reproduction | Root cause |
+| ID | Severity | Finding | Evidence | Root cause |
 | --- | --- | --- | --- | --- |
-| B-1 | **Blocker — data loss** | `sync` overwrites a tracked-but-unpushed edit with the old blob. | `edit f; blobsy track f; git stash; blobsy sync` → file reverted to v1; v2 bytes exist nowhere; `git stash pop` restores a pointer to bytes that are gone [V]. Same via `git checkout -- f.bref`, and after an uncommitted push [S]. | `track` writes the stat-cache “merge base” before anything is committed or pushed; the three-way table then reads “ref moved back, local unchanged → pull”. |
-| B-2 | **Blocker** | Pre-push hook uploads from the working tree, ignoring the refs being pushed. | Commit on `feature`, `git checkout main`, `git push origin feature` → 0 blobs uploaded; a clone of `feature` cannot pull [S]. | Hook ignores the `<local ref> <sha> <remote ref> <sha>` lines git passes on stdin. |
-| B-3 | **Blocker — PAIN-1** | A natural rename commits the payload to git. | `git mv a.bref b.bref; mv a b; git add -A` → 250 KB payload committed [S]. | Gitignore entries are load-bearing; no pre-commit large-file guard. |
-| H-1 | High | `setup` doesn’t gitignore `.blobsy/`; `git add -A` commits one stat-cache JSON per tracked file. | 1,000 cache files committed in the benchmark [V]. | Setup gap; design-doc contradiction. |
-| H-2 | High | Two-phase `remote_key` (bead `pqyt`): two commits per change; dirty pointer blocks `git checkout`; rebases conflict twice; teammates can’t pull between the commits. | [S] | Push-time, non-derivable keys. |
-| H-3 | High | After any git operation that changes a pointer (teammate update, revert, cherry-pick, the design doc’s own conflict recipe), `pull` refuses with exit 2 and recommends `--force`; `status` shows a teammate’s change as `~ modified`. | [S] | Overwrite decision based on a merge base instead of on known-synced content. |
-| H-4 | High | Two developers adding *different* new files to the same directory conflict in the generated `.gitignore` block. | [S] | Sorted per-file ignore lines land in the same gap. |
-| H-5 | High | Dedup and determinism claims are false under the default template. | [V] | Timestamped keys. |
-| H-6 | High | Per-file `.gitignore` lines make `git status` superlinear in the number of tracked files per directory: 20k entries 0.82 s vs 0.009 s for one wildcard [V]; 50k entries 10.9 s [S]; s3lfs reports 70 s at 100k. Every git command pays this, not just blobsy. | [V] | One ignore line per tracked file. |
-| H-7 | High | Under jj (and any tool that pushes with `--no-verify`), hooks never fire: `.bref` files reached the remote with no blobs; jj also auto-snapshots payloads under 1 MiB that were seen before `blobsy add`, and its conflict style can un-ignore payloads in the managed `.gitignore` block. | [S] (jj 0.46, colocated repo) | Correctness depends on hooks and on load-bearing ignore lines. |
-| M-1 | Medium | Compression kept when larger; no keep-if-smaller rule. | [V] | — |
-| M-2 | Medium | Exec bit lost on pull; symlinks skipped (verbose-only message); `dist/`, `build/`, `node_modules/` ignored by bare name at any depth. | [S] | No mode in `.bref`; walker rules. |
-| M-3 | Medium | `check-unpushed` reports “all pushed” when a blob was deleted (checks key presence only). | [S] | Pushed-bit stored in the pointer. |
-| M-4 | Medium | `doctor`’s stale-cache scan is dead code (reads the top level of a sharded dir). | [S] | — |
-| L-1 | Low | `setup` rejects `local:../repo-remote` when the repo is `../repo` (string-prefix containment check, `backend-url.ts:176`). | [V] | Missing path-separator check. |
+| B-1 | **Blocker — data loss** | `sync` overwrites a tracked-but-unpushed edit with the old blob. | [V]; variants [S] | `track` writes the stat-cache “merge base” before anything is committed or pushed. The three-way table then reads “ref moved back, local unchanged → pull”. |
+| B-2 | **Blocker** | The pre-push hook uploads from the working tree, ignoring the refs being pushed. | [S] | The hook ignores the `<local ref> <sha> <remote ref> <sha>` lines git passes on stdin. |
+| B-3 | **Blocker — PAIN-1** | A natural rename commits the payload to git. | [S] | Gitignore entries are the only protection; there is no large-file guard. |
+| H-1 | High | `setup` doesn’t gitignore `.blobsy/`, so `git add -A` commits one stat-cache JSON per tracked file (1,000 cache files committed in the benchmark). | [V] | A setup gap, plus a design-doc contradiction. |
+| H-2 | High | Two-phase `remote_key` (bead `pqyt`): two commits per change; the dirty pointer blocks `git checkout`; rebases conflict twice; teammates can’t pull between the two commits. | [S] | Keys assigned at push time cannot be derived. |
+| H-3 | High | After any git operation that changes a pointer, `pull` refuses with exit 2 and recommends `--force`. Triggers include a teammate’s update, a revert, a cherry-pick, and the design doc’s own conflict recipe. `status` shows a teammate’s change as `~ modified`. | [S] | The overwrite decision is based on a merge base instead of on recoverability. |
+| H-4 | High | Two developers adding *different* new files to the same directory get a conflict in the generated `.gitignore` block. | [S] | Sorted per-file ignore lines land in the same gap. |
+| H-5 | High | The dedup and determinism claims are false under the default template. | [V] | Timestamped keys. |
+| H-6 | High | Per-file `.gitignore` lines make `git status` slow down superlinearly as the number of tracked files in a directory grows. Every git command pays this, not just blobsy. | [V] | One ignore line per tracked file. |
+| H-7 | High | Under jj, and under any push with `--no-verify`, hooks never fire, so `.bref` files reached the remote with no blobs. jj also mishandles payloads and ignore blocks. | [S] | Correctness depends on hooks and on load-bearing ignore lines. |
+| M-1 | Medium | Compressed output is kept even when it is larger; there is no keep-if-smaller rule. | [V] | — |
+| M-2 | Medium | The exec bit is lost on pull, and symlinks are skipped with only a verbose-mode message. `dist/`, `build/` and `node_modules/` are ignored by bare name at any depth. | [S] | No mode in `.bref`; walker rules. |
+| M-3 | Medium | `check-unpushed` reports “all pushed” when a blob was deleted, because it checks only key presence. | [S] | The pushed state is stored in the pointer. |
+| M-4 | Medium | `doctor`’s stale-cache scan is dead code: it reads only the top level of a sharded directory. | [S] | — |
+| L-1 | Low | `setup` rejects `local:../repo-remote` when the repo is `../repo`, because the containment check compares string prefixes (`backend-url.ts:176`). | [V] | Missing path-separator check. |
 
-B-1 needs only a one-line policy change to stop the bleeding (write the cache only after
-a successful push or pull), independent of every design decision below.
+**B-1 reproduction.** `edit f; blobsy track f; git stash; blobsy sync` reverts the file
+to v1, and the v2 bytes exist nowhere.
+`git stash pop` then restores a pointer to bytes that are gone [V]. The same happens via
+`git checkout -- f.bref` [S]. Variant C: after an *uncommitted push*, the same revert
+happens, and v2 survives only at a timestamped key that nothing records [S]. To
+reproduce, gitignore `.blobsy/` first.
+If `.blobsy/` was committed (H-1), `git stash` also restores the stat cache and the bug
+hides.
+
+**B-2 reproduction.** Commit on `feature`, then `git checkout main`, then
+`git push origin feature`. Zero blobs are uploaded, and a clone of `feature` cannot pull
+[S].
+
+**B-3 reproduction.** `git mv a.bref b.bref; mv a b; git add -A` commits the 250 KB
+payload [S].
+
+**H-6 numbers.**
+
+- At 20k entries, `git status` takes 0.82 s with per-file lines vs 0.009 s with one
+  wildcard [V].
+- The red team measured 1.3–1.6 s vs 0.013 s on another machine.
+  The claim is the ~100× ratio, not the absolute times.
+- 10.9 s at 50k entries [S, competitors-other §3].
+- s3lfs reports 70 s at 100k.
+
+**H-7 details** [S, jj research, jj 0.46 colocated repo]:
+
+- jj auto-snapshots payloads under 1 MiB that it saw before `blobsy add`.
+- jj’s conflict style can un-ignore payloads in the managed `.gitignore` block.
 
 * * *
 
-## 4. Merge workflows (UC-4) across all use cases
+## 4. Workflows and merges across the use cases
 
-Merging is where the use cases diverge most, so it gets its own section.
-The governing requirements: **(X-1)** a merge must be *correct* with plain git (no
-driver, no hooks, no network) — GitHub’s merge button, merge queues, jj, and fresh
-clones run nothing of ours; blobsy-installed drivers and hooks may only make it *nicer*.
-**(No network in git operations.)** Payload hydration after a merge is a separate,
-explicit (or opt-in hook) step.
+### 4.0 The flows side by side (proposed design)
+
+| Step | UC-1 pointer | UC-2 collection | UC-3 cache snapshot | UC-5 asset snapshot |
+| --- | --- | --- | --- | --- |
+| Declare | `blobsy add data/model.bin` | `blobsy add --collection data/images` | `snapshots:` stanza in `.blobsy.yml` (path + key recipe, e.g. `{hash:Cargo.lock}`) | `snapshots:` stanza with a chosen name pattern |
+| Git holds | `data/model.bin.bref` (3 fields) | `data/images.brefs` (one line per file) + one ignore line | the stanza only | the stanza + optional pin `models/llama.bref` (`kind: tree`) |
+| Commit | `git commit` | `git commit` | nothing per build | `git commit` the pin |
+| Publish | `blobsy push` (or the pre-push hook) | `blobsy push data/images` | `blobsy snap publish target` (CI, write credentials) | `blobsy snap publish llama --version v2` |
+| Clone / CI | `blobsy pull` | `blobsy pull data/images [--include 'cats/**']` | `blobsy snap restore target [--fallback]` | `blobsy snap restore llama` (verifies the pin’s `tree_id`) |
+| Change | edit, `blobsy add`, commit, push | edit/add files, `blobsy add data/images`, commit, push | lockfile changes → new key → build → publish | publish `--version v3`, update the pin |
+| Merge | one pointer per file (§4.2) | per-line manifest merge (§4.2) | none: the lockfile merge decides the key | one pin line |
+| Delete / GC | reachability GC (§5.5) | reachability GC | bucket lifecycle rule (expires) | never |
+
+Run archives (UC-6) are left out of this table pending D8.
 
 ### 4.1 What git does to the reference files
 
+Two requirements govern merges:
+
+- **Plain git must be enough for correctness** (X-1): no driver, no hooks, no network.
+  GitHub’s merge button, merge queues, jj and fresh clones run nothing of ours.
+- **Hydration is a separate step.** Fetching payloads after a merge is explicit, or an
+  opt-in hook.
+
 | Reference | Git-level merge behavior | Verdict |
 | --- | --- | --- |
-| `.bref` (UC-1) | A 3–4 line text file per data file. One side changed → clean. Both changed the same file → a real conflict on that pointer. Different files → different pointers → always clean. | Correct with plain git. **No merge driver needed** [S]. |
-| Per-directory `.gitignore` block (UC-1 today) | Sorted per-file lines; two branches adding different files to one directory insert into the same gap → **false conflict** [S]. | Fix by making ignore entries non-load-bearing (pre-commit guard) and `doctor --fix` regeneration; collections use one directory line instead. |
-| Collection manifest (UC-2) | Sorted one-line-per-file TSV. Git conflicts iff two hunks have no unchanged line between them: same-gap inserts, adjacent edits/deletes, both-append-at-EOF → **false conflicts**, even for distinct paths. Batch additions with date/run-prefixed names into one subdirectory conflict with P≈1 regardless of size [S, Monte-Carlo]. `merge=union` silently corrupts (duplicate paths; delete-vs-modify lost) [S]. | Safe but conservative with plain git. A **per-path three-way merge driver** removes all false conflicts (45-line prototype, 0.13 s on 20k lines) [S]. |
-| Snapshot pin `.bref kind: tree` (UC-5) | One line changes per upgrade. Two branches upgrading to different versions conflict on that line — correct and trivial. | Plain git suffices. |
-| Cache stanza (UC-3) | Git never sees the tree. The cache key is a function of committed inputs (lockfile); the package manager’s lockfile merge *is* the merge. | Nothing to merge [S]. |
+| `.bref` (UC-1) | A 6-field YAML file today; 3 fields after §5.1. One side changed → clean. Both changed the same file → a real conflict on that pointer. Different files → always clean. | Correct with plain git. **No merge driver needed** [S]. |
+| Per-directory `.gitignore` block (UC-1 today) | Sorted per-file lines. Two branches adding different files to one directory insert into the same gap, causing a **false conflict** [S]. | Regenerate the block from pointers instead of merging it (§5.1). Collections use one directory line. |
+| Collection manifest (UC-2) | Sorted TSV, one line per file. See the note below the table. | Safe but conservative with plain git. A **per-path three-way merge driver** removes all the false conflicts [S]. |
+| Snapshot pin (UC-5) | One line changes per upgrade. Two branches upgrading to different versions conflict on that line, which is correct and trivial to resolve. | Plain git is enough. |
+| Cache stanza (UC-3) | Git never sees the tree. The cache key is a function of committed inputs (the lockfile), so the package manager’s lockfile merge *is* the merge. | Nothing to merge [S]. |
 | Run receipts (UC-6) | Single writer per run; never merged. | Nothing to merge. |
+
+**Collection manifests under plain git.** Git conflicts whenever two hunks have no
+unchanged line between them.
+So these are all **false conflicts**, even when the paths are distinct:
+
+- inserts into the same gap;
+- edits or deletes of adjacent lines;
+- both sides appending at the end of the file.
+
+Batch additions with date- or run-prefixed names into one subdirectory conflict with
+probability ≈1, whatever the manifest size [S, Monte-Carlo]. `merge=union` silently
+corrupts the file: it produces duplicate paths and loses delete-vs-modify [S]. The
+per-path driver prototype is 45 lines and runs in 0.13 s on 20k lines [S].
 
 ### 4.2 Ideal blobsy merge workflow per use case
 
-**UC-1 (pointers).** `git merge` → clean or a per-pointer conflict → resolve with
-`git checkout --ours|--theirs x.bref` (or `blobsy resolve x --tool <cmd>` for
-content-level merges of text-like data, explicit and after the fact) → `git add` →
-`blobsy pull`. With content-derived keys the merged pointer is complete (no `remote_key`
-write-back), and the pull overwrite rule is “overwrite iff the local hash is one this
-path has had in git history or was last synced here” — so a teammate’s update, a revert,
-or a resolved conflict pulls cleanly, while unpushed local edits are refused (fixes B-1
-and H-3) [S]. Optional hydration hooks (`post-checkout`/`post-merge`/`post-rewrite` →
-`blobsy pull --quiet`, never failing the git operation) make this automatic for users
-who opt in.
+**UC-1 (pointers).**
 
-**UC-2 (collections).** `git merge` → the per-path driver merges the manifest by path:
-changed on one side wins; identical changes merge; differing changes to the same path
-and delete-vs-modify conflict **with markers scoped to that one line**. Without the
-driver (web merge, fresh clone, jj), git’s text merge is safe-but-conservative and
-`blobsy merge-manifest --resolve <file>` re-runs the same algorithm from the three index
-stages git leaves behind (`:1:`/`:2:`/`:3:`), so no marker parsing is needed [S]. A
-validator (sorted, unique, no markers) in pre-commit, `doctor`, and CI is the backstop
-for hand-resolved or web-merged manifests.
-Then `blobsy pull <collection>` hydrates; the same overwrite rule applies per entry.
+1. `git merge` is clean, or conflicts on one pointer.
+2. Resolve with `git checkout --ours|--theirs x.bref`. For a content-level merge of
+   text-like data, use `blobsy resolve x --tool <cmd>`, which is explicit and runs after
+   the fact.
+3. `git add`, then `blobsy pull`.
 
-**UC-3 (caches).** No merge exists: after `git merge`, the merged lockfile yields a new
-key; `blobsy snap restore` hits or misses (with optional prefix fallback); a miss means
-“build, then publish”.
-Branches never need cache scoping because keys are pure functions of committed inputs.
+With content-derived keys the merged pointer is already complete: there is no
+`remote_key` to write back.
+`pull` applies the **recoverability rule** (§5.2):
 
-**UC-5 (pinned assets).** A one-line pointer conflict when both branches upgrade
-differently; pick one; `blobsy snap restore` verifies the tree id against the pin.
+- A teammate’s update, a revert, or a resolved conflict pulls cleanly, because the old
+  bytes were synced here or exist remotely.
+- An unpushed local edit is refused, and blobsy prints the two explicit choices.
 
-**UC-6 (runs).** Not merged; single writer per run prefix; receipts are append-only.
+Optional hydration hooks make this automatic for users who opt in: `post-checkout`,
+`post-merge` and `post-rewrite` run `blobsy pull --quiet`, and never fail the git
+operation.
+
+**UC-2 (collections).** `git merge` runs the per-path driver:
+
+- A path changed on one side takes that side.
+- Identical changes merge.
+- Differing changes to the same path, and delete-vs-modify, conflict **with markers
+  scoped to that one line**, inside an otherwise fully merged file.
+
+Without the driver, there are three cases:
+
+- **A local driverless merge (fresh clone).** It is repaired by
+  `blobsy merge-manifest --resolve <file>`. That command re-runs the same algorithm on
+  the three index stages git leaves behind (`:1:`/`:2:`/`:3:`) [S].
+- **A GitHub web-UI merge.** This leaves no index stages locally, so the **validator**
+  catches a bad result.
+  It checks for sorted lines, no duplicates, no conflict markers and no file/directory
+  prefix collisions, and it runs in CI and pre-commit.
+  The user re-runs the merge locally if it fails.
+- **jj.** jj calls the same algorithm as a four-argument merge tool
+  (`$base $left $right $output`), because jj ignores `.gitattributes` drivers.
+
+Then `blobsy pull <collection>` hydrates, applying the recoverability rule per entry.
+
+**UC-3 (caches).** No merge exists.
+
+- After `git merge`, the merged lockfile yields a new key.
+- `blobsy snap restore` hits, or misses and can fall back by prefix.
+- A miss means: build, then publish.
+
+Branches never need cache scoping, because keys are pure functions of committed inputs.
+
+**UC-5 (pinned assets).** When both branches upgrade differently, the one-line pin
+conflicts and you pick one.
+`blobsy snap restore` verifies the tree id against the pin.
+
+**UC-6 (runs).** Not merged.
+Each run prefix has a single writer, and receipts are append-only.
 
 ### 4.3 Gat vs blobsy on merging
 
-Gat 0.0.15 was built from source and every scenario below was run with the real binary
-against a `file://` remote (git 2.43) [S, `research-2026-10-22-competitor-gat.md` §7].
-The blobsy columns are blobsy *today* (per-file pointers, measured) and the *proposed*
-design (§5.1–§5.3; the UC-2 driver was prototyped and tested [S]).
+Gat 0.0.15 was built from source and tested against a `file://` remote with git 2.43
+[S, `research-2026-10-22-competitor-gat.md` §7].
 
-**How Gat merges.** Gat keeps every tracked file in one repo-wide `gat.lock`
-(`<blake3>⇥<path>` rows, sorted; optionally sharded by path hash).
-A per-path merge driver (`gat merge-driver %O %A %B`) is registered **per clone** in
-`.git/config` and `.git/info/attributes` by `gat init`; nothing is committed.
-Per path: identical on both sides → keep; changed on one side → take it; changed
-differently → conflict.
-After a clean merge, a `post-merge` hook hydrates payloads from the local cache (no
-network unless `sync.auto_fetch`).
+- **Gat, driver installed:** every scenario was run with the real binary.
+- **Gat, no driver:** only the same-directory/adjacent, fresh-clone and prefix-collision
+  rows were run. The other cells are standard git text-merge behavior [I].
+- **Blobsy columns:** blobsy *today* (per-file pointers, measured) and the *proposed*
+  design (§5.1–§5.3). The UC-2 driver was prototyped and tested [S].
 
-| Scenario | Gat (driver installed) | Gat (no driver: fresh clone, web merge, jj) | Blobsy today | Blobsy proposed |
+**How Gat merges.**
+
+- **One repo-wide lock.** Gat keeps every tracked file in a single `gat.lock`: sorted
+  `<blake3>⇥<path>` rows, optionally sharded by path hash.
+- **A per-path merge driver, installed per clone.** `gat init` registers
+  `gat merge-driver %O %A %B` in `.git/config` and `.git/info/attributes`. Nothing is
+  committed.
+- **The per-path rule:** identical on both sides → keep; changed on one side → take it;
+  changed differently → conflict.
+- **Hydration after the merge.** After a clean merge, a `post-merge` hook hydrates
+  payloads from the local cache.
+  There is no network access unless `sync.auto_fetch` is set.
+
+The table rows are named in the list below it.
+
+| # | Gat (driver installed) | Gat (no driver: fresh clone, web merge, jj) | Blobsy today | Blobsy proposed |
 | --- | --- | --- | --- | --- |
-| Two branches add different files to the same directory (adjacent names) | Clean; hook hydrates | **False conflict** in `gat.lock` | Pointers: clean. **`.gitignore` block: false conflict** (H-4) | UC-1: clean (ignore block regenerated, not merged). UC-2: clean with driver; false conflict without, repaired by `merge-manifest --resolve` |
-| Edits to two different (adjacent) files | Clean | False conflict | Clean | Clean (UC-1); clean with driver (UC-2) |
-| Both edit the same file differently | Conflict, but the lock is left as *ours*: no markers, **the other side’s clean changes are omitted**; a naive `git add` silently dropped an independent addition [S, tested] | Conflict with markers | Conflict on one small pointer, with markers | Conflict on one pointer (UC-1) or **one marked line in the full merged manifest** (UC-2); validator blocks committing markers |
-| Delete vs modify | Conflict (same data-loss hazard on naive resolve) | Conflict | Conflict on the pointer | Same as above |
-| Rename on one side, edit on the other | Conflict (rename seen as delete + add) | Conflict | Conflict | Same; `blobsy resolve` helps pick |
-| Identical change on both sides | Clean | Clean | Clean | Clean |
-| File added at `p` on one side, `p/x` on the other | Refused (driver) — but **sharded locks merge cleanly into an invalid lock** that blocks every Gat command | **Clean text merge → invalid lock**; “Could not read gat.lock” | Clean (independent pointers; on-disk clash surfaces at pull) | Validator (pre-commit, doctor, CI) flags the prefix collision; resolved per path |
-| Rebase / cherry-pick | Clean; rebase hydrates (`post-rewrite`); cherry-pick does **not** hydrate | Likely conflicts | Clean pointers, but two-commit flow doubles conflicts (H-2) | Clean; one commit per change |
-| After merge: payload hydration | Hook, cache-only; `gat pull` if objects missing | Manual `gat sync`/`pull` | Manual; `pull` falsely refuses after a teammate change (H-3); `sync` works | `blobsy pull` with the known-synced rule; opt-in hydration hooks |
-| Resolve tooling | None; hand-edit hex rows from `:1:/:2:/:3:` | Same | `git checkout --ours/--theirs x.bref` | Same for UC-1; `blobsy merge-manifest --resolve [--ours/--theirs PATH]` for UC-2 |
-| Network inside the merge | Never | Never | Never | Never |
-| Under jj | No driver, no hooks | — | No hooks (H-7) | Driver also usable as a jj merge tool; correctness doesn’t depend on hooks |
+| **A** | Clean; hook hydrates | **False conflict** in `gat.lock` | Pointers clean, but a **false conflict in the `.gitignore` block** (H-4) | UC-1: clean (ignore block regenerated, not merged). UC-2: clean with the driver. Without it, a false conflict, repaired by `--resolve` (local) or a local re-merge (web) |
+| B | Clean | False conflict [I] | Clean | Clean (UC-1); clean with the driver (UC-2) |
+| **C** | Conflict, but the lock is left as *ours*, with no markers and **the other side’s clean changes omitted**. A naive `git add` silently dropped an independent addition [S, tested] | Conflict with markers [I] | Conflict on one small pointer, with markers | UC-1: conflict on one pointer. UC-2: **one marked line in the fully merged manifest**; the validator blocks committing markers |
+| D | Conflict (same data-loss hazard on a naive resolve) | Conflict [I] | Conflict on the pointer | As above |
+| E | Conflict (a rename is seen as delete + add) | Conflict [I] | Conflict | Same; `blobsy resolve` helps pick |
+| F | Clean | Clean [I] | Clean | Clean |
+| **G** | Refused by the driver. But **sharded locks merge cleanly into an invalid lock** that blocks every Gat command | **Clean text merge into an invalid lock**: “Could not read gat.lock” | Clean (independent pointers; the on-disk clash surfaces at pull) | The validator (pre-commit, `doctor`, CI) flags the prefix collision; resolved per path |
+| H | Clean. Rebase hydrates (`post-rewrite`); cherry-pick does **not** hydrate | Likely conflicts [I] | Pointers clean, but the two-commit flow doubles conflicts (H-2) | Clean; one commit per change |
+| I | Hook, cache-only; `gat pull` if objects are missing | Manual `gat sync`/`pull` | Manual. `pull` falsely refuses after a teammate change (H-3); `sync` works | `blobsy pull` with the recoverability rule; opt-in hydration hooks |
+| J | None; hand-edit hex rows from `:1:/:2:/:3:` | Same | `git checkout --ours/--theirs x.bref` | Same for UC-1; for UC-2, `blobsy merge-manifest --resolve [--ours/--theirs PATH]` |
+| K | Never | Never | Never | Never |
+| L | No driver, no hooks | — | No hooks (H-7) | The driver also works as a jj merge tool; correctness doesn’t depend on hooks |
+
+Rows (the three bold rows matter most):
+
+- **A**: two branches add different files to the same directory, with adjacent names.
+- **B**: edits to two different files on adjacent lines.
+- **C**: both branches edit the same file differently.
+- **D**: one branch deletes a file, the other modifies it.
+- **E**: a rename on one branch, an edit on the other.
+- **F**: an identical change on both branches.
+- **G**: a file added at `p` on one branch and at `p/x` on the other.
+- **H**: rebase and cherry-pick.
+- **I**: payload hydration after the merge.
+- **J**: tooling for resolving conflicts.
+- **K**: whether any merge step uses the network.
+- **L**: behavior under jj.
 
 **What this shows.**
 
-1. **The per-path rules are the same, and both projects reached them independently.**
-   Gat proves the manifest-plus-driver model works for UC-2. Blobsy’s prototype differs
-   only in conflict handling, and that difference matters.
-   Gat leaves the file as *ours* with no markers, so the conflict is invisible in
-   `git diff`, and a careless `git add` loses the other side’s clean changes.
-   Blobsy’s prototype writes the full merged result with per-path markers, which a
-   validator then rejects.
-2. **Neither model is correct without the driver unless something validates the
+1. **Both projects reached the same per-path rules independently.** Gat proves that the
+   manifest-plus-driver model works for UC-2. Blobsy’s prototype differs only in how it
+   handles conflicts, and that difference matters:
+   - Gat leaves the file as *ours*, with no markers.
+     The conflict is invisible in `git diff`, and a careless `git add` loses the other
+     side’s clean changes.
+   - Blobsy writes the full merged result with per-path markers, and a validator rejects
+     any file that still contains markers.
+2. **Neither model is correct without the driver unless something validates the merged
    result.** Gat has no pre-commit or CI check, so hosted or driverless merges can
    produce a lock that every Gat command refuses to read.
-   Blobsy should put `merge=blobsy-manifest` in the committed `.gitattributes` (an
-   undefined driver falls back silently to text merge, which is safe) and ship a
-   validator in pre-commit, `doctor` and CI.
-3. **Per-file pointers are the most host-robust merge unit.** They merge cleanly on
-   GitHub, in jj and in driverless clones, because there is nothing to merge but
+   Blobsy should:
+   - commit `merge=blobsy-manifest` in `.gitattributes` (an undefined driver falls back
+     silently to text merge, which is safe);
+   - ship the validator in pre-commit, `doctor` and CI.
+3. **Per-file pointers are the merge unit that survives any host.** They merge cleanly
+   on GitHub, in jj and in driverless clones, because there is nothing to merge except
    independent small files.
-   That is a real reason to keep `.bref` for UC-1 rather than fold everything into one
-   repo-wide lock as Gat does.
-   It is also a reason to keep collections *per directory* rather than per repo: churn
-   and conflicts stay local.
-4. **Hydration belongs after the merge, not in it.** Both projects agree: no network in
-   drivers. Gat’s cache-only hydration hooks plus a local CAS cache make branch switches
-   offline-capable. Blobsy should adopt both as opt-in features (X-3), while keeping its
-   pre-commit and pre-push guards, which Gat lacks.
-   Gat lets unpushed content reach `git push` unchecked.
+   That argues for:
+   - keeping `.bref` for UC-1, rather than folding everything into one repo-wide lock as
+     Gat does;
+   - keeping collections *per directory* rather than per repo, so churn and conflicts
+     stay local.
+4. **Hydration belongs after the merge, not inside it.** Both projects agree: no network
+   access inside drivers.
+   - Gat’s cache-only hydration hooks, plus a local content cache, let branch switches
+     work offline. Blobsy should adopt both as opt-in features (X-3).
+   - Blobsy should also keep its pre-commit and pre-push guards, which Gat lacks.
+     Gat lets unpushed content reach `git push` unchecked.
 
 * * *
 
@@ -318,238 +513,456 @@ network unless `sync.auto_fetch`).
 
 ### 5.1 UC-1: per-file pointers
 
-Right shape, wrong key model.
-The pointer is minimal and reviewable, but because the default key embeds push time, the
-pointer is incomplete until after push, which is the single largest source of
-user-visible friction (H-2), of four duplicated “upload-then-write-back” code paths, of
-three disagreeing “is it pushed” audits, and of the false dedup claims.
+**Right shape, wrong key model.** The pointer is minimal and reviewable.
+But the default key embeds push time, so the pointer is incomplete until after push.
+That is the largest single source of:
 
-**Recommendation (bead `pqyt` option 1, strengthened):**
+- user-visible friction (H-2);
+- four duplicated “upload-then-write-back” code paths;
+- three “is it pushed” audits that disagree with each other;
+- the false dedup claims.
+
+**Recommendation** (bead `pqyt` option 1, strengthened):
 
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 format: blobsy-bref/0.2
 hash: sha256:82020d96…
 size: 300000
-compressed: zstd      # decided at track time; absent = stored as-is
+compressed: zstd      # decided at add time; absent = stored as-is
 ```
 
-- Key derived: `sha256/<hex>{suffix}` (pure CAS default).
-  Push is a create-only PUT; “already exists” = already published.
+- **Keys are derived from committed data.** A `.bref` 0.2 key template may use only
+  entry-derived variables: `{content_sha256}`, `{content_sha256_short}`, `{filename}`,
+  `{compress_suffix}`, and optionally `{repo_path}`. **`{iso_date_secs}` is rejected.**
+  - Every key is therefore a function of the committed pointer.
+  - Push never writes back.
+  - Invariant 2 (§6.2) holds without exceptions.
+- **The default template is decision D2.** Both options close `pqyt`.
+  - (a) `sha256/{content_sha256}{compress_suffix}`: maximum dedup and free renames, but
+    an opaque remote.
+  - (b) `{content_sha256}/{filename}{compress_suffix}`: keeps original filenames visible
+    in consoles, as design principles 5–6 promise; renames re-upload.
+  - Recommendation: (b) as the default, with (a) documented.
+- **Push is a create-only PUT.** “Already exists” means already published.
   Push never edits the pointer.
-- `remote_key` remains legal and authoritative when present: every existing 0.1 pointer
-  keeps working with zero migration; an optional `migrate-keys` re-homes them.
-- “Pushed” becomes remote state, not pointer state: offline `status` reports
-  tracked/modified/missing; `status --remote` and the pre-push check HEAD the keys.
-- Compression decided at track time and kept only if smaller; `compressed_size` dropped
-  from the pointer.
-- Cost: the date-browsable default remote layout.
-  Browsability by path belongs to mirrors (UC-6) and can be rendered for file mode by
-  `blobsy ls --remote`. A custom `key_template` stays available as an advanced option
-  that documents its two-phase cost.
+- **Legacy pointers keep working.** `remote_key` stays legal and authoritative when
+  present, so every existing 0.1 pointer works with zero migration (§5.7).
+- **“Pushed” becomes remote state, not pointer state.** Offline `status` reports
+  tracked, modified or missing.
+  `status --remote` and the pre-push check verify existence in batch (X-4).
+- **Compression is decided at `add` time.**
+  - Decide by rule. For candidate files, compress once and keep the result only if it is
+    at least 5% smaller; the file is being hashed anyway.
+  - Record the decision in the pointer, so every machine derives the same key.
+  - Drop `compressed_size` from the pointer.
+- **What is lost:** the date-browsable default layout.
+  Path-shaped browsability is the job of mirrors (UC-6), and for file mode, of
+  `blobsy ls --remote`.
 
-Plus: a pre-commit **large-file guard** (refuse staging a payload with a sibling pointer
-or above `externalize.min_size`) so gitignore entries stop being load-bearing (B-3); and
-a pre-push hook that reads the pushed refs from stdin (B-2), which only works once keys
-are derivable from the committed pointer.
+**The pre-push hook (B-2).** The hook reads the pushed refs from stdin and uploads what
+those commits reference.
 
-**Ignore entries (H-4, H-6, H-7).** Per-file ignore lines are fine at UC-1 scale but
-conflict on concurrent adds and make every `git status` superlinear past a few thousand
-entries. Three changes, in order: (1) collections (§5.3) take large directories down to
-one line; (2) `doctor --fix` regenerates the managed block from the pointers present, so
-a conflicted block is a one-command repair rather than a merge; (3) consider Gat’s
-approach of writing per-file exclusions to the uncommitted `.git/info/exclude`,
-regenerated from pointers, which removes the merge conflict entirely at the cost of
-clones being unprotected until `blobsy setup`/`pull` runs — acceptable only once the
-pre-commit guard and a CI check make ignores non-load-bearing.
+- Uploading from *any* commit needs D2.
+- Until then, the hook can upload only from the working tree.
+  It must **abort** the push when a pushed pointer’s payload is not in the working tree.
+
+**The large-file guard (B-3).** A pre-commit guard refuses a staged payload that has a
+sibling pointer or exceeds `externalize.min_size`, and a CI/`doctor` check does the
+same.
+
+- Hooks are not reliable (X-1), so committed ignore lines remain the hook-independent
+  protection.
+- They stay load-bearing until the CI check exists.
+
+**Ignore entries (H-4, H-6, H-7).** Per-file ignore lines are fine at UC-1 scale.
+Past a few thousand entries, though, they conflict on concurrent adds and make every
+`git status` superlinear.
+The fixes:
+
+1. **Collections** (§5.3) take large directories down to one ignore line.
+2. **Regeneration:** `doctor --fix` rebuilds the managed block from the pointers that
+   are present. A conflicted block becomes a one-command repair rather than a merge.
+3. **Rejected: Gat’s approach** of writing per-file exclusions to the uncommitted
+   `.git/info/exclude`.
+   - It is per-clone.
+   - It breaks in linked worktrees, which is a known Gat bug.
+   - It makes unprotected clones the default.
 
 ### 5.2 UC-4: merges and git operations
 
-Covered in §4. Summary of the change: replace the stat-cache merge base with the
-**known-synced rule** (pull overwrites a local file only if its hash appears in this
-path’s pointer history or was last pushed/pulled here); write the cache only after a
-successful push or pull; keep the cache purely as a size+mtime hash-skip accelerator.
-This dominates the three-way table: no “ambiguous” state, recomputable from git when the
-cache is lost, and it fixes B-1 and H-3. `sync` then reduces to `pull && push` (or is
-removed).
+The merge workflows are in §4. The core change here: replace the stat-cache merge base
+with a **recoverability rule**.
 
-Do **not** add: a `.bref` merge driver (plain git is already right), file locking (needs
-a server), content-merge drivers inside `git merge` (network inside git operations).
-Do add: `blobsy diff` (PR summary: added/removed/changed with sizes), `blobsy resolve
---tool`, opt-in hydration hooks.
+> `pull` overwrites a local file only if its bytes are known to be recoverable, meaning
+> either: (a) the hash cache records that this hash was pushed or pulled on this
+> machine, or (b) with derived keys, `exists(key(localHash))` is true on the backend.
+> 
+> Git history is used only to word the refusal (“your local content matches commit X,
+> which was never pushed”), never as permission to overwrite.
+> When offline with no cache evidence, refuse and print the two explicit choices.
+
+**Why not the v1 draft’s rule.** The v1 draft proposed a weaker “known-synced” rule:
+overwrite if the local hash appears in the path’s git history.
+The red team showed that loses data in plain git:
+
+1. `blobsy add`.
+2. `git commit` (not pushed).
+3. `git revert`.
+4. `blobsy pull` overwrites bytes that were never uploaded.
+
+The same happens after jj, `--no-verify` or B-2. A hash in history is not evidence that
+the bytes exist remotely.
+
+**What the recoverability rule changes:**
+
+- It fixes all B-1 variants and H-3 without a merge base.
+- The cache becomes a size+mtime hash-skip accelerator plus a record of what was pushed
+  and pulled.
+- The cache is written only after a successful push or pull, never by `track`.
+
+**`sync` becomes `pull` followed by `push`, with no decision logic of its own.** It
+exits 2 only on a refusal that `pull` would also make.
+Otherwise the 9-state table will grow back.
+
+**Do not add:**
+
+- a `.bref` merge driver (plain git already gets it right);
+- file locking (it needs a server);
+- content-merge drivers inside `git merge` (that means network inside git operations).
+
+**Do add:**
+
+- `blobsy diff`, a PR summary of what was added, removed or changed, with sizes;
+- `blobsy resolve --tool`;
+- opt-in hydration hooks.
 
 ### 5.3 UC-2: collections
 
-**Today:** a directory becomes N pointers, N ignore lines, N stat-cache files and (under
-the default template) N remote prefixes.
-Git is fine (10k files: 2.67 MB pack); the pain is the PR (a 100-file update is “101
-files changed”), the ignore file, and blobsy’s per-file overhead [S]. Threshold:
-pointers are right up to ~50 files per directory; review degrades between ~50 and ~300;
-above ~300 — or for any directory that receives files in batches — collections are
-needed [S].
+**Today**, a directory becomes N pointers, N ignore lines, N stat-cache files and, under
+the default template, N remote prefixes.
+Git copes fine: 10k files make a 2.67 MB pack.
+The pain is elsewhere [S]:
 
-**Recommended design** — a second *container* for the same entry, not a second kind of
-thing:
+- the PR: a 100-file update shows as “101 files changed”;
+- the ignore file;
+- blobsy’s per-file overhead.
+
+Thresholds [S]:
+
+- up to ~50 files per directory, pointers are right;
+- between ~50 and ~300, review degrades;
+- above ~300, or for any directory that receives files in batches, use collections.
+
+**Recommended design:** a second *container* for the same entry, not a second kind of
+thing. The name `.brefs` is an open decision; `.btree` was also proposed.
 
 ```text
 data/images/            <- directory, gitignored as a whole (one line: "images/")
-data/images.brefs       <- committed manifest (name is an open decision; ".btree" also proposed)
+data/images.brefs       <- committed manifest
 ```
 
 ```text
 # blobsy collection manifest -- https://github.com/jlevy/blobsy
 # Run: blobsy status data/images | blobsy --help
 #format blobsy-manifest/0.1
-#columns path	size	sha256	mode	stored
-cats/001.jpg	48213	9f2c0e7b…e1	-	-
-scripts/fetch.sh	1430	5e0f9c1d…02	x	-
-tables/2026-10.parquet	734003200	a81c4f3e…9b	-	zstd
+#columns path	kind	size	sha256	stored
+cats/001.jpg	f	48213	9f2c0e7b…e1	-
+scripts/fetch.sh	x	1430	5e0f9c1d…02	-
+tables/2026-10.parquet	f	734003200	a81c4f3e…9b	zstd
 ```
 
-- Sorted bytewise TSV; static header; **no aggregates** (counts, totals, tree hash,
-  timestamps change on every edit and make every concurrent edit conflict — DVC’s
-  mistake). Tree id = sha256 over the first four columns, computed, never stored in git.
-- Per-file content-addressed objects with keys derived from the line (content-only
-  templates are mandatory for collections), so push never writes back and a file moved
-  between a pointer and a collection needs no re-upload.
-- Commands: `add --collection <dir>`, `add <dir|subpath>` (adds/updates; removal only
-  via `--prune` or `rm`, because partial pulls make snapshot-style `add` unsafe),
-  `status`, `push`, `pull --include <glob>`, `verify`, `diff`, `untrack`, demote via
-  `add --files`.
-- Merging as in §4: per-path driver installed by `setup`, `--resolve` fallback,
-  validator in pre-commit/doctor/CI.
-- Not in v1: auto-sharding, packs, symlink/mtime fidelity, textconv drivers, nested
-  collections, per-entry key overrides, `merge=union`.
+**One entry format, pinned here.**
 
-Round 8’s rejection of Option A (a digest-only directory pointer) still stands, for a
-different reason here: UC-2 *wants* the per-file list in git.
-Re-point bead `blobsy-aad8` at this design.
+- **Columns:** `path ⇥ kind ⇥ size ⇥ sha256`, with `kind ∈ {f, x, l:<target>, d}`.
+  Collections will rarely contain `l:` or `d`.
+- **`stored`:** `.brefs` adds this as a fifth column, excluded from the id.
+- **`tree_id`:** sha256 over the sorted lines of the first four columns.
+  It is computed, never stored in git.
+- **Shared definition.** Snapshots (§5.4) and receipts use the same definition, so
+  checking that a receipt matches a manifest is a string compare.
+- **Supersedes** the `path size sha256 mode` column order in the tree-manifests research
+  doc and the UC-2 sub-review.
+
+**Static header, no aggregates.** The body is sorted bytewise TSV. Counts, totals, a
+tree hash or timestamps would change on every edit and make every pair of concurrent
+edits conflict. That was DVC’s mistake.
+
+**Per-file objects, content-addressed.** Keys are derived from the line.
+Push never writes back, and moving a file between a pointer and a collection needs no
+re-upload.
+
+**Commands:**
+
+- `add --collection <dir>`.
+- `add <dir|subpath>` adds and updates.
+  Removal happens only via `--prune` or `rm`, because partial pulls make snapshot-style
+  `add` unsafe.
+- `status`, `push`, `pull [--include <glob>]`, `verify`, `untrack`.
+- Later: `diff`, and demotion back to pointers via `add --files`.
+
+**Status, pull and sync** on collections use the recoverability rule of §5.2. This
+supersedes the UC-2 sub-review’s reuse of `decideSyncAction` and the merge base.
+The sub-review’s “not pulled” vs “missing” distinction survives: it depends on whether
+the hash cache has ever recorded the path.
+
+**Merging** works as in §4:
+
+- `setup` installs the per-path driver, and `.gitattributes` is committed.
+- `--resolve` handles local driverless merges.
+- The validator runs in pre-commit, `doctor` and CI.
+
+**Not in v1:** auto-sharding, packs, symlink/mtime fidelity, textconv drivers, nested
+collections, per-entry key overrides, `merge=union`.
+
+**Option A stays rejected.** Round 8 rejected Option A (a digest-only directory
+pointer). That rejection stands, for a different reason here: UC-2 *wants* the per-file
+list in git. Re-point bead `blobsy-aad8` at this design.
 
 ### 5.4 UC-3 and UC-5: trees and immutable assets
 
-**Taxonomy [S].** Four workloads, three disciplines:
+**Taxonomy [S].**
 
 |  | Repo files (UC-1/2) | Run archives (UC-6, round 8) | Derived caches (UC-3) | Pinned assets (UC-5) |
 | --- | --- | --- | --- | --- |
 | Identity | path at a commit | path-shaped prefix | input hash (lockfile, toolchain, platform) | chosen immutable name |
 | Writers | many, via git | one per prefix | many CI jobs racing | one publisher per name |
-| Lifecycle | versioned by git; GC by reachability | frozen when done; never deleted | immutable per key; TTL | immutable; forever |
+| Lifecycle | versioned by git; GC by reachability | frozen when done; never deleted | immutable per key; expires | immutable; forever |
 | Git holds | pointer / manifest | receipt (optional) | config stanza only | one pin pointer (optional) |
-| Transfer unit | file | file (batched) | packed archive | packed archive or single file |
-| Fidelity | content (+ exec bit) | content | symlinks, exec bits, empty dirs | same |
+| Transfer unit | file (batched) | file (batched) | packed archive | packed archive or single file |
+| Fidelity | content + exec bit | content | symlinks, exec bits, empty dirs | same |
 
-Stretching file mode to trees fails on fidelity, per-file transfer cost (14,711 PUTs for
-one `node_modules`), and git footprint.
-Stretching mirror mode to caches fails on identity, concurrency (last-writer-wins on a
-shared prefix), restore speed, and lifecycle [S].
+**Why existing modes can’t stretch to cover trees [S].**
+
+- Stretching **file mode** to trees fails on:
+  - fidelity;
+  - per-file transfer cost (14,711 PUTs for one `node_modules`);
+  - git footprint.
+- Stretching **mirror mode** to caches fails on:
+  - identity;
+  - concurrency (last writer wins on a shared prefix);
+  - restore speed;
+  - lifecycle.
 
 **Recommended: one *snapshot* primitive for UC-3 and UC-5** [S]:
 
-- **Identity:** the canonical entry `path ⇥ kind ⇥ size ⇥ sha256` (kind
-  `f|x|l:<target>|d`), bytewise-sorted; `tree_id = sha256` of the lines.
-  Shared with UC-2 manifests and round-8 receipts, so “receipt matches manifest” is a
-  string compare.
-- **Store layout (everything under the name):** `snap/<name>/data.tar.zst`,
-  `manifest.tsv.zst`, and a tiny `ref.yaml` written **last** with a create-only PUT —
-  the commit point. A `412` on the ref → read it; same `tree_id` → already published.
-- **Names:** derived for caches (`cache/target/v1/{os}-{arch}/{hash:Cargo.lock}`, pure
-  template variables only — no `{cmd:…}`, per the threat model) or chosen for assets
-  (`assets/llama-3-8b/v2`). Never mutable; no “latest”.
-- **Git:** nothing per cache snapshot; a pinned asset is a `.bref` with `kind: tree`,
-  `name`, and `hash: <tree_id>` (verified on restore).
-- **Restore:** ref → manifest (verify tree id) → archive (via a local content cache) →
-  extract to a sibling temp dir → verify every file → two-rename atomic swap.
-  `--only <glob>` partial restore; `--fallback` to the newest name under the parent
-  prefix (actions/cache `restore-keys` semantics).
-- **Packing:** one deterministic `tar.zst` per snapshot in v1 (measured on this repo’s
-  `node_modules`: 14,711 files / 171 MB → 40 MB in 2.8 s; restore with all symlinks and
-  exec bits in 4.8 s) [S]. Package-grouped packs and range restore are v2.
-- **Expiry:** bucket lifecycle rules on `snap/cache/`; assets never expire; `snap gc`
-  only for backends without lifecycle.
-- **CLI:** one noun with immutable verbs —
-  `blobsy snap publish|restore|status|ls|show|pin|gc`. Do not reuse `push`/`pull` for
-  snapshots: the safety profiles are opposite.
-- **Non-goals:** bidirectional sync of derived trees, mutable names, hooks, per-file
-  objects for snapshots, CDC, signatures (v1), ecosystem-specific pruning, executing
-  commands from key templates.
-- **Guidance:** for JS/Python, cache the package-manager store (pnpm store, uv cache),
-  not `node_modules`/`.venv` (absolute paths, pnpm hardlinks); `target/`, model
-  directories and preprocessed datasets are the clean wins.
+- **Identity:** the canonical entry of §5.3; `tree_id` over the sorted entry lines.
 
-**Mirror mode (UC-6) stays as round 8 proposed, narrowed:** keep attach points,
-path-shaped keys, receipts (adopting the canonical `tree_id`), copy-only, no hooks, no
-two-way merge. Move round 8’s R10 “shared tool caches” out of mirror mode into the
-snapshot primitive as *entry assets* (create-only per entry).
+- **Store layout:** everything lives under the snapshot’s name.
+  - `snap/<name>/data.tar.zst` and `manifest.tsv.zst`.
+  - A tiny `ref.yaml`, written **last** with a create-only PUT. It is the commit point.
+  - If the ref write returns 412, read the existing ref.
+    Same `tree_id` means it is already published.
 
-**The owner’s hypothesis holds:** UC-5 lets UC-3 avoid file-level merges — precisely,
-the merge surface collapses to the key inputs (the lockfile, merged by the package
-manager) for caches, or to one pin line for assets.
+- **Names:**
+  - Derived for caches, e.g. `cache/target/v1/{os}-{arch}/{hash:Cargo.lock}`. Template
+    variables must be pure, so there is no `{cmd:…}` (threat-model rule 1).
+  - Chosen for assets, e.g. `assets/llama-3-8b/v2`.
+  - Names are never mutable, and there is no “latest”.
+
+- **Git:** holds nothing per cache snapshot.
+  A pinned asset is a `.bref` with `kind: tree`, `name` and `hash: <tree_id>`, verified
+  on restore.
+
+- **Restore:**
+  1. Read the ref and the manifest, and verify the tree id.
+  2. Fetch the archive through the local content cache.
+  3. Extract to a sibling temp directory, and verify every file.
+  4. Swap it into place with two renames.
+
+  Options: `--only <glob>` restores part of the tree; `--fallback` restores the newest
+  name under the parent prefix (actions/cache `restore-keys` semantics).
+
+- **Packing:** one deterministic `tar.zst` per snapshot in v1. Measured on this repo’s
+  `node_modules` [S]:
+  - 14,711 files / 171 MB packed to 40 MB in 2.8 s;
+  - restored, with all symlinks and exec bits, in 4.8 s.
+
+- **Expiry:** bucket lifecycle rules on `snap/cache/`. Assets never expire.
+
+- **CLI:** one noun with immutable verbs: `blobsy snap publish|restore|ls`, later
+  `status|show|pin|gc`. Don’t reuse `push`/`pull`; the safety profiles are opposite.
+
+- **Non-goals:**
+  - bidirectional sync of derived trees;
+  - mutable names;
+  - hooks;
+  - per-file objects for snapshots;
+  - CDC;
+  - signatures (in v1);
+  - ecosystem-specific pruning;
+  - executing commands from key templates.
+
+- **Guidance:**
+  - For JS and Python, cache the package-manager store (pnpm store, uv cache), not
+    `node_modules`/`.venv`, which contain absolute paths and pnpm hardlinks.
+  - The clean wins are `target/`, model directories and preprocessed datasets.
+  - The default mtime policy needs a cargo fingerprint experiment first.
+
+**Mirrors (UC-6) are an open decision (D8), not settled.** The options:
+
+- (a) Approve round 8’s mirror mode, narrowed.
+- (b) Fold mirrors into snapshots as `snap publish --unpacked`: path-shaped keys, no
+  tar, and the receipt *is* the snapshot `ref.yaml`.
+- (c) Defer: ship only `blobsy receipt write|verify <dir>` (`tree_id` plus a receipt,
+  ~100 LOC) and an rclone recipe.
+  Build mirrors only if the trading repo commits to adopting them.
+
+Recommendation: (c) now, and (b) if demand materializes.
+That leaves two families: in-git entries (pointers and manifests) and named snapshots.
+Under any option, round 8’s R10 “shared tool caches” belong to the snapshot primitive,
+as single-file *entry assets*.
+
+**The owner’s hypothesis holds.** UC-5 lets UC-3 avoid file-level merges.
+Precisely, the merge surface collapses to:
+
+- the key inputs, for caches (the lockfile, which the package manager merges);
+- one pin line, for assets.
+
 The trade-off is that git cannot diff the tree; `blobsy snap show --diff` does.
 
 ### 5.5 PAIN-3 and PAIN-4: removal, migration, and the LFS comparison
 
-Pointers solve PAIN-3 going forward: removing a pointer from history is cheap, and the
-bytes live in a bucket the owner controls.
-Native git still does not solve it: the “large object promisor” work (Git 2.49–2.56)
-makes clones cheaper, but git’s own design notes say a pushed large blob may not be
-removable without rewriting history [S]. GitHub still documents “delete and recreate the
-repository” to remove LFS objects [S].
+**Pointers solve PAIN-3 going forward.** Removing a pointer from history is cheap, and
+the bytes live in a bucket the owner controls.
 
-Missing for PAIN-3/4:
+**Native git still does not solve it.** The “large object promisor” work (Git 2.49–2.56)
+makes clones cheaper.
+But git’s own design notes say a pushed large blob may not be removable without
+rewriting history [S]. GitHub still documents “delete and recreate the repository” as
+the way to remove LFS objects [S].
 
-1. `blobsy migrate import` (history rewrite via `git filter-repo`, LFS-style) —
-   tractable only with content-derived keys.
-2. `blobsy import-lfs` — LFS pointers are already sha256 + size; convert pointers
-   without downloading, copy objects into the CAS. The highest-leverage adoption
-   feature.
-3. Reachability GC: reachable = all hashes in all pointers/manifests across refs;
-   orphans = listed − reachable; age gate; dry-run first; bucket versioning or Object
-   Lock as the recovery window.
+**Missing for PAIN-3/4:**
 
-Honest LFS comparison: blobsy wins on cost, provider neutrality, legible state for
-agents, and (after §5.1) dedup across history; LFS wins on transparency (smudge/clean),
-maturity (migrate, prune, locks) and hosting UI. Blobsy should not claim “simpler” while
-every change takes two commits.
+1. **`blobsy import-lfs`.** LFS pointers are already sha256 + size, so pointers convert
+   without downloading, and the objects copy into the store.
+   This is the highest-leverage adoption feature.
+2. **`blobsy migrate import`.** A history rewrite via `git filter-repo`, in the style of
+   `git lfs migrate import`. It is tractable only with content-derived keys.
+3. **Reachability GC.**
+   - Reachable keys are the union of two sets:
+     - `key(entry)` for every entry in every `.bref`/`.brefs`, across all refs;
+     - every legacy `remote_key` string in every `.bref`, across all refs.
+   - Orphans are the listed objects minus the reachable ones.
+   - Deletion is age-gated and dry-run first, with bucket versioning or Object Lock as
+     the recovery window.
+   - Until `migrate-keys` has re-homed a repo, legacy objects are reachable only through
+     the second set.
+   - GC must refuse to run if any pointer in history has neither a derivable key nor a
+     `remote_key`.
+
+**An honest LFS comparison.**
+
+- Blobsy wins on:
+  - cost;
+  - provider neutrality;
+  - state that agents can read;
+  - dedup across history (after §5.1).
+- LFS wins on:
+  - transparency (smudge/clean filters);
+  - maturity (migrate, prune, locks);
+  - hosting UI.
+
+Blobsy should not claim “simpler” while every change takes two commits.
+
+### 5.6 Cross-cutting: credentials, CI, platforms, large objects, scope
+
+- **Credentials and CI (X-7).** This is the actual CREEP mitigation [S]:
+  - Laptops and PR builds get read-only credentials.
+  - Only protected-branch CI gets write credentials for `snap/cache/` (and for pushes,
+    where policy allows).
+  - Snapshot `ref.yaml` records provenance (branch, commit, run id), and a signature
+    field is reserved.
+- **Windows.** None of this is tested today.
+  - Restoring snapshot symlinks needs Developer Mode or admin rights.
+    Restore must fall back to copying the targets, with a warning.
+  - Case-insensitive filesystems need collision detection when files are added to a
+    manifest.
+  - Hook shims must work in Git for Windows.
+- **Large single objects (over 5 GB)** must be uploaded multipart.
+  - S3 honors `If-None-Match` on `CompleteMultipartUpload`.
+  - GCS’s XML multipart API rejects preconditions, and R2 doesn’t document support for
+    them at multipart completion.
+  - So create-only writes for very large objects fall back to exists-then-put on those
+    backends. Snapshot commit objects are always small single PUTs, so this never affects
+    them.
+- **Moving between backends** becomes a real PAIN-5 win with derived keys: `rclone copy`
+  the prefix and change the backend URL. No pointer is rewritten.
+- **Scope limits.**
+  - One backend per repo.
+    Dropping subdirectory configs removes the only per-directory override, so monorepos
+    that need two buckets are out of scope for now.
+  - Partial clone and sparse checkout compose naturally: pointers and manifests are
+    tiny, and snapshots live outside git.
+
+### 5.7 What changes for repos that use blobsy today
+
+- **0.1 pointers keep working.** They are read forever through their stored
+  `remote_key`.
+  - Existing timestamped objects stay reachable, and safe from GC (§5.5).
+  - An explicit `migrate-keys` re-homes them to derived keys; this is never automatic.
+- **The default-template change and derive-when-absent ship together.** Both land in one
+  release: the new default template, and deriving the key when `remote_key` is absent.
+  So no clone pushes old-style keys after another clone has started deriving new ones.
+- **Committed stat caches.** `doctor --fix` runs `git rm --cached` on any stat-cache
+  files that were committed (H-1). After Phase 0, the cache lives under the git
+  directory.
+- **Removed or renamed commands** print “renamed to …” for one release.
 
 * * *
 
 ## 6. Proposed architecture
 
-### 6.1 One storage contract, three reference disciplines
+### 6.1 One storage contract, one entry format, two ways to reference it
 
-Replace principle 9 (“one primitive … no second kind of thing”) with:
+Replace principle 9 (“one primitive … no second kind of thing”) with the statement
+below. If D2 picks pure CAS, also reword principles 5–6, which promise filenames in the
+remote.
 
-> **One storage contract** — immutable objects, create-only writes, hash-verified reads
-> — and **one entry format** (`path, kind, size, sha256`), referenced in one of three
-> ways: **in git** (a `.bref` pointer for a file, a `.brefs` manifest for a collection),
-> **by name** (a snapshot for a tree or asset, optionally pinned in git), or **by path**
-> (a mirror for run archives).
+> **One storage contract**: immutable objects, create-only writes and hash-verified
+> reads.
+> 
+> **One entry format**: `path, kind, size, sha256`.
+> 
+> **Two ways to reference it:**
+> 
+> - **in git**: a `.bref` pointer for a file, or a `.brefs` manifest for a collection;
+> - **by name**: a snapshot for a tree or asset, optionally pinned in git.
 
-What was rightly eliminated in the original design was *mutable remote manifests as
-coordination state*. A committed manifest is the opposite: git sees it and git merges
-it, and the store stays a dumb immutable blob store.
+Mirrors become a third way only if D8 approves them.
+
+The original design was right to eliminate *mutable remote manifests used as
+coordination state*. A committed manifest is the opposite: git sees it, git merges it,
+and the store stays a dumb store of immutable blobs.
 
 ### 6.2 Object model and invariants
 
-- **Blob** — immutable bytes identified by sha256 of the original content; optional
-  encoding (`zstd`); stored at a key that is a pure function of (hash, encoding).
-- **Ref** — a committed pointer (`.bref`): one entry at an adjacent path.
-- **Manifest** — a committed list of entries for a collection directory: N refs in one
+**Objects:**
+
+- **Blob:** immutable bytes, identified by the sha256 of the original content, with an
+  optional encoding (`zstd`). It is stored at a key that is a function of committed
+  entry data.
+- **Ref:** a committed pointer (`.bref`): one entry at an adjacent path.
+- **Manifest:** a committed list of entries for a collection directory: N refs in one
   file.
-- **Snapshot** — a named, immutable, packed tree (or single file) with a store-side
+- **Snapshot:** a named, immutable, packed tree (or single file), with a store-side
   manifest and a create-only commit object.
-- **Mirror** — a path-shaped remote prefix for a run tree, with a receipt.
 
-Invariants:
+**Invariants:**
 
-1. Store writes are create-only; nothing overwrites; deletion only by explicit GC or
-   lifecycle rules on cache prefixes.
-2. For refs and manifests, `key = f(entry)`; no push-time state is ever written into a
-   committed file.
-3. A path is governed by exactly one discipline; `doctor` errors on overlap.
-4. Pulled or restored bytes are hash-verified before replacing anything.
-5. Correctness never depends on hooks or drivers; hooks verify and convenience-sync;
-   nothing unbounded runs in hooks; snapshots and mirrors never run in hooks.
+1. **Store writes are create-only.** Nothing overwrites.
+   Deletion happens only through explicit GC, or lifecycle rules on cache prefixes.
+2. **Keys come only from committed data.** For refs and manifests, the key is a function
+   of committed entry data.
+   No push-time state is ever written into a committed file.
+3. **One discipline per path.** A path is governed by exactly one discipline, and
+   `doctor` errors on overlap.
+4. **Verify before replacing.** Pulled or restored bytes are hash-verified before they
+   replace anything. Local bytes are overwritten only if they are recoverable (§5.2).
+5. **Correctness never depends on hooks or drivers.**
+   - Hooks only verify and do convenience syncs; nothing unbounded runs in them.
+   - Snapshots never run in hooks.
+   - CI checks are the backstop that doesn’t depend on hooks.
 
 ### 6.3 Module layout
 
@@ -557,27 +970,46 @@ Invariants:
 cli/verbs/   one file per verb (plan + execute); verbs dispatch by discipline
 core/        hash + hash cache, paths, config (3 levels), errors, reporter, git helpers
 store/       Backend (+ list, putIfAbsent, capabilities), transfer (batch), local CAS cache
-refs/        file.ts (.bref), manifest.ts (.brefs)  — one Entry loop for push/pull/status/verify
+refs/        file.ts (.bref), manifest.ts (.brefs) — one Entry loop for push/pull/status/verify
 snap/        snapshot publish/restore/ls/gc, pack/unpack, tree walk with fidelity
-mirror/      round-8 attach points + receipts
 doctor/      check registry; each module registers its checks
 ```
 
-The key leverage: with derived keys and no merge base, `push`, `pull`, `status` and
-`verify` for refs **and** manifests are one loop over `Entry {path, hash, size,
-encoding}` [S]. Snapshots and mirrors share `store/` and `core/` but have their own
-loops.
+**One loop for refs and manifests.** Once keys are derived and the merge base is gone,
+`push`, `pull`, `status` and `verify` become one loop over
+`Entry {path, kind, hash, size, encoding}` for both refs **and** manifests [S].
+Snapshots share `store/` and `core/`, but have their own loop.
+
+**Machine-local state moves under the git directory.**
+
+- The hash cache goes under `$(git rev-parse --git-path blobsy)/` (per worktree).
+- The shared content cache goes under `$(git rev-parse --git-common-dir)/blobsy/`, or a
+  user-level cache.
+- This removes `.blobsy/` from the working tree entirely: no gitignore line, no `doctor`
+  check, and nothing for jj to auto-snapshot.
 
 ### 6.4 Backend interface additions
 
-`list(prefix)`, `putIfAbsent(key, …)` (S3 `If-None-Match: *`, GCS `ifGenerationMatch=0`,
-Azure `If-None-Match`, local `O_EXCL`), a batch transfer method (rclone `--files-from0`,
-SDK concurrency pool), and `capabilities.conditionalPut` **set by a doctor probe**
-(write a sentinel twice; expect success then 412), because S3-compatible stores can
-silently ignore the header [S]. Known gaps: rclone’s GCS and Azure backends pass no
-preconditions; B2 rejects the header; command backends can’t express it.
-Use a documented exists-then-put fallback there, or a thin native write for small commit
-objects only.
+- **`list(prefix)`.**
+- **`putIfAbsent(key, …)`:** S3 `If-None-Match: *`, GCS `ifGenerationMatch=0`, Azure
+  `If-None-Match`, local `O_EXCL`.
+- **Batch transfer and batch existence checks:** rclone `--files-from0`, an SDK
+  concurrency pool, and `list` over the content-addressed prefix instead of one HEAD per
+  file.
+- **`capabilities.conditionalPut`**, set by a `doctor` probe that writes a sentinel
+  twice and expects success, then 412. A probe is needed because S3-compatible stores
+  can silently ignore the header [S].
+
+**Known gaps:**
+
+- rclone’s GCS and Azure backends pass no preconditions.
+- B2 rejects the header.
+- Command backends can’t express it.
+
+On those backends blobsy uses a documented exists-then-put fallback.
+Alternatively, for the small commit objects only, OpenDAL’s npm bindings offer native
+in-process writes (§7.4). Command backends without a `list_command` fall back to
+per-file existence checks.
 
 * * *
 
@@ -585,138 +1017,217 @@ objects only.
 
 ### 7.1 Inventory [S]
 
-8,862 source LOC; 9,436 lines of current design docs (more than the source).
-Of the source, ≈3,600 LOC is mode-specific (tracking, gitignore, sync, hooks, templates,
-compression, config), ≈2,900 is shareable (backends, transfer, output, core), ≈1,400 is
-doctor and plumbing (`doctor` alone is ~915 LOC), and ≈400 is dead or duplicated.
-An agent must absorb ~80 nouns (22 commands, 35 config keys, 7 env vars, 7 state
-symbols, 6 pointer fields, hidden state) to use blobsy fully.
+The source is 8,862 LOC; the current design docs are 9,436 lines, more than the source.
+The source breaks down as:
 
-For scale: Gat, covering UC-1/2/4 with hooks, a cache, routes, and mounts, is ~150k
-lines of Rust including tests.
-The full feature surface is large; blobsy’s advantage must come from refusing most of it
-(§10).
+- ≈3,600 LOC mode-specific: tracking, gitignore, sync, hooks, templates, compression,
+  config;
+- ≈2,900 shareable: backends, transfer, output, core;
+- ≈1,400 doctor and plumbing (`doctor` alone is ~915 LOC);
+- ≈400 dead or duplicated.
+
+To use blobsy fully, an agent must absorb ~80 nouns:
+
+- 22 commands;
+- ~35 config keys;
+- 7 environment variables;
+- 7 state symbols;
+- 6 pointer fields;
+- hidden state.
+
+**What the proposal does to these numbers (honestly):**
+
+- **Phase 1** deletions (S1–S5, S8, S10) remove roughly 1.3–1.9k LOC (15–20%). They
+  remove a much larger share of the *concepts*: timestamps, write-back, two-commit
+  flows, the merge base, ambiguous states, the trash, inert config levels and hidden
+  commands.
+- **Phases 2–3** then add more code than Phase 1 removes: a manifest parser, validator
+  and driver; tar packing; snapshot verbs; the backend additions.
+
+The net result is **fewer concepts per use case, and more code in total**. For scale:
+Gat covers UC-1/2/4, with hooks, a cache, routes and mounts, in ~150k lines of Rust
+including tests. Blobsy’s advantage has to come from refusing most of that surface.
+§10 names the smallest cut of each phase.
 
 ### 7.2 Accidental complexity
 
 | Upstream choice | What it forced | Verdict |
 | --- | --- | --- |
-| Timestamped default key template | `remote_key` in the pointer; two-phase commits (pqyt); 4 copies of upload-then-write-back; `track` clearing keys; 3 “pushed” audits; false dedup; `push --force` orphaning unchanged content | Accidental — remove (§5.1) |
-| Bidirectional `sync` with stat-cache merge base | 9 decision states; exit 2 from sync; “ambiguous after git pull”; B-1 data loss; 583-line design doc | Accidental — replace with the known-synced rule (§5.2) |
-| Compression decided at push time | Encoding leaks into key and pointer; different configs → different keys | Accidental placement — decide at track time |
-| Trash directory | Written, never read; gitignored so the “GC paper trail” can’t work | Delete; git history is the undo |
-| 8 hidden commands | Full handlers, goldens, docs | Delete or fold into flags |
-| Five-level config hierarchy | Inert walk, duplicated loop, unreachable `subdir` origin, inert `checksum` section | Delete (bead `4vpk`: drop) |
-| No reporter / plan-execute split | 117 hand-written quiet/json guards; duplicated dry-run logic per command | Refactor before adding modes |
-| Per-file adjacency everywhere | O(N²) gitignore rewrites, 2 git spawns per file in rm/untrack, 1 synchronous transport spawn per file | Batch per command |
+| Timestamped default key template | `remote_key` in the pointer; two-phase commits (pqyt); 4 copies of upload-then-write-back; `track` clearing keys; 3 “pushed” audits; false dedup; `push --force` orphaning unchanged content | Accidental. Remove it, and forbid push-time variables (§5.1). |
+| Bidirectional `sync` with a stat-cache merge base | 9 decision states; exit 2 from sync; “ambiguous after git pull”; B-1 data loss; a 583-line design doc | Accidental. Replace with the recoverability rule (§5.2). |
+| Compression decided at push time | The encoding leaks into the key and the pointer; different configs → different keys | Wrong placement. Decide at add time. |
+| Trash directory | Written, never read. It is gitignored, so the “GC paper trail” can’t work | Delete; git history is the undo. |
+| 8 hidden commands | Full handlers, goldens, docs | Delete them, or fold them into flags. |
+| Five-level config hierarchy | An inert walk, a duplicated loop, an unreachable `subdir` origin, an inert `checksum` section | Delete (bead `4vpk`: drop). |
+| No reporter, no plan/execute split | 117 hand-written quiet/json guards; duplicated dry-run logic per command | Refactor when the second container lands (Phase 2). |
+| Per-file adjacency everywhere | O(N²) gitignore rewrites; 2 git spawns per file in rm/untrack; sequential transfers | Batch per command. |
 
-Essential and worth keeping: the pointer (hash + size), the backend layer, atomic
-verified pulls, create-only remote semantics, path containment and the threat model,
-externalization rules, `--json` and non-interactivity, golden tests, and `doctor` as a
-concept (at a fraction of its size).
+**Essential, and worth keeping:**
+
+- the pointer (hash + size);
+- the backend layer;
+- atomic verified pulls, and create-only remote semantics;
+- path containment, and the threat model;
+- externalization rules;
+- `--json` and non-interactivity;
+- golden tests;
+- `doctor` as a concept, at a fraction of its size.
 
 ### 7.3 Simplifications, ranked by complexity removed ÷ capability lost [S]
 
 | # | Change | Removes | Loses |
 | --- | --- | --- | --- |
-| S1 | Delete inert subdir-config walk, `subdir` origin, `checksum`, `sync.tools` | ~150 LOC, bead 4vpk | nothing |
-| S2 | Delete `.blobsy/trash/` and the ⊗ state | contradiction + dead code | nothing |
-| S3 | Delete hidden commands (`init`→`setup`, `track`→`add --no-stage`, `health`/`check-unpushed`/`pre-push-check`→`doctor` flags, `readme`/`skill`→`docs` flags) | ~300 LOC, 7 goldens | aliases (print “renamed” for one release) |
-| S4 | Content-derived keys; compression at track time; `remote_key` optional | pqyt, write-back, 4 duplicated paths, 3 audits | date-browsable default layout |
-| S5 | Drop the merge base; hash cache only, actually wired into status/verify/push/pull | ~325 LOC, 9 states, B-1, H-3 | one-verb bidirectional detection (already degrades to push/pull) |
-| S6 | Reporter abstraction + plan/execute per verb | 117 guards, duplicated dry-runs | nothing |
-| S7 | Batch gitignore writes and git spawns per command | O(N²) and O(N) spawns | nothing |
-| S8 | Doctor diet: table-driven checks; fold `health`; fix or drop the dead cache scan | ~300 LOC | did-you-mean on config keys |
-| S9 | Compression: zstd + none; keep only if smaller | small | gzip/brotli encoders (keep decoders) |
-| S10 | Consider dropping the `aws-cli` backend (the SDK backend covers it) | 176 LOC + tests | aws-cli quirks |
+| S1 | Delete the inert subdir-config walk, the `subdir` origin, `checksum`, `sync.tools` | ~150 LOC; bead 4vpk | nothing |
+| S2 | Delete `.blobsy/trash/` and the ⊗ state | a contradiction + dead code | nothing |
+| S3 | Delete the hidden commands (see below) | ~300 LOC; 7 goldens | aliases (each prints “renamed” for one release) |
+| S4 | Derived keys only, with no push-time variables; compression decided at add time; `remote_key` for legacy pointers only | pqyt; all write-back paths; 3 audits | the date-browsable default layout |
+| S5 | Drop the merge base; adopt the recoverability rule; actually wire the hash cache into status/verify/push/pull | ~325 LOC; 9 states; B-1; H-3 | nothing that works today |
+| S6 | A reporter abstraction + plan/execute per verb | 117 guards; duplicated dry-runs | nothing |
+| S7 | Batch gitignore writes, git spawns and transfers per command | O(N²) rewrites and O(N) spawns | nothing |
+| S8 | Doctor diet: table-driven checks; fold `health` in; fix or drop the dead cache scan | ~300 LOC | did-you-mean on config keys |
+| S9 | Compression: zstd + none only; keep output only if smaller | small | gzip/brotli encoders (keep the decoders) |
+| S10 | Consider dropping the `aws-cli` backend; the SDK backend covers it | 176 LOC + tests | aws-cli quirks |
 
-S1–S3 are pure deletions and should land first.
-S4–S5 are the architectural pair that makes UC-2 cheap.
-S6–S7 are what keep the next modes from tripling the plumbing.
+The hidden commands in S3, and where each one goes:
+
+- `init` → `setup`;
+- `track` → `add --no-stage`;
+- `health`, `check-unpushed`, `pre-push-check` → `doctor` flags;
+- `readme`, `skill` → `docs` flags.
+
+**How the changes group:**
+
+- **S1–S3** are pure deletions.
+- **S4–S5** are the architectural pair that makes UC-2 cheap.
+- **S6–S7** keep the next modes from tripling the plumbing.
+  Do them as part of Phase 2, not before.
 
 ### 7.4 Implementation language: TypeScript vs Rust
 
 Full report:
 [`round9-subreviews/language-typescript-vs-rust.md`](round9-subreviews/language-typescript-vs-rust.md)
-[S]. Gat, jj, Xet, Oxen and Lore are all Rust, and the landscape research calls
-single-binary distribution “the category norm”, so the question is fair.
-The evidence says it is not a language problem.
+[S].
+
+The question is fair.
+Gat, jj, Xet, Oxen and Lore are all written in Rust, and the landscape research calls
+single-binary distribution “the category norm”.
+But the evidence says this is not a language problem.
 
 | Concern | Finding |
 | --- | --- |
-| Startup | `blobsy --version` 0.53–0.58 s vs bare `node` 0.03 s [V]. The cost is eager imports: `marked-terminal` ~160 ms, `@aws-sdk/client-s3` ~133 ms, `zod` ~64 ms, `yaml` ~36 ms [S]. A lazily-loaded TS CLI starts in ~100–150 ms; Rust CLIs (gat, jj) in 8–14 ms. A merge driver runs once per conflicted *manifest*, not per data file, so ~100 ms is invisible. |
-| Hot paths | Node is within 1.0–1.5× of Rust: SHA-256 (OpenSSL) 1 GiB in 4.3–4.9 s vs Rust `sha2` 6.7 s on this CPU; 100k-file walk+stat 340 ms vs 209–288 ms; zstd of 179 MB 2.1–2.3 s vs 1.7–1.8 s [S]. Only BLAKE3 is a large Rust win, and that is a hash choice, not a language choice; the Gat comparison recommends keeping SHA-256. |
-| Single binary | `bun build --compile` produced a working 84 MB blobsy binary in 2.8 s [S]. Node SEA is maturing. Claude Code and Codex ship native binaries via per-platform npm packages; the same packaging works for a bun/SEA build or a Rust binary, so install UX is independent of language. |
-| Ecosystem | Create-only writes are available in every option: AWS SDK v3 `IfNoneMatch`; `aws-sdk-s3`; Rust `object_store`; and **OpenDAL’s npm bindings**, which could give in-process GCS/Azure preconditions without rclone (closing the gap in §6.4) [S]. |
-| Supply chain | A wash: 166 npm packages in blobsy’s prod tree (94 are AWS SDK/Smithy) vs ~276 crates for a blobsy-shaped Rust CLI (Gat: 455) [S]. |
-| Velocity | Rust clean release builds take minutes (Gat ~7 min); vitest and goldens iterate in seconds. Coding agents still pay a compile-fix tax in Rust [S]. The three blockers (B-1..B-3) are policy bugs that no type system prevents; error-shape drift is the one place Rust’s `Result` would genuinely help. |
-| Switch cost | After Phases 1–2: ~5–6k LOC TS → ~7–9k Rust, 3–6 weeks plus release engineering [I]. Porting *before* Phase 1 would port code that is about to be deleted. The 71 golden tryscripts run `blobsy` from `$PATH` and carry over unchanged to any binary with identical output [S]. A napi-rs hybrid is the worst option: all of Rust’s build matrix for ≤1.5× gains. |
+| Startup | `blobsy --version` takes 0.53–0.58 s, vs 0.03 s for bare `node` [V]. The cost is eager imports (see the breakdown below) [S]. A lazily loaded TS CLI starts in ~100–150 ms; Rust CLIs (gat, jj) start in 8–14 ms. A merge driver runs once per conflicted *manifest*, not once per data file, so ~100 ms is invisible. |
+| Hot paths | Rough parity [S]. SHA-256, a 100k-file walk and zstd are all within 1.0–1.5×. The SHA-256 comparison was OpenSSL vs Rust `sha2` without SHA-NI on this CPU. Neither language is the bottleneck. Only BLAKE3 is a large Rust win, and that is a choice of hash, not of language; the Gat comparison recommends keeping SHA-256. |
+| Single binary | `bun build --compile` produced a working 84 MB blobsy binary in 2.8 s [S], and Node SEA is maturing. Claude Code and Codex ship native binaries through per-platform npm packages. That packaging works the same for a bun/SEA build or a Rust binary, so install UX is independent of language. |
+| Ecosystem | Create-only writes are available in every option: AWS SDK v3 `IfNoneMatch`, `aws-sdk-s3`, Rust `object_store`, and **OpenDAL’s npm bindings**. The last could give blobsy in-process GCS/Azure preconditions without rclone, closing the gap in §6.4 [S]. |
+| Supply chain | A wash [S]. Blobsy’s production dependency tree has 166 npm packages (94 are AWS SDK/Smithy). A blobsy-shaped Rust CLI would pull ~276 crates; Gat pulls 455. |
+| Velocity | A clean Rust release build takes minutes (Gat ~7 min); vitest and goldens iterate in seconds. Coding agents still pay a compile-fix tax in Rust [S]. The three blockers (B-1..B-3) are policy bugs that no type system prevents. Error-shape drift is the one place Rust’s `Result` would genuinely help. |
+| Switch cost | After Phases 1–2: ~5–6k LOC of TS becomes ~7–9k of Rust, taking 3–6 weeks plus release engineering [I]. Porting *before* Phase 1 would mean porting code that is about to be deleted. The 71 golden tryscripts run `blobsy` from `$PATH`, so they carry over unchanged to any binary with identical output [S]. A napi-rs hybrid is the worst option: all of Rust’s build matrix for ≤1.5× gains. |
 
-**Recommendation: stay in TypeScript through Phase 3** (no rewrite, no hybrid).
-Do these now regardless:
+Startup cost by import [S]:
+
+- `marked-terminal`: ~160 ms;
+- `@aws-sdk/client-s3`: ~133 ms;
+- `zod`: ~64 ms;
+- `yaml`: ~36 ms.
+
+**Recommendation: stay in TypeScript through Phase 3**: no rewrite, no hybrid.
+Whatever happens later, do these now:
+
 - Lazy-load `@aws-sdk`, `marked-terminal` and `zod`, with a CI startup budget
-  (`--version` < 200 ms).
-- Give the merge driver and hooks a minimal-import entry point.
+  (`--version` under 200 ms).
+
+- Give the merge driver and the hooks a minimal-import entry point.
+
 - Ship bun-compiled binaries alongside npm as an experiment, and run the golden suite
   against them.
-- Loosen `engines` to Node ≥ 22.15 (the zstd floor).
-- Make the formats language-neutral: a normative spec with test vectors for `.bref` 0.2,
-  `.brefs`, `tree_id`, the deterministic tar flavor, key derivation and `--json`
-  schemas. That makes a later port, or a second implementation, cheap.
+
+- Write a normative spec, with test vectors, for:
+  - `.bref` 0.2 and `.brefs`;
+  - `tree_id`;
+  - the deterministic tar flavor;
+  - key derivation;
+  - the `--json` schemas.
+
+  A spec makes a later port, or a second implementation, cheap.
+
+The package already requires Node ≥ 22.15, the zstd floor.
+Only `CLAUDE.md` and `.nvmrc` imply 24, and only for development.
 
 **Decision rule:** switch to Rust after Phase 2 only if one of these is *measured*:
-1. After Phase 1 and lazy imports, a real workload is more than 2× over budget and the
-   profile blames the runtime.
+
+1. **A workload blows its budget.** After Phase 1 and lazy imports, a real workload is
+   more than 2× over budget, and the profile blames the runtime.
    Suggested budgets:
    - `status`/`verify` on a 10k-entry manifest: ≤ 1 s warm;
    - `--version`, hooks and the merge driver: ≤ 150 ms;
    - publishing a 15k-file / 170 MB snapshot: ≤ 10 s.
-2. Both `npx` and a single binary are unacceptable in a target environment.
-3. Blobsy becomes a library product that needs in-process git or non-JS embedding.
-4. An npm supply-chain incident makes the dependency tree unacceptable.
+2. **Distribution fails.** Both `npx` and a single binary are unacceptable in a target
+   environment.
+3. **Blobsy becomes a library product** that needs in-process git or non-JS embedding.
+4. **A supply-chain incident.** An npm incident makes the dependency tree unacceptable.
 
-If none fires by the end of Phase 3, the question is settled.
+If none of these fires by the end of Phase 3, the question is settled.
 
 ### 7.5 Documentation
 
-Restructure (round 7 already asked for part of this): a normative `spec/` (≤800 lines,
-shipped behavior only — concepts, invariants, formats, commands, config, threat model),
-`roadmap/` (everything deferred, including this review’s proposals once approved),
-`reviews/` (rounds 7–9 and archived plans, read-only), a ≤300-line testing doc, and a
-≤200-line README. Render defaults and command tables from code, as the skill text
-already is.
+Restructure the docs (round 7 already asked for part of this):
+
+- **`spec/`**, normative and ≤800 lines, describing shipped behavior only: concepts,
+  invariants, formats, commands, config, threat model.
+- **`roadmap/`**: everything deferred, including this review’s proposals once approved.
+- **`reviews/`**, read-only: rounds 7–9, these sub-reviews, archived plans.
+- **A testing doc** of ≤300 lines, and **a README** of ≤200 lines.
+
+Render defaults and command tables from code, as is already done for the skill text.
+
+This round adds ~4,400 lines of review and research.
+The first act of the restructure should be moving rounds 7–9 and the sub-reviews into
+`reviews/`, so the normative spec stops sharing a directory with critiques of it.
 
 * * *
 
 ## 8. Agents and non-git porcelains
 
-- The SKILL omits `sync`, `mv`, `rm`, conflicts, what to do after `git
-  pull/merge/rebase/stash`, and the two-commit rule; and `pull`’s refusal message
-  teaches `--force`, which is destructive in exactly the case that matters [S]. After
-  §5.1–§5.2 most of these instructions disappear rather than needing to be added.
-- **jj (Jujutsu)**
-  [S, `research-2026-10-22-jj-vcs-and-blobsy.md`, tested with jj 0.46.0 in a colocated repo].
-  jj is active (monthly releases 0.34 → 0.46 since Oct 2025; its creator moved from
-  Google to East River Source Control in July 2026) and still has no Git LFS,
-  `.gitattributes`, hooks, or partial-clone support; its roadmap points at a VFS and
-  chunked storage rather than LFS. For blobsy:
-  - `jj git push` runs `git push --no-verify` and `jj commit` runs no hooks, so the
-    pre-push upload never happens (H-7). This is the strongest single argument for X-1
-    (hook-independent correctness) and for derived keys (nothing to write back).
-  - jj snapshots every non-ignored file under 1 MiB on almost every command, so a
-    payload jj saw before `blobsy add` stays tracked; recovery needs `jj file untrack`.
-  - jj ignores `.gitattributes` merge drivers; the planned manifest driver must also be
-    a standalone `$base $left $right $output` tool registrable as a jj merge tool.
-  - What works: `blobsy add` → `blobsy push` → `jj commit` → `jj git push` produces a
-    correct commit; `.bref` conflicts resolve with `jj resolve --tool :theirs`;
-    colocated `git add` is harmless (jj 0.45 fixed an index-corruption bug triggered by
-    exactly this pattern).
-  - Recommendations: gitignore `.blobsy/` at setup (H-1); regenerate the managed
-    `.gitignore` block from pointers rather than merging it; detect jj (skip `git add`,
-    untrack already-snapshotted payloads, jj wording); add a jj pre-upload hook once jj
-    ships one (open design PR); hydration must stay on-demand and idempotent.
-- Plan/apply output (`--dry-run --json` that emits the exact resolved keys and actions)
-  is trivial once keys are derivable and suits agents well [S].
+**Agent skill gaps [S].**
+
+- The SKILL omits:
+  - `sync`, `mv` and `rm`;
+  - conflicts;
+  - what to do after `git pull/merge/rebase/stash`;
+  - the two-commit rule.
+- Worse, `pull`’s refusal message teaches `--force`, which is destructive in exactly the
+  case that matters.
+- After §5.1–§5.2, most of these instructions disappear rather than needing to be added.
+
+**jj (Jujutsu)** [S, jj research, tested with jj 0.46.0 in a colocated repo]. jj is
+active, with monthly releases (0.34 → 0.46 since Oct 2025). It still has no LFS,
+`.gitattributes`, hooks or partial clone.
+
+What breaks for blobsy under jj:
+
+- **No pre-push upload.** `jj git push` runs `git push --no-verify`, so the pre-push
+  upload never happens (H-7). This is the strongest argument for X-1 and for derived
+  keys.
+- **Payloads committed by accident.** jj snapshots non-ignored files under 1 MiB. A
+  payload that jj saw before `blobsy add` stays tracked, and recovery needs
+  `jj file untrack`.
+- **Drivers ignored.** jj ignores `.gitattributes` drivers, so the manifest driver must
+  also work as a four-argument jj merge tool.
+
+What already works:
+
+- `blobsy add` → `blobsy push` → `jj commit` → `jj git push`;
+- `jj resolve --tool :theirs` for pointer conflicts.
+
+Recommendations:
+
+- Move machine-local state under the git directory (§6.3).
+- Regenerate the ignore block rather than merging it.
+- Detect jj: skip `git add`, and untrack payloads that jj already snapshotted.
+- Add a jj pre-upload hook once jj ships one.
+
+**Plan/apply output.** A `--dry-run --json` that emits the exact resolved keys and
+actions becomes trivial once keys are derivable, and suits agents well [S].
 
 * * *
 
@@ -724,195 +1235,289 @@ already is.
 
 ### 9.1 Gat — the closest competitor
 
-Full reference: `research-2026-10-22-competitor-gat.md` (source review plus empirical
-runs of Gat 0.0.15 built from source) [S].
+Full reference: `research-2026-10-22-competitor-gat.md`: a source review plus empirical
+runs of Gat 0.0.15, built from source [S].
 
-**What it is.** Rust, Apache-2.0, created 2026-09-07, releases v0.0.10–0.0.15, ~152k
-lines including 2,467 tests, CI on three OSes; one human maintainer, ~630 stars, little
-discussion so far. It has:
-- a committed repo-wide `gat.lock` (BLAKE3 → path; no size, mode or compression;
-  optional sharding by path hash) and three config scopes (`gat.yaml`, global, local);
-- derived keys `blake3/xx/yy/<oid>` that are never stored, so there is no two-phase
-  commit, but the remote is opaque;
-- OpenDAL backends (S3, Azure, GCS, OSS, fs);
-- a local CAS cache (`.gat/objects`) with reflink/hardlink materialization, and SQLite
-  placement state;
-- per-file exclusions in `.git/info/exclude`;
-- hydration hooks (post-checkout, post-merge, post-rewrite), but **no pre-commit or
-  pre-push guard**;
-- a per-path merge driver installed per clone;
-- no `--json` output.
+**What it is.**
 
-**Is Gat’s design better?** Decision by decision [S, §12 of the Gat doc]:
+- Rust, Apache-2.0, created 2026-09-07; releases v0.0.10–0.0.15.
+- About 152k lines, including 2,467 tests, with CI on three OSes.
+- One human maintainer, ~630 stars, and little discussion so far.
+
+**Its design:**
+
+- **Lock file:** a committed repo-wide `gat.lock` (BLAKE3 → path; no size, mode or
+  compression), optionally sharded by path hash.
+- **Config:** three scopes (global, project, local).
+- **Keys:** derived as `blake3/xx/yy/<oid>` and never stored, so there is no two-phase
+  commit. The remote is opaque.
+- **Backends:** OpenDAL (S3, Azure, GCS, OSS, fs).
+- **Local state:** a CAS cache with reflink/hardlink materialization, plus SQLite
+  placement state.
+- **Ignores:** per-file exclusions in `.git/info/exclude`.
+- **Hooks:** hydration hooks (post-checkout, post-merge, post-rewrite), but **no
+  pre-commit or pre-push guard**.
+- **Merging:** a per-path merge driver, installed per clone.
+- **Output:** no `--json`.
+
+**Is Gat’s design better?** Decision by decision [S, Gat doc §12]:
 
 | Decision | Better | Note |
 | --- | --- | --- |
-| Derived keys vs stored `remote_key` | **Gat** | The single most important lesson; adopt (D2). |
-| Local CAS cache | **Gat** | Offline branch switches; free re-adds; verified prune. Adopt as optional (X-3). |
-| Merge driver | **Gat ships one; blobsy’s prototype handles conflicts better** | Same rules; Gat’s keep-ours-without-markers conflict handling loses data on a naive resolve. |
+| Derived keys vs stored `remote_key` | **Gat** | The single most important lesson. Adopt it (D2). |
+| Local CAS cache | **Gat** | Offline branch switches, free re-adds, verified prune. Adopt it as optional (X-3). |
+| Merge driver | **Gat ships one; blobsy’s prototype handles conflicts better** | The rules are the same. On conflict Gat keeps *ours* with no markers, which loses data on a naive resolve. |
 | Config scopes (global/project/local, `${VAR}` URLs) | **Gat** | Matches dropping subdirectory configs (S1). |
-| Single binary | **Gat** | Category norm; see §7.4. |
-| Unit of reference | **Split** | One lock is best at scale but is a single conflict hotspot that needs a per-clone driver; per-file pointers merge everywhere. Blobsy’s pointers plus per-collection manifests combine the strengths. |
-| PR diff readability | **Split** | Gat: one line per change, hash first, no size. Blobsy proposed: path-first rows with size and mode. |
-| Hash (BLAKE3 vs SHA-256) | **Blobsy** | SHA-256 matches LFS oids (free `import-lfs`), S3 native checksums, and Node crypto. |
-| Remote browsability | **Blobsy** | Gat buckets are unreadable without git. |
+| Single binary | **Gat** | The category norm. §7.4 shows how blobsy gets one without Rust. |
+| Unit of reference | **Split** | One lock is best at scale, but it is a single conflict hotspot that needs a per-clone driver. Per-file pointers merge everywhere. Blobsy’s pointers plus per-collection manifests combine both strengths. |
+| PR diff readability | **Split** | Gat: one line per change, hash first, no size. Blobsy proposes path-first rows with kind and size. |
+| Hash (BLAKE3 vs SHA-256) | **Blobsy** | SHA-256 matches LFS oids (making `import-lfs` free), S3 native checksums, and Node crypto. |
+| Remote browsability | **Blobsy** (with D2 option b) | Gat buckets are unreadable without git. |
 | Backend pluggability | **Blobsy** | Command and rclone backends have no Gat equivalent. |
-| Safety hooks | **Blobsy** | Gat lets unpushed content reach `git push` and ignores `core.hooksPath`. |
-| Agent UX | **Blobsy** | `--json`, skill, self-describing pointers. |
-| UC-3 / UC-5 | **Blobsy (if built)** | Gat has none. Its experimental `mount` pins another repo’s lock, the nearest thing to UC-5. |
+| Safety hooks | **Blobsy** | Gat lets unpushed content reach `git push`, and it ignores `core.hooksPath`. |
+| Agent UX | **Blobsy** | `--json`, the skill, and self-describing pointers. |
+| UC-3 / UC-5 | **Blobsy (if built)** | Gat has none. Its experimental `mount`, which pins another repo’s lock, is the nearest thing to UC-5. |
 
 **Verdict.** For the repo-files core (UC-1/2/4), Gat’s design is better engineered and
-more coherent than blobsy’s *current* design: it made the right calls on keys,
-collections, caching and hydration.
-It is weaker on safety at the edges, transparency, pluggability and UC-3. Gat bugs found
-by running it:
-- a data-losing conflict UX;
+more coherent than blobsy’s *current* design.
+It made the right calls on keys, collections, caching and hydration.
+It is weaker on safety at the edges, transparency, pluggability and UC-3.
+
+Running Gat surfaced these bugs:
+
+- a conflict UX that loses data;
 - invalid locks from hosted or sharded merges;
 - worktrees clobbering each other’s exclude blocks;
 - `core.hooksPath` ignored;
-- exec bit lost;
+- the exec bit lost;
 - payload edits invisible to `gat status`;
-- fetch stops at the first missing object.
+- fetch stopping at the first missing object.
 
-Most of the changes this review recommends for blobsy’s core (D2, D3, D4, X-3) are ones
-Gat already embodies.
-The rest (safety guards, validation, `--json`, UC-3/5) are where blobsy can lead.
+Gat already embodies most of the core changes this review recommends (D2, D3, D4, X-3).
+The rest — safety guards, validation, `--json`, UC-3/UC-5 — are where blobsy can lead.
 
 ### 9.2 Other tools
 
-Source-level reviews in `research-2026-10-22-competitors-other.md` and the landscape
+Source-level reviews are in `research-2026-10-22-competitors-other.md` and the landscape
 refresh [S]:
 
 | Tool | What it is (Oct 2026) | Relevance to blobsy |
 | --- | --- | --- |
-| **s3lfs** (Python) | Committed YAML manifest (path → sha256) split per top-level dir, key-wise merge driver, hooks, browsable S3 layout `assets/<sha>/<path>`, racy-clean hash cache, “never delete local bytes unless the remote has them”, TLA+ models. 0 stars, one author, S3 only. | A design reference, not a market threat; validates the UC-2 design and supplies two rules blobsy lacks (racy-clean cache; remote-presence check before local deletion). |
-| **git-xet** (Hugging Face) | Git LFS custom transfer agent; Hub-negotiated storage; only a dev server is open. | Fails PAIN-5. Borrow the shape (content id separate from location; index uploaded last), not the chunk formats. |
-| **Oxen** | Own VCS + server; directories bucketed (~10k entries) by path hash; merges outside git. | Not git-compatible for UC-4; non-deterministic tree hashes. |
-| **Epic Lore** (Jun 2026) | Centralized chunked VCS, no git interop. | Patterns: single conditional-write commit, typed “obliterated” markers instead of 404s, compression outside identity, causal locks for unmergeable files. |
-| **git-lfs-fuse** | ~1.5k LOC Go; lazy FUSE mount of LFS repos; inactive since mid-2025. | Not a competitor. |
-| **Git (native)** | Large-object promisors (2.49–2.56) reduce clone cost; history removal still requires rewriting. | Complement, not a replacement; PAIN-3 untouched. |
-| **Git LFS / GitHub** | 3.7.x–3.8.0; metered billing (10 GiB free storage/bandwidth); removal = delete and recreate the repo. | PAIN-3/4 confirmed; `import-lfs` is the on-ramp (LFS oid = sha256 of raw bytes). |
-| **DVC** | Acquired by lakeFS (Nov 2025); last release Mar 2026. | Stalled incumbent for UC-2-like workflows. |
-| **HF Storage Buckets** (Mar 2026) | Mutable S3-like buckets beside versioned repos; plan/apply sync. | Same versioned-vs-working-storage split as file vs mirror mode; HF-only. |
+| **s3lfs** (Python) | A committed YAML manifest (path → sha256) split per top-level dir, a key-wise merge driver, hooks, a browsable S3 layout `assets/<sha>/<path>`, a racy-clean hash cache, and TLA+ models. 0 stars, one author, S3 only. | A design reference, not a market threat. It validates the UC-2 design, and it adds two rules blobsy lacks: a racy-clean cache, and checking that the remote has the bytes before deleting local ones. |
+| **git-xet** (Hugging Face) | A Git LFS custom transfer agent with Hub-negotiated storage; only a dev server is open. | Fails PAIN-5. Borrow the shape (content id separate from location; index uploaded last), not the chunk formats. |
+| **Oxen** | Its own VCS and server. Directories are bucketed (~10k entries) by path hash, and merges happen outside git. | Not git-compatible for UC-4, and its tree hashes are non-deterministic. |
+| **Epic Lore** (Jun 2026) | A centralized chunked VCS with no git interop. | Patterns worth noting: a single conditional-write commit, typed “obliterated” markers instead of 404s, compression kept outside identity, and causal locks for files that can’t be merged. |
+| **git-lfs-fuse** | ~1.5k LOC of Go: a lazy FUSE mount of LFS repos, inactive since mid-2025. | Not a competitor. |
+| **Git (native)** | Large-object promisors (2.49–2.56) reduce clone cost. Removing history still requires rewriting it. | A complement, not a replacement; PAIN-3 is untouched. |
+| **Git LFS / GitHub** | Versions 3.7.x–3.8.0. Billing is metered (10 GiB free storage and bandwidth). Removing objects means deleting and recreating the repo. | Confirms PAIN-3/4. `import-lfs` is the on-ramp, since an LFS oid is the sha256 of the raw bytes. |
+| **DVC** | Acquired by lakeFS (Nov 2025); last release Mar 2026. | A stalled incumbent for UC-2-like workflows. |
+| **HF Storage Buckets** (Mar 2026) | Mutable S3-like buckets beside versioned repos, with plan/apply sync. | The same versioned-vs-working-storage split as file vs mirror mode, but HF-only. |
 
-No tool reviewed — Gat included — offers UC-3/UC-5 (immutable tree snapshots and caches
-outside git) on arbitrary storage.
-Cache-specific tools (actions/cache, runs-on/cache, Turborepo/Nx, sccache, Bazel) are
-CI- or build-system-scoped; Nx deprecated its bucket caches after CVE-2025-36852.
+**Nobody offers UC-3/UC-5 on arbitrary storage.** No tool reviewed, Gat included, offers
+immutable tree snapshots and caches outside git on any bucket.
+The cache-specific tools (actions/cache, runs-on/cache, Turborepo/Nx, sccache, Bazel)
+are scoped to CI or to a build system.
+Nx deprecated its bucket caches after CVE-2025-36852.
 
 ### 9.3 Positioning
 
-- **The “serverless LFS replacement with a manifest and a merge driver” niche is crowded
-  in design (Gat, s3lfs) but thin in adoption.** Building UC-2 *only* to match Gat would
-  duplicate a better-tested tool.
-  UC-2 is still worth building, because blobsy’s users need it and because it shares the
-  entry format, tree id and store with UC-3/5. But it should ship bundled with blobsy’s
-  differentiators, not as the headline.
+- **The niche is crowded in design but thin in adoption.** Gat and s3lfs both already
+  offer “a serverless LFS replacement with a manifest and a merge driver”.
+  - Building UC-2 *only* to match Gat would duplicate a better-tested tool.
+  - UC-2 is still worth building: blobsy’s users need it, and it shares the entry
+    format, tree id and store with UC-3/5.
+  - But it should not be the headline.
 
 - **Blobsy’s defensible position is the combination:**
   - **UC-1:** per-file pointers that merge on any host.
   - **UC-2:** per-collection manifests with validated merges.
-  - **UC-3/5:** immutable snapshots for trees and assets on any bucket.
-    Nobody covers this.
-  - **UC-6:** run mirrors.
+  - **UC-3/5:** immutable snapshots for trees and assets, on any bucket.
+    Nobody else covers this.
 
-  All four sit on any storage (command and rclone backends), with safety guards that
-  don’t depend on hooks, and are built agent-first (`--json`, skill, plan/apply).
+  All three run on any storage, including command and rclone backends.
+  Safety doesn’t depend on hooks, and the CLI is agent-first (`--json`, skill,
+  plan/apply).
 
 - **Interop:**
   - `import-lfs` is the high-value on-ramp.
   - Reading `gat.lock` is not worth it now.
     Gat uses BLAKE3, so import means rehashing, and its user base is tiny.
-  - Revisit if Gat gains traction.
-    A `blobsy import-gat` would be straightforward, since a lock row maps to a manifest
-    line once rehashed.
+  - Revisit if Gat gains traction; a `blobsy import-gat` would be straightforward.
 
-- **Remote browsability vs derived keys** is not either/or.
-  The invariant that matters is “the key is a function of committed data”.
-  Pure CAS (`sha256/<hex>`) is the default; `{content_sha256_short}/{filename}`-style
-  templates stay available.
-  They are still derivable, so there is no two-phase commit, but renames re-upload.
-  Path-shaped browsability is the job of mirrors (UC-6), plus `blobsy ls --remote` for
-  file mode.
+- **Remote browsability vs derived keys is not either/or.** The invariant is only that
+  the key is a function of committed data.
+  Option (b) in D2 keeps filenames visible.
 
 * * *
 
 ## 10. Recommendations and sequencing
 
-**Phase 0 — safety, now (no design decisions needed):** B-1 (write the stat cache only
-after successful push/pull), B-2 (pre-push hook reads pushed refs; interim: scan the
-commits in `<remote>..<local>` for pointers), B-3 (pre-commit large-file guard), H-1
-(`setup` gitignores `.blobsy/`; fix design-doc wording), M-1 (keep compressed only if
-smaller), L-1 (path containment), README dedup claim, SKILL “after git operations”
-guidance.
+Each phase lists its **smallest shippable cut** first, then what to defer.
 
-**Phase 1 — simplify the core (gates every new mode):** S1–S3 deletions; S4
-content-derived keys + `.bref` 0.2 + create-only PUT; S5 known-synced rule + wired hash
-cache; S6 reporter + plan/execute; S7 batching; `Backend.list`, `putIfAbsent`,
-capabilities probe; batched transfer.
-**Pin the entry format and `tree_id` definition as a normative appendix** (tiny, and the
-trading repo wants the receipt schema first).
+**Phase 0 — safety, now.** No decisions are needed; the full B-2 fix waits for D2.
 
-**Phase 2 — UC-2 collections:** manifest format + validator; `RefSource` abstraction;
-collection verbs; per-path merge driver + `--resolve`; `blobsy diff`; CI check.
+Smallest cut:
 
-**Phase 3 — UC-3/UC-5 snapshots:** `snap publish/restore/ls` with a single archive and a
-local content cache; then fallback, gc, status; then pins.
-Validate on `target/` and model directories first; run the cargo mtime experiment before
-fixing the default.
+- **B-1:** write the cache only after a successful push or pull.
+  - This closes the stash and discard variants.
+  - The pushed-but-uncommitted variant stays open until D2.
+  - As an interim, `sync` and `pull --force` print the cache-recorded key before
+    overwriting, so the bytes can be recovered by hand.
+- **B-2 (interim):** the hook reads the pushed refs from stdin and lists the `*.bref`
+  files in `<remote>..<local>`.
+  - It uploads from the working tree when the file’s hash matches the committed pointer.
+  - Otherwise it **aborts the push**, naming the commit and path.
+    Today it silently succeeds.
+- **B-3:** a pre-commit large-file guard, plus a `doctor` check.
+- **H-1:** move the stat cache under `$(git rev-parse --git-path blobsy)/` instead of
+  adding a gitignore line.
+  `doctor --fix` un-stages caches that were committed.
+- **M-1:** a push-time keep-if-smaller check.
+  Phase 1 replaces it with the add-time decision.
+- **Also:**
+  - L-1 (containment);
+  - the README dedup claim;
+  - SKILL guidance for what to do after git operations.
 
-**Phase 4 — UC-6 mirrors (round 8), narrowed;** sequencing relative to Phase 3 is an
-owner decision driven by the trading repo’s needs.
+**Phase 1 — simplify the core.** This gates every new mode, and needs D1, D2, D3 and
+D11.
 
-**Phase 5 — adoption and lifecycle:** `import-lfs`, `migrate import`, reachability GC,
-opt-in hydration hooks, `blobsy resolve --tool`.
+Smallest cut:
 
-**Explicit non-goals (all phases):** file locking; smudge/clean filters; merge drivers
-for `.bref`; network inside git operations; mutable names; bidirectional sync of derived
-trees; CDC/sub-file dedup; a server.
+- the S1–S3 deletions;
+- S4: derived keys only, `.bref` 0.2, and create-only PUT on S3 and local;
+- S5: the recoverability rule, with the hash cache wired in;
+- the full B-2 fix;
+- the entry format and `tree_id` pinned in a normative appendix, with test vectors.
+  It is tiny, and the trading repo wants the receipt schema first.
+
+Defer to Phase 2 (UC-2 scale needs these; UC-1 does not):
+
+- S6/S7 (reporter, plan/execute, batching);
+- `Backend.list`;
+- the capabilities probe;
+- batched transfer.
+
+Defer further:
+
+- S8–S10;
+- the startup and lazy-import work, which can happen at any time.
+
+**Phase 2 — UC-2 collections.** Needs D4 and D10.
+
+Smallest cut:
+
+- the manifest format, parser and validator;
+- `add --collection`, `add`, `status`, `push`, `pull` and `verify`, all over the shared
+  entry loop;
+- one ignore line per collection;
+- the validator in pre-commit and `doctor`;
+- batched transfer and existence checks;
+- S6/S7, done as part of this work.
+
+Defer:
+
+- the merge driver and `--resolve`. Plain text merge is safe, so ship them when a real
+  collection hits the clustered-adds conflict;
+- `blobsy diff`, `--include` globs, promotion/demotion, a CI action.
+
+**Phase 3 — UC-3/UC-5 snapshots.** Needs D5, D6 and D7.
+
+Smallest cut:
+
+- `snap publish|restore|ls`, with one `tar.zst` and a create-only `ref.yaml`;
+- local and S3 backends only, with exists-then-put elsewhere;
+- validation on `target/` and model directories;
+- the cargo mtime experiment, run before the default is fixed.
+
+Defer:
+
+- fallback, gc, status and pins;
+- the local archive cache;
+- provenance fields;
+- the capabilities probe.
+
+**Phase order (D14).**
+
+- UC-2 is cheaper once the Phase 1 entry loop exists.
+- UC-3/5 is the uncontested differentiator, and was described as a current need.
+- After Phase 1, per-file mode is acceptable up to a few hundred files per directory.
+
+Recommendation: choose by whichever pain is pressing now.
+If that is caches or build trees, do Phase 3 before Phase 2.
+
+**Phase 4 — run archives (D8):** receipts only, unless D8 approves more.
+
+**Phase 5 — adoption and lifecycle:**
+
+- `import-lfs` first;
+- reachability GC, only with bucket versioning as the safety net;
+- opt-in hydration hooks and `blobsy resolve --tool`;
+- `migrate import` last.
+
+**Explicit non-goals, for all phases:**
+
+- file locking;
+- smudge/clean filters;
+- merge drivers for `.bref`;
+- network inside git operations;
+- mutable names;
+- bidirectional sync of derived trees;
+- CDC or sub-file dedup;
+- a server;
+- multiple backends per repo.
 
 * * *
 
 ## 11. Decisions for the owner
 
-| # | Decision | Recommendation |
-| --- | --- | --- |
-| D1 | Adopt “one storage contract, one entry format, three reference disciplines”; reword principle 9 and “What This Design Eliminates”. | Yes |
-| D2 | Content-derived keys as the file-mode default (closes `pqyt`), giving up the date-browsable default layout. | Yes |
-| D3 | Replace the stat-cache merge base with the known-synced rule; make `sync` = `pull && push` or remove it. | Yes; keep `sync` as the one recommended verb |
-| D4 | Collection manifest: name/placement (`<dir>.brefs` sibling vs `.btree`), explicit `--collection`, explicit prune, merge driver installed by `setup`. | `.brefs` sibling; explicit; explicit prune; driver on by default |
-| D5 | Snapshot primitive for UC-3/UC-5: `snap` verbs, layout “everything under the name”, single `tar.zst` in v1, pins as `.bref kind: tree`. | Yes |
-| D6 | Snapshot trust: IAM + write segregation + provenance in v1, signatures later? | Yes (signature field reserved) |
-| D7 | Conditional writes: require a probe-verified backend for snapshot publish, or allow exists-then-put with a documented race? Thin native writes for GCS/Azure commit objects? | Allow fallback, surfaced by `doctor`; native writes for small commit objects |
-| D8 | Mirror mode (bead `s2tr`): approve, narrowed per §5.4, with R10 moved to entry assets; sequence vs snapshots. | Approve narrowed; sequence by trading-repo demand |
-| D9 | Hooks: correctness never depends on them; hydration hooks opt-in. | Yes |
-| D10 | Compression: zstd + none only; decided at track/add time; none in collections v1? | zstd + none; keep-if-smaller; allow in collections via `stored` |
-| D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes |
-| D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first; revisit `import-gat` only if Gat gains traction |
-| D13 | Implementation language: stay TypeScript, rewrite in Rust, or hybrid. | Stay TypeScript through Phase 3; lazy imports + startup budget; ship bun single binary alongside npm; switch only per the §7.4 decision rule |
+| # | Decision | Recommendation | Blocks |
+| --- | --- | --- | --- |
+| D1 | Adopt the new model: one storage contract, one entry format, references in git or by name. Reword principles 5, 6 and 9, and “What This Design Eliminates”. | Yes | Phase 1 |
+| D2 | Derived keys only (no push-time variables), closing `pqyt`. Choose the default template: (a) `sha256/{content_sha256}{suffix}`, max dedup but opaque; or (b) `{content_sha256}/{filename}{suffix}`, which keeps filenames but re-uploads on rename. | Yes; (b) as the default | Phase 1 |
+| D3 | Replace the stat-cache merge base with the recoverability rule. `sync` = `pull` then `push`, with no logic of its own. | Yes; keep `sync` as the one recommended verb | Phase 1 |
+| D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes | Phase 1 |
+| D4 | Collection manifest: name and placement (`<dir>.brefs` sibling vs `.btree`), explicit `--collection`, explicit prune, and whether `setup` installs the merge driver once it exists. | `.brefs` sibling; explicit; explicit prune; driver on by default | Phase 2 |
+| D10 | Compression: zstd and none only, decided at add time with keep-if-smaller. Allowed in collections via the `stored` column? | Yes | Phase 2 |
+| D14 | Phase order: collections (Phase 2) or snapshots (Phase 3) first? | Whichever pain is pressing now; snapshots first if build trees are the need | Phase 2/3 |
+| D5 | Snapshot primitive for UC-3/UC-5: `snap` verbs, everything stored under the name, a single `tar.zst` in v1, pins as `.bref kind: tree`. | Yes | Phase 3 |
+| D6 | Snapshot trust: IAM, write segregation and provenance in v1, with signatures later? | Yes (signature field reserved) | Phase 3 |
+| D7 | Conditional writes. Require a probe-verified backend for snapshot publish, or allow exists-then-put with a documented race? Use native writes (OpenDAL npm) for GCS/Azure commit objects? | Allow the fallback, surfaced by `doctor`; native writes for small commit objects | Phase 3 |
+| D8 | Run archives (bead `s2tr`): (a) approve round-8 mirrors, narrowed; (b) fold them into snapshots as `snap publish --unpacked`; or (c) defer, shipping only `blobsy receipt write/verify` and an rclone recipe. | (c) now; (b) if demand materializes | Phase 4 |
+| D9 | Hooks: correctness never depends on them, and hydration hooks are opt-in. | Yes | none |
+| D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first | none |
+| D13 | Implementation language: TypeScript, Rust, or a hybrid. | TypeScript through Phase 3; switch only under the §7.4 rule | none |
 
-Bead dispositions: `blobsy-pqyt` → close via D2; `blobsy-aad8` → re-point at the UC-2
-collection design (§5.3); `blobsy-4vpk` → drop (S1); `blobsy-s2tr` → resolve via D8.
+Bead dispositions:
+
+- `blobsy-pqyt`: close via D2.
+- `blobsy-aad8`: re-point at the UC-2 collection design (§5.3).
+- `blobsy-4vpk`: drop (S1).
+- `blobsy-s2tr`: resolve via D8.
 
 * * *
 
 ## Appendix A. Evidence index
 
-Sub-reviews (full reports, with reproductions; scratch paths refer to the review
-session’s ephemeral workspace):
+**Sub-reviews.** These are the full reports, with reproductions.
+Scratch paths in them refer to the review session’s ephemeral workspace.
 
-- [`round9-subreviews/complexity.md`](round9-subreviews/complexity.md) — engineering
-  complexity, target architecture, doc structure.
-- [`round9-subreviews/uc1-uc4-file-mode-and-merges.md`](round9-subreviews/uc1-uc4-file-mode-and-merges.md)
-  — UC-1/UC-4 workflows, blockers B-1..B-3, PAIN-3/4.
-- [`round9-subreviews/uc2-collections.md`](round9-subreviews/uc2-collections.md) —
-  collection manifest design, merge experiments and Monte-Carlo, driver prototype.
-- [`round9-subreviews/uc3-uc5-snapshots.md`](round9-subreviews/uc3-uc5-snapshots.md) —
-  taxonomy, snapshot primitive, conditional-write matrix, `node_modules` profile.
-- [`round9-subreviews/language-typescript-vs-rust.md`](round9-subreviews/language-typescript-vs-rust.md)
-  — TypeScript vs Rust: startup, hot-path benchmarks, distribution, switch cost.
+- [`round9-subreviews/complexity.md`](round9-subreviews/complexity.md): engineering
+  complexity, the target architecture, doc structure.
+- [`round9-subreviews/uc1-uc4-file-mode-and-merges.md`](round9-subreviews/uc1-uc4-file-mode-and-merges.md):
+  UC-1/UC-4 workflows, blockers B-1..B-3, PAIN-3/4. Its “known-pushed hash” overwrite
+  rule is superseded by §5.2.
+- [`round9-subreviews/uc2-collections.md`](round9-subreviews/uc2-collections.md): the
+  collection manifest design, merge experiments and Monte-Carlo, the driver prototype.
+  Its entry column order and merge-base reuse are superseded by §5.3.
+- [`round9-subreviews/uc3-uc5-snapshots.md`](round9-subreviews/uc3-uc5-snapshots.md):
+  the taxonomy, the snapshot primitive, the conditional-write matrix, the `node_modules`
+  profile.
+- [`round9-subreviews/language-typescript-vs-rust.md`](round9-subreviews/language-typescript-vs-rust.md):
+  TypeScript vs Rust: startup, hot-path benchmarks, distribution, switch cost.
+  Its “loosen engines” advice is already true.
 
-Research (October 2026 refresh), in `docs/project/research/current/`:
+**Research** (the October 2026 refresh), in `docs/project/research/current/`:
 
 - `research-2026-10-22-large-file-tools-landscape-refresh.md`
 - `research-2026-10-22-object-store-capabilities-refresh.md`
@@ -921,9 +1526,82 @@ Research (October 2026 refresh), in `docs/project/research/current/`:
 - `research-2026-10-22-competitors-other.md`
 - `research-2026-10-22-jj-vcs-and-blobsy.md`
 
-Lead-reviewer reproductions: the 1,000-file benchmark (§2.2), B-1 (`edit; track;
-stash; sync`), H-1 (`setup` + `git add -A`), L-1 (`local:../g1rem` rejected for repo
-`g1`), compression-larger (§2.2).
+**Lead-reviewer reproductions.** All used the CLI at `packages/blobsy/bin/blobsy`, a
+`local:` backend, and git 2.43.
+
+- **1,000-file benchmark (§2.2):**
+  1. `setup --auto local:../remote`.
+  2. Create 10 dirs × 100 files with `head -c 210000 /dev/urandom`.
+  3. `track data/coll`, `status`, `push`, commit, `status`, `sync`, each timed.
+
+- **B-1:**
+  1. Gitignore `.blobsy/`.
+  2. `add f.bin`, commit, `push`, commit.
+  3. Overwrite `f.bin`, then `track f.bin`.
+  4. `git stash`, then `sync`.
+
+  Result: the file is reverted to v1, and v2 exists in no remote object.
+
+- **H-1:** `setup` in a fresh repo, then `track`, then `git status` shows `.blobsy/`
+  untracked. `doctor` reports “✗ .blobsy/ not in root .gitignore”.
+
+- **H-6:** 20,000 files and 20,000 ignore lines in one directory make `git status` take
+  0.82 s. A single `*.bin` line takes 0.009 s.
+
+- **L-1:** with repo `g1`, `setup --auto local:../g1rem` fails with “must be outside the
+  git repository”.
+
+- **Startup:** `blobsy --version` takes 0.53–0.58 s, vs 0.03 s for `node -e ''`.
+
+## Appendix B. Red-team revisions (v2)
+
+An independent red-team pass checked the v1 draft against the source, the sub-reviews
+and the running CLI.
+
+**What it confirmed:** the load-bearing facts.
+
+- B-1 (all three variants), H-1, H-6 and L-1;
+- the startup numbers;
+- the inert config;
+- the unemitted state symbols;
+- that `getCachedHash` is unused;
+- the 9-state sync;
+- the Gat and jj facts.
+
+**What it found:** 34 issues, all incorporated (full list:
+[`round9-subreviews/redteam-findings.md`](round9-subreviews/redteam-findings.md)). The
+substantive changes from v1:
+
+1. **A new overwrite rule.** “Known-synced” (the hash appears in git history) became
+   **recoverability** (synced here, or exists remotely).
+   The v1 rule lost unpushed bytes after `commit` + `revert` in plain git.
+2. **One entry format** (`path, kind, size, sha256`), pinned in §5.3. v1 presented two
+   incompatible column orders.
+3. **Complexity claims corrected.** Phase 1 removes ~15–20% of LOC and most of the
+   accidental *concepts*. The full design adds code overall but reduces concepts per use
+   case.
+4. **Push-time key variables forbidden** in `.bref` 0.2, so invariant 2 holds.
+   v1 kept them as an “advanced option”, which would have kept all the write-back code.
+5. **Phase 0 qualified.** B-1’s pushed-but-uncommitted variant and the full B-2 fix need
+   D2. B-2’s interim fix aborts the push.
+   B-3 adds a `doctor`/CI check, because hooks are unreliable.
+6. **Mirrors became an open decision** (D8: approve, fold or defer).
+   The recommendation is to defer.
+7. **New material:**
+   - §4.0 (the flows side by side);
+   - §5.6 (credentials, Windows, large objects, backend moves, scope);
+   - §5.7 (existing users);
+   - the smallest cut per phase;
+   - a “Blocks” column in §11, and D14 (phase order).
+8. **Smaller fixes:**
+   - GC reachability now includes legacy `remote_key`s.
+   - The scope of `--resolve` is narrowed.
+   - `.git/info/exclude` is rejected.
+   - Machine-local state moves under the git directory.
+   - Stat-cache call sites corrected to 12.
+   - Gat no-driver cells marked [I].
+   - D2 offers a filename-preserving template.
+   - The `engines` advice is corrected.
 
 <!-- This document follows common-doc-guidelines.md.
 See github.com/jlevy/practical-prose and review guidelines before editing.

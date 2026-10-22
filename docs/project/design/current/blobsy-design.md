@@ -46,7 +46,7 @@ repositories.
 | UC-3 | A very large tree (node_modules, cargo `target/`) synced or cached externally with no manifest in git at all. | Nothing per tree (a config stanza at most). | **Not covered.** Immutable snapshots proposed (round 9 §5.4). |
 | UC-4 | Standard git merge workflows for externalized files: the merged data is external, merges happen in git on the metadata (UC-1, UC-2). | — | **Partly covered.** Pointer merges work with plain git; payload hydration and some git operations are unsafe today (round 9 §3–§4). |
 | UC-5 | Fixed assets with immutable names, separate from git workflows (the substrate for UC-3). | Nothing, or one pin line. | **Not covered.** Same snapshot primitive as UC-3 (round 9 §5.4). |
-| UC-6 | Run/output archives mirrored to path-shaped prefixes with receipts (from round 8). | A receipt, optionally. | **Proposed** (round 8 mirror mode). |
+| UC-6 | Run/output archives mirrored to path-shaped prefixes with receipts (from round 8). | A receipt, optionally. | **Open decision** (round 9 D8: defer to a receipt writer, or fold into snapshots). |
 | UC-7 | Adoption: convert existing large files (and Git LFS pointers) in history to blobsy references. | — | **Not covered.** `import-lfs` and history import proposed (round 9 §5.5). |
 
 Two workloads are easy to conflate under UC-3. **Derived caches** take their identity
