@@ -255,10 +255,62 @@ differently; pick one; `blobsy snap restore` verifies the tree id against the pi
 
 ### 4.3 Gat vs blobsy on merging
 
-*(Filled from the source-level Gat review, including tested scenarios — see §9.1 and
-`research-2026-10-22-competitor-gat.md`.)*
+Gat 0.0.15 was built from source and every scenario below was run with the real binary
+against a `file://` remote (git 2.43) [S, `research-2026-10-22-competitor-gat.md` §7].
+The blobsy columns are blobsy *today* (per-file pointers, measured) and the *proposed*
+design (§5.1–§5.3; the UC-2 driver was prototyped and tested [S]).
 
-<!-- GAT-MERGE-PLACEHOLDER -->
+**How Gat merges.** Gat keeps every tracked file in one repo-wide `gat.lock`
+(`<blake3>⇥<path>` rows, sorted; optionally sharded by path hash).
+A per-path merge driver (`gat merge-driver %O %A %B`) is registered **per clone** in
+`.git/config` and `.git/info/attributes` by `gat init`; nothing is committed.
+Per path: identical on both sides → keep; changed on one side → take it; changed
+differently → conflict.
+After a clean merge, a `post-merge` hook hydrates payloads from the local cache (no
+network unless `sync.auto_fetch`).
+
+| Scenario | Gat (driver installed) | Gat (no driver: fresh clone, web merge, jj) | Blobsy today | Blobsy proposed |
+| --- | --- | --- | --- | --- |
+| Two branches add different files to the same directory (adjacent names) | Clean; hook hydrates | **False conflict** in `gat.lock` | Pointers: clean. **`.gitignore` block: false conflict** (H-4) | UC-1: clean (ignore block regenerated, not merged). UC-2: clean with driver; false conflict without, repaired by `merge-manifest --resolve` |
+| Edits to two different (adjacent) files | Clean | False conflict | Clean | Clean (UC-1); clean with driver (UC-2) |
+| Both edit the same file differently | Conflict, but the lock is left as *ours*: no markers, **the other side’s clean changes are omitted**; a naive `git add` silently dropped an independent addition [S, tested] | Conflict with markers | Conflict on one small pointer, with markers | Conflict on one pointer (UC-1) or **one marked line in the full merged manifest** (UC-2); validator blocks committing markers |
+| Delete vs modify | Conflict (same data-loss hazard on naive resolve) | Conflict | Conflict on the pointer | Same as above |
+| Rename on one side, edit on the other | Conflict (rename seen as delete + add) | Conflict | Conflict | Same; `blobsy resolve` helps pick |
+| Identical change on both sides | Clean | Clean | Clean | Clean |
+| File added at `p` on one side, `p/x` on the other | Refused (driver) — but **sharded locks merge cleanly into an invalid lock** that blocks every Gat command | **Clean text merge → invalid lock**; “Could not read gat.lock” | Clean (independent pointers; on-disk clash surfaces at pull) | Validator (pre-commit, doctor, CI) flags the prefix collision; resolved per path |
+| Rebase / cherry-pick | Clean; rebase hydrates (`post-rewrite`); cherry-pick does **not** hydrate | Likely conflicts | Clean pointers, but two-commit flow doubles conflicts (H-2) | Clean; one commit per change |
+| After merge: payload hydration | Hook, cache-only; `gat pull` if objects missing | Manual `gat sync`/`pull` | Manual; `pull` falsely refuses after a teammate change (H-3); `sync` works | `blobsy pull` with the known-synced rule; opt-in hydration hooks |
+| Resolve tooling | None; hand-edit hex rows from `:1:/:2:/:3:` | Same | `git checkout --ours/--theirs x.bref` | Same for UC-1; `blobsy merge-manifest --resolve [--ours/--theirs PATH]` for UC-2 |
+| Network inside the merge | Never | Never | Never | Never |
+| Under jj | No driver, no hooks | — | No hooks (H-7) | Driver also usable as a jj merge tool; correctness doesn’t depend on hooks |
+
+**What this shows.**
+
+1. **The per-path rules are the same, and both projects reached them independently.**
+   Gat proves the manifest-plus-driver model works for UC-2. Blobsy’s prototype differs
+   only in conflict handling, and that difference matters.
+   Gat leaves the file as *ours* with no markers, so the conflict is invisible in
+   `git diff`, and a careless `git add` loses the other side’s clean changes.
+   Blobsy’s prototype writes the full merged result with per-path markers, which a
+   validator then rejects.
+2. **Neither model is correct without the driver unless something validates the
+   result.** Gat has no pre-commit or CI check, so hosted or driverless merges can
+   produce a lock that every Gat command refuses to read.
+   Blobsy should put `merge=blobsy-manifest` in the committed `.gitattributes` (an
+   undefined driver falls back silently to text merge, which is safe) and ship a
+   validator in pre-commit, `doctor` and CI.
+3. **Per-file pointers are the most host-robust merge unit.** They merge cleanly on
+   GitHub, in jj and in driverless clones, because there is nothing to merge but
+   independent small files.
+   That is a real reason to keep `.bref` for UC-1 rather than fold everything into one
+   repo-wide lock as Gat does.
+   It is also a reason to keep collections *per directory* rather than per repo: churn
+   and conflicts stay local.
+4. **Hydration belongs after the merge, not in it.** Both projects agree: no network in
+   drivers. Gat’s cache-only hydration hooks plus a local CAS cache make branch switches
+   offline-capable. Blobsy should adopt both as opt-in features (X-3), while keeping its
+   pre-commit and pre-push guards, which Gat lacks.
+   Gat lets unpushed content reach `git push` unchecked.
 
 * * *
 
@@ -633,7 +685,59 @@ already is.
 
 ### 9.1 Gat — the closest competitor
 
-<!-- GAT-PLACEHOLDER -->
+Full reference: `research-2026-10-22-competitor-gat.md` (source review plus empirical
+runs of Gat 0.0.15 built from source) [S].
+
+**What it is.** Rust, Apache-2.0, created 2026-09-07, releases v0.0.10–0.0.15, ~152k
+lines including 2,467 tests, CI on three OSes; one human maintainer, ~630 stars, little
+discussion so far. It has:
+- a committed repo-wide `gat.lock` (BLAKE3 → path; no size, mode or compression;
+  optional sharding by path hash) and three config scopes (`gat.yaml`, global, local);
+- derived keys `blake3/xx/yy/<oid>` that are never stored, so there is no two-phase
+  commit, but the remote is opaque;
+- OpenDAL backends (S3, Azure, GCS, OSS, fs);
+- a local CAS cache (`.gat/objects`) with reflink/hardlink materialization, and SQLite
+  placement state;
+- per-file exclusions in `.git/info/exclude`;
+- hydration hooks (post-checkout, post-merge, post-rewrite), but **no pre-commit or
+  pre-push guard**;
+- a per-path merge driver installed per clone;
+- no `--json` output.
+
+**Is Gat’s design better?** Decision by decision [S, §12 of the Gat doc]:
+
+| Decision | Better | Note |
+| --- | --- | --- |
+| Derived keys vs stored `remote_key` | **Gat** | The single most important lesson; adopt (D2). |
+| Local CAS cache | **Gat** | Offline branch switches; free re-adds; verified prune. Adopt as optional (X-3). |
+| Merge driver | **Gat ships one; blobsy’s prototype handles conflicts better** | Same rules; Gat’s keep-ours-without-markers conflict handling loses data on a naive resolve. |
+| Config scopes (global/project/local, `${VAR}` URLs) | **Gat** | Matches dropping subdirectory configs (S1). |
+| Single binary | **Gat** | Category norm; see §7.4. |
+| Unit of reference | **Split** | One lock is best at scale but is a single conflict hotspot that needs a per-clone driver; per-file pointers merge everywhere. Blobsy’s pointers plus per-collection manifests combine the strengths. |
+| PR diff readability | **Split** | Gat: one line per change, hash first, no size. Blobsy proposed: path-first rows with size and mode. |
+| Hash (BLAKE3 vs SHA-256) | **Blobsy** | SHA-256 matches LFS oids (free `import-lfs`), S3 native checksums, and Node crypto. |
+| Remote browsability | **Blobsy** | Gat buckets are unreadable without git. |
+| Backend pluggability | **Blobsy** | Command and rclone backends have no Gat equivalent. |
+| Safety hooks | **Blobsy** | Gat lets unpushed content reach `git push` and ignores `core.hooksPath`. |
+| Agent UX | **Blobsy** | `--json`, skill, self-describing pointers. |
+| UC-3 / UC-5 | **Blobsy (if built)** | Gat has none. Its experimental `mount` pins another repo’s lock, the nearest thing to UC-5. |
+
+**Verdict.** For the repo-files core (UC-1/2/4), Gat’s design is better engineered and
+more coherent than blobsy’s *current* design: it made the right calls on keys,
+collections, caching and hydration.
+It is weaker on safety at the edges, transparency, pluggability and UC-3. Gat bugs found
+by running it:
+- a data-losing conflict UX;
+- invalid locks from hosted or sharded merges;
+- worktrees clobbering each other’s exclude blocks;
+- `core.hooksPath` ignored;
+- exec bit lost;
+- payload edits invisible to `gat status`;
+- fetch stops at the first missing object.
+
+Most of the changes this review recommends for blobsy’s core (D2, D3, D4, X-3) are ones
+Gat already embodies.
+The rest (safety guards, validation, `--json`, UC-3/5) are where blobsy can lead.
 
 ### 9.2 Other tools
 
@@ -659,7 +763,38 @@ CI- or build-system-scoped; Nx deprecated its bucket caches after CVE-2025-36852
 
 ### 9.3 Positioning
 
-<!-- POSITIONING-PLACEHOLDER -->
+- **The “serverless LFS replacement with a manifest and a merge driver” niche is crowded
+  in design (Gat, s3lfs) but thin in adoption.** Building UC-2 *only* to match Gat would
+  duplicate a better-tested tool.
+  UC-2 is still worth building, because blobsy’s users need it and because it shares the
+  entry format, tree id and store with UC-3/5. But it should ship bundled with blobsy’s
+  differentiators, not as the headline.
+
+- **Blobsy’s defensible position is the combination:**
+  - **UC-1:** per-file pointers that merge on any host.
+  - **UC-2:** per-collection manifests with validated merges.
+  - **UC-3/5:** immutable snapshots for trees and assets on any bucket.
+    Nobody covers this.
+  - **UC-6:** run mirrors.
+
+  All four sit on any storage (command and rclone backends), with safety guards that
+  don’t depend on hooks, and are built agent-first (`--json`, skill, plan/apply).
+
+- **Interop:**
+  - `import-lfs` is the high-value on-ramp.
+  - Reading `gat.lock` is not worth it now.
+    Gat uses BLAKE3, so import means rehashing, and its user base is tiny.
+  - Revisit if Gat gains traction.
+    A `blobsy import-gat` would be straightforward, since a lock row maps to a manifest
+    line once rehashed.
+
+- **Remote browsability vs derived keys** is not either/or.
+  The invariant that matters is “the key is a function of committed data”.
+  Pure CAS (`sha256/<hex>`) is the default; `{content_sha256_short}/{filename}`-style
+  templates stay available.
+  They are still derivable, so there is no two-phase commit, but renames re-upload.
+  Path-shaped browsability is the job of mirrors (UC-6), plus `blobsy ls --remote` for
+  file mode.
 
 * * *
 
@@ -714,7 +849,7 @@ trees; CDC/sub-file dedup; a server.
 | D9 | Hooks: correctness never depends on them; hydration hooks opt-in. | Yes |
 | D10 | Compression: zstd + none only; decided at track/add time; none in collections v1? | zstd + none; keep-if-smaller; allow in collections via `stored` |
 | D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes |
-| D12 | Positioning vs Gat: interoperate (e.g. read `gat.lock`) or differentiate only. | *(see §9.3)* |
+| D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first; revisit `import-gat` only if Gat gains traction |
 
 Bead dispositions: `blobsy-pqyt` → close via D2; `blobsy-aad8` → re-point at the UC-2
 collection design (§5.3); `blobsy-4vpk` → drop (S1); `blobsy-s2tr` → resolve via D8.
