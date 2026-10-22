@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
-import { findTrackableFiles } from '../src/paths.js';
+import { findTrackableFiles, isPathInside } from '../src/paths.js';
 
 describe('findTrackableFiles', () => {
   function tmpDir(): string {
@@ -86,5 +86,30 @@ describe('findTrackableFiles', () => {
     const relPaths = files.map((f) => f.replace(dir + '/', ''));
     expect(relPaths).toContain('node_modules/pkg.json');
     expect(relPaths).toContain('file.txt');
+  });
+});
+
+describe('isPathInside', () => {
+  it('treats the root itself as inside', () => {
+    expect(isPathInside('/tmp/repo', '/tmp/repo')).toBe(true);
+    expect(isPathInside('/tmp/repo/', '/tmp/repo')).toBe(true);
+  });
+
+  it('accepts descendants', () => {
+    expect(isPathInside('/tmp/repo/sub/file', '/tmp/repo')).toBe(true);
+  });
+
+  it('rejects siblings that share a name prefix', () => {
+    expect(isPathInside('/tmp/repo-remote', '/tmp/repo')).toBe(false);
+    expect(isPathInside('/tmp/reporemote/x', '/tmp/repo')).toBe(false);
+  });
+
+  it('rejects parents and paths that escape with ..', () => {
+    expect(isPathInside('/tmp', '/tmp/repo')).toBe(false);
+    expect(isPathInside('/tmp/repo/../other', '/tmp/repo')).toBe(false);
+  });
+
+  it('handles the filesystem root as the parent', () => {
+    expect(isPathInside('/tmp/x', '/')).toBe(true);
   });
 });

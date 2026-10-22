@@ -8,6 +8,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
+import { isPathInside } from './paths.js';
 import type { BackendType, ParsedBackendUrl } from './types.js';
 import { ValidationError } from './types.js';
 
@@ -173,7 +174,7 @@ function validatePrefix(prefix: string, url: string): void {
 export function validateBackendUrl(parsed: ParsedBackendUrl, repoRoot: string): void {
   if (parsed.type === 'local' && parsed.path) {
     const resolvedPath = resolveLocalPath(parsed.path, repoRoot);
-    if (resolvedPath.startsWith(repoRoot)) {
+    if (isPathInside(resolvedPath, repoRoot)) {
       throw new ValidationError(
         `Local backend path must be outside the git repository: ${parsed.path}`,
         [`The path "${resolvedPath}" is inside the repo root "${repoRoot}".`],
