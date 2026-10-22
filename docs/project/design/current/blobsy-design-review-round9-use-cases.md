@@ -121,8 +121,8 @@ accidental complexity.**
 - **Phases 2–3:** add collection manifests (UC-2) and snapshots (UC-3/UC-5) on the
   shared core. Their order is itself a decision (D14).
 
-Fourteen owner decisions gate this (§11). Four of them (D1, D2, D3, D11) gate Phase 1;
-the rest can wait.
+Fifteen owner decisions gate this (§11). Five of them (D1, D2, D3, D11, D15) gate Phase
+1; the rest can wait.
 
 ### Glossary
 
@@ -1271,7 +1271,7 @@ runs of Gat 0.0.15, built from source [S].
 | Single binary | **Gat** | The category norm. §7.4 shows how blobsy gets one without Rust. |
 | Unit of reference | **Split** | One lock is best at scale, but it is a single conflict hotspot that needs a per-clone driver. Per-file pointers merge everywhere. Blobsy’s pointers plus per-collection manifests combine both strengths. |
 | PR diff readability | **Split** | Gat: one line per change, hash first, no size. Blobsy proposes path-first rows with kind and size. |
-| Hash (BLAKE3 vs SHA-256) | **Blobsy** | SHA-256 matches LFS oids (making `import-lfs` free), S3 native checksums, and Node crypto. |
+| Hash (BLAKE3 vs SHA-256) | **Split** | SHA-256 matches LFS oids (making `import-lfs` free), S3 native checksums, and Node crypto. BLAKE3 measured 6–8× faster per file here. Algorithm-prefixed pointers keep both (D15). |
 | Remote browsability | **Blobsy** (with D2 option b) | Gat buckets are unreadable without git. |
 | Backend pluggability | **Blobsy** | Command and rclone backends have no Gat equivalent. |
 | Safety hooks | **Blobsy** | Gat lets unpushed content reach `git push`, and it ignores `core.hooksPath`. |
@@ -1474,7 +1474,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | # | Decision | Recommendation | Blocks |
 | --- | --- | --- | --- |
 | D1 | Adopt the new model: one storage contract, one entry format, references in git or by name. Reword principles 5, 6 and 9, and “What This Design Eliminates”. | Yes | Phase 1 |
-| D2 | Derived keys only (no push-time variables), closing `pqyt`. Choose the default template: (a) `sha256/{content_sha256}{suffix}`, max dedup but opaque; or (b) `{content_sha256}/{filename}{suffix}`, which keeps filenames but re-uploads on rename. | Yes; (b) as the default | Phase 1 |
+| D2 | Derived keys only (no push-time variables), closing `pqyt`. Default template: (a) pure content key, e.g. `{hash_algo}/{h0}/{h1}/{hash}{suffix}` (max dedup, free renames, filename kept as object metadata) or (b) `{content_sha256}/{filename}{suffix}`. **Revised** in `specs/active/plan-2026-10-22-pointers-with-computed-keys.md`: compute the key at add time and record it in the pointer (survives plain `git mv` and template changes), and prefer (a) because a filename in the key breaks renames inside collections. | Yes; (a) + record at add | Phase 1 |
 | D3 | Replace the stat-cache merge base with the recoverability rule. `sync` = `pull` then `push`, with no logic of its own. | Yes; keep `sync` as the one recommended verb | Phase 1 |
 | D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes | Phase 1 |
 | D4 | Collection manifest: name and placement (`<dir>.brefs` sibling vs `.btree`), explicit `--collection`, explicit prune, and whether `setup` installs the merge driver once it exists. | `.brefs` sibling; explicit; explicit prune; driver on by default | Phase 2 |
@@ -1487,6 +1487,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | D9 | Hooks: correctness never depends on them, and hydration hooks are opt-in. | Yes | none |
 | D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first | none |
 | D13 | Implementation language: TypeScript, Rust, or a hybrid. | TypeScript through Phase 3; switch only under the §7.4 rule | none |
+| D15 | Hash for new content: stay SHA-256, or BLAKE3 (native addon, WASM fallback) with algorithm-prefixed pointers and keys so both stay readable. Measured here: native BLAKE3 6–8× faster per file than Node SHA-256 on a CPU without SHA-NI; expected ~1.5–2.5× on CPUs with SHA hardware [I]. `import-lfs` keeps SHA-256 pointers without rehashing. | BLAKE3 default for new content, if a cross-hardware benchmark shows ≥3× on at least two of four common platforms (plan K3) | Phase 1 |
 
 Bead dispositions:
 
