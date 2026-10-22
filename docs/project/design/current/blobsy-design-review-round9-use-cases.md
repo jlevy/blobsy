@@ -3,7 +3,9 @@
 **Status:** Active review — design decisions requested (see §11)
 
 **Date:** 2026-10-22. A v2 was issued the same day, revised after an independent
-red-team pass (Appendix B).
+red-team pass (Appendix B). v3, also the same day, applies the owner’s policy of **no
+backward compatibility** (blobsy is pre-alpha), removing every legacy and migration
+provision.
 
 **Reviewed revision:** `main` @ `04a3d1a` (PR #5 merge).
 No code has changed since PR #4 (2026-07-31); PR #5 was documentation only.
@@ -532,22 +534,22 @@ size: 300000
 compressed: zstd      # decided at add time; absent = stored as-is
 ```
 
-- **Keys are derived from committed data.** A `.bref` 0.2 key template may use only
-  entry-derived variables: `{content_sha256}`, `{content_sha256_short}`, `{filename}`,
-  `{compress_suffix}`, and optionally `{repo_path}`. **`{iso_date_secs}` is rejected.**
-  - Every key is therefore a function of the committed pointer.
-  - Push never writes back.
-  - Invariant 2 (§6.2) holds without exceptions.
-- **The default template is decision D2.** Both options close `pqyt`.
-  - (a) `sha256/{content_sha256}{compress_suffix}`: maximum dedup and free renames, but
-    an opaque remote.
-  - (b) `{content_sha256}/{filename}{compress_suffix}`: keeps original filenames visible
-    in consoles, as design principles 5–6 promise; renames re-upload.
-  - Recommendation: (b) as the default, with (a) documented.
+- **Keys are derived, never stored.** The key is a pure function of the pointer’s
+  content facts: a fixed layout `<algo>/<h0h1>/<h2h3>/<hash>[.zst]` under the backend
+  prefix.
+  - Push never writes back, and invariant 2 (§6.2) holds without exceptions.
+  - `remote.key_template`, its variables and the timestamped default are deleted.
+  - Because the key doesn’t depend on the path, `git mv`, renames and promotion into a
+    collection never change it.
+- **Filenames stay visible as object metadata**, not in the key (D2). Blobsy sets
+  `x-amz-meta-blobsy-path` and `Content-Disposition` at upload where the backend
+  supports it, and `blobsy ls --remote` renders a path view from the pointers.
 - **Push is a create-only PUT.** “Already exists” means already published.
   Push never edits the pointer.
-- **Legacy pointers keep working.** `remote_key` stays legal and authoritative when
-  present, so every existing 0.1 pointer works with zero migration (§5.7).
+- **No backward compatibility.** The reader accepts exactly `blobsy-bref/0.2` and fails
+  fast on anything else (“re-run `blobsy add`”). See §5.7.
+- **The design is specified in full** in
+  `docs/project/specs/active/plan-2026-10-22-pointers-with-computed-keys.md`.
 - **“Pushed” becomes remote state, not pointer state.** Offline `status` reports
   tracked, modified or missing.
   `status --remote` and the pre-push check verify existence in batch (X-4).
@@ -834,22 +836,21 @@ the way to remove LFS objects [S].
 
 **Missing for PAIN-3/4:**
 
-1. **`blobsy import-lfs`.** LFS pointers are already sha256 + size, so pointers convert
-   without downloading, and the objects copy into the store.
+1. **`blobsy import-lfs`.** LFS pointers are sha256 + size.
+   With SHA-256 (D15) they convert without reading the content.
+   With BLAKE3, each object in `.git/lfs/objects` is read once to rehash, which is local
+   work done while copying it into the store anyway.
    This is the highest-leverage adoption feature.
 2. **`blobsy migrate import`.** A history rewrite via `git filter-repo`, in the style of
    `git lfs migrate import`. It is tractable only with content-derived keys.
 3. **Reachability GC.**
-   - Reachable keys are the union of two sets:
-     - `key(entry)` for every entry in every `.bref`/`.brefs`, across all refs;
-     - every legacy `remote_key` string in every `.bref`, across all refs.
+   - Reachable keys are `key(entry)` for every entry in every `.bref`/`.brefs`, across
+     all refs.
    - Orphans are the listed objects minus the reachable ones.
    - Deletion is age-gated and dry-run first, with bucket versioning or Object Lock as
      the recovery window.
-   - Until `migrate-keys` has re-homed a repo, legacy objects are reachable only through
-     the second set.
-   - GC must refuse to run if any pointer in history has neither a derivable key nor a
-     `remote_key`.
+   - GC must refuse to run if any pointer in the scanned history fails to parse in the
+     current format, rather than treating its objects as orphans.
 
 **An honest LFS comparison.**
 
@@ -895,19 +896,22 @@ Blobsy should not claim “simpler” while every change takes two commits.
   - Partial clone and sparse checkout compose naturally: pointers and manifests are
     tiny, and snapshots live outside git.
 
-### 5.7 What changes for repos that use blobsy today
+### 5.7 No backward compatibility
 
-- **0.1 pointers keep working.** They are read forever through their stored
-  `remote_key`.
-  - Existing timestamped objects stay reachable, and safe from GC (§5.5).
-  - An explicit `migrate-keys` re-homes them to derived keys; this is never automatic.
-- **The default-template change and derive-when-absent ship together.** Both land in one
-  release: the new default template, and deriving the key when `remote_key` is absent.
-  So no clone pushes old-style keys after another clone has started deriving new ones.
-- **Committed stat caches.** `doctor --fix` runs `git rm --cached` on any stat-cache
-  files that were committed (H-1). After Phase 0, the cache lives under the git
-  directory.
-- **Removed or renamed commands** print “renamed to …” for one release.
+Blobsy is a pre-alpha proof of concept with no released users.
+Per the owner’s policy and `backward-compatibility-rules` (“DO NOT MAINTAIN”), none of
+this work keeps old formats, keys, config, commands or objects.
+
+- **Pointers:** readers accept exactly the current format and fail fast with “re-run
+  `blobsy add`”. There is no dual reader and no migration command.
+- **Objects:** objects stored under old key layouts are abandoned.
+  Existing test repos delete their pointers and re-add.
+- **Commands and config:** removed commands and config keys disappear outright, with no
+  aliases or deprecation period.
+- **Local state:** machine-local state moves under the git directory.
+  Any stray `.blobsy/` is just deleted.
+- **Releases:** each change ships as one coordinated breaking release, with no mixed-
+  version rollout planning.
 
 * * *
 
@@ -1079,13 +1083,13 @@ including tests. Blobsy’s advantage has to come from refusing most of that sur
 | --- | --- | --- | --- |
 | S1 | Delete the inert subdir-config walk, the `subdir` origin, `checksum`, `sync.tools` | ~150 LOC; bead 4vpk | nothing |
 | S2 | Delete `.blobsy/trash/` and the ⊗ state | a contradiction + dead code | nothing |
-| S3 | Delete the hidden commands (see below) | ~300 LOC; 7 goldens | aliases (each prints “renamed” for one release) |
-| S4 | Derived keys only, with no push-time variables; compression decided at add time; `remote_key` for legacy pointers only | pqyt; all write-back paths; 3 audits | the date-browsable default layout |
+| S3 | Delete the hidden commands (see below) | ~300 LOC; 7 goldens | nothing (no aliases; pre-alpha) |
+| S4 | Derived keys only, with no push-time variables; compression decided at add time; no stored `remote_key`; fixed key layout (templates deleted) | pqyt; all write-back paths; 3 audits | the date-browsable default layout |
 | S5 | Drop the merge base; adopt the recoverability rule; actually wire the hash cache into status/verify/push/pull | ~325 LOC; 9 states; B-1; H-3 | nothing that works today |
 | S6 | A reporter abstraction + plan/execute per verb | 117 guards; duplicated dry-runs | nothing |
 | S7 | Batch gitignore writes, git spawns and transfers per command | O(N²) rewrites and O(N) spawns | nothing |
 | S8 | Doctor diet: table-driven checks; fold `health` in; fix or drop the dead cache scan | ~300 LOC | did-you-mean on config keys |
-| S9 | Compression: zstd + none only; keep output only if smaller | small | gzip/brotli encoders (keep the decoders) |
+| S9 | Compression: zstd + none only; keep output only if smaller | small | gzip/brotli (no decoders kept) |
 | S10 | Consider dropping the `aws-cli` backend; the SDK backend covers it | 176 LOC + tests | aws-cli quirks |
 
 The hidden commands in S3, and where each one goes:
@@ -1271,7 +1275,7 @@ runs of Gat 0.0.15, built from source [S].
 | Single binary | **Gat** | The category norm. §7.4 shows how blobsy gets one without Rust. |
 | Unit of reference | **Split** | One lock is best at scale, but it is a single conflict hotspot that needs a per-clone driver. Per-file pointers merge everywhere. Blobsy’s pointers plus per-collection manifests combine both strengths. |
 | PR diff readability | **Split** | Gat: one line per change, hash first, no size. Blobsy proposes path-first rows with kind and size. |
-| Hash (BLAKE3 vs SHA-256) | **Split** | SHA-256 matches LFS oids (making `import-lfs` free), S3 native checksums, and Node crypto. BLAKE3 measured 6–8× faster per file here. Algorithm-prefixed pointers keep both (D15). |
+| Hash (BLAKE3 vs SHA-256) | **Split** | SHA-256 matches LFS oids (making `import-lfs` free), S3 native checksums, and Node crypto. BLAKE3 measured ~8.5× faster per file here, in Node, Bun and Rust alike. One algorithm is chosen (D15). |
 | Remote browsability | **Blobsy** (with D2 option b) | Gat buckets are unreadable without git. |
 | Backend pluggability | **Blobsy** | Command and rclone backends have no Gat equivalent. |
 | Safety hooks | **Blobsy** | Gat lets unpushed content reach `git push`, and it ignores `core.hooksPath`. |
@@ -1371,7 +1375,6 @@ Smallest cut:
 - **B-3:** a pre-commit large-file guard, plus a `doctor` check.
 - **H-1:** move the stat cache under `$(git rev-parse --git-path blobsy)/` instead of
   adding a gitignore line.
-  `doctor --fix` un-stages caches that were committed.
 - **M-1:** a push-time keep-if-smaller check.
   Phase 1 replaces it with the add-time decision.
 - **Also:**
@@ -1474,7 +1477,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | # | Decision | Recommendation | Blocks |
 | --- | --- | --- | --- |
 | D1 | Adopt the new model: one storage contract, one entry format, references in git or by name. Reword principles 5, 6 and 9, and “What This Design Eliminates”. | Yes | Phase 1 |
-| D2 | Derived keys only (no push-time variables), closing `pqyt`. Default template: (a) pure content key, e.g. `{hash_algo}/{h0}/{h1}/{hash}{suffix}` (max dedup, free renames, filename kept as object metadata) or (b) `{content_sha256}/{filename}{suffix}`. **Revised** in `specs/active/plan-2026-10-22-pointers-with-computed-keys.md`: compute the key at add time and record it in the pointer (survives plain `git mv` and template changes), and prefer (a) because a filename in the key breaks renames inside collections. | Yes; (a) + record at add | Phase 1 |
+| D2 | Keys derived from content, never stored: a fixed layout `<algo>/<h0h1>/<h2h3>/<hash>[.zst]`, with the filename as object metadata; `remote.key_template` deleted. Closes `pqyt`. Specified in `specs/active/plan-2026-10-22-pointers-with-computed-keys.md` (K1, K2). | Yes | Phase 1 |
 | D3 | Replace the stat-cache merge base with the recoverability rule. `sync` = `pull` then `push`, with no logic of its own. | Yes; keep `sync` as the one recommended verb | Phase 1 |
 | D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes | Phase 1 |
 | D4 | Collection manifest: name and placement (`<dir>.brefs` sibling vs `.btree`), explicit `--collection`, explicit prune, and whether `setup` installs the merge driver once it exists. | `.brefs` sibling; explicit; explicit prune; driver on by default | Phase 2 |
@@ -1487,7 +1490,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | D9 | Hooks: correctness never depends on them, and hydration hooks are opt-in. | Yes | none |
 | D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first | none |
 | D13 | Implementation language: TypeScript, Rust, or a hybrid. | TypeScript through Phase 3; switch only under the §7.4 rule | none |
-| D15 | Hash for new content: stay SHA-256, or BLAKE3 (native addon, WASM fallback) with algorithm-prefixed pointers and keys so both stay readable. Measured here: native BLAKE3 6–8× faster per file than Node SHA-256 on a CPU without SHA-NI; expected ~1.5–2.5× on CPUs with SHA hardware [I]. `import-lfs` keeps SHA-256 pointers without rehashing. | BLAKE3 default for new content, if a cross-hardware benchmark shows ≥3× on at least two of four common platforms (plan K3) | Phase 1 |
+| D15 | One hash for all content: SHA-256 or BLAKE3 (native addon; WASM fallback). Measured on this CPU without SHA-NI: native BLAKE3 ~8.5× faster per file than SHA-256 in Node and Bun, and Node/Bun match Rust single-threaded once reads use 1 MB buffers (`research-2026-10-22-hash-performance-node-bun-rust.md`). Expected ~1.5–2.5× on CPUs with SHA hardware [I]. With BLAKE3, `import-lfs` rehashes each object once. | BLAKE3 if a cross-hardware benchmark shows ≥3× on at least two of four common platforms (plan K3) | Phase 1 |
 
 Bead dispositions:
 
@@ -1591,17 +1594,19 @@ substantive changes from v1:
 7. **New material:**
    - §4.0 (the flows side by side);
    - §5.6 (credentials, Windows, large objects, backend moves, scope);
-   - §5.7 (existing users);
+   - §5.7 (now: no backward compatibility, per v3);
    - the smallest cut per phase;
    - a “Blocks” column in §11, and D14 (phase order).
 8. **Smaller fixes:**
-   - GC reachability now includes legacy `remote_key`s.
+   - GC reachability handling of legacy keys (removed again in v3: no backward
+     compatibility).
    - The scope of `--resolve` is narrowed.
    - `.git/info/exclude` is rejected.
    - Machine-local state moves under the git directory.
    - Stat-cache call sites corrected to 12.
    - Gat no-driver cells marked [I].
-   - D2 offers a filename-preserving template.
+   - D2 offered a filename-preserving template (v3: the filename moves to object
+     metadata, and templates are deleted).
    - The `engines` advice is corrected.
 
 <!-- This document follows common-doc-guidelines.md.

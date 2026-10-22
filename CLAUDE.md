@@ -1,5 +1,14 @@
 # Development Guide
 
+## Backward Compatibility: None
+
+Blobsy is a pre-alpha proof of concept with no released users. **Do not maintain backward
+compatibility in any plan or code**: no dual readers, legacy fields, migrations, command
+aliases, deprecation periods, or mixed-version rollout logic. Change formats, config,
+and commands directly; update all code, tests, and docs together; and have readers fail
+fast on anything but the current format. (This applies `backward-compatibility-rules`:
+DO NOT MAINTAIN.)
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 24 (see `.nvmrc`)

@@ -848,6 +848,13 @@ Fields:
 (e.g., `blobsy-bref/0.1`). Compatibility policy: reject if major version is unsupported;
 warn if minor version is newer than the running blobsy version supports.
 
+> **Policy (2026-10-22): no backward compatibility.** Blobsy is a pre-alpha proof of
+> concept with no released users.
+> Readers should accept exactly the current format and fail fast on any other; no dual
+> readers, migrations or legacy fields are kept.
+> The strategy below describes the shipped parser and is superseded by this policy and
+> by `specs/active/plan-2026-10-22-pointers-with-computed-keys.md`.
+
 **Forward Compatibility Strategy:**
 
 The `.bref` format is designed for forward compatibility across versions:

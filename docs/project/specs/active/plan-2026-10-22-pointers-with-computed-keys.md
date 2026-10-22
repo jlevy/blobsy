@@ -1,61 +1,69 @@
 ---
 title: Pointers with Computed Keys (Blobsy pointers + Gat-style storage names)
-description: Keep blobsy's per-file .bref pointers and get Gat's one-commit flow, real dedup, local content cache, hydration, and a fast hash
+description: Keep blobsy's per-file .bref pointers and get Gat's one-commit flow, real dedup, local content cache, hydration, and a fast hash — with no backward compatibility
 author: Claude (round 9 follow-up) with Joshua Levy
 ---
 # Feature: Pointers with Computed Keys
 
-**Date:** 2026-10-22
+**Date:** 2026-10-22 (revised the same day: no backward compatibility; hash benchmarks
+added)
 
 **Author:** Claude (round 9 follow-up)
 
-**Status:** Draft — needs decisions K1–K5 before implementation
+**Status:** Draft — needs decisions K1–K4 before implementation
 
 ## Overview
 
 Blobsy and Gat each get something right that the other doesn’t (round 9 review §4.3,
 §9.1; `research-2026-10-22-competitor-gat.md`):
 
-- **Blobsy:** a per-file pointer next to the payload, which merges correctly on any host
-  (GitHub, jj, fresh clones).
+- **Blobsy** has a per-file pointer next to the payload, which merges correctly on any
+  host (GitHub, jj, fresh clones).
   It also has guard hooks, readable state, any-storage backends, and `--json`.
-- **Gat:** storage names computed from content, so `add` writes the final reference and
-  there is no second “record the key” commit.
-  It also has real dedup, create-only uploads, a local content cache shared across
-  branches and worktrees, hydration after git operations, and a fast hash (BLAKE3).
+- **Gat** computes storage names from content, so `add` writes the final reference.
+  There is no second “record the key” commit, and identical bytes are stored once.
+  - Uploads are create-only.
+  - It keeps a local content cache shared across branches and worktrees.
+  - It restores files after git operations, and uses a fast hash (BLAKE3).
 
 This plan keeps blobsy’s pointer model and adopts Gat’s storage and cache model.
-It is the concrete version of round 9 decisions D2 and D3 and the core of Phase 1. It
-also resolves bead `blobsy-pqyt` (two-phase `remote_key`).
+It is the concrete form of round 9 decisions D2, D3 and D15, and the core of Phase 1. It
+closes bead `blobsy-pqyt` (two-phase `remote_key`).
+
+**Compatibility policy: none.** Blobsy is a pre-alpha proof of concept with no released
+users. Per `backward-compatibility-rules` (“DO NOT MAINTAIN”) and the owner’s
+instruction, this plan keeps no old pointer formats, config keys, commands, key layouts
+or stored objects:
+- Readers accept exactly the current pointer format and fail fast on anything else.
+- Repos with old pointers re-run `blobsy add`.
 
 ## Goals
 
-Benefits to keep from blobsy, and to gain from Gat:
-
 | Keep (blobsy) | Gain (Gat) |
 | --- | --- |
-| One `.bref` per file, next to the payload | **One commit per change**: the pointer is final at `add` time |
+| One `.bref` per file, next to the payload | **One commit per change**: the pointer is final at `add` |
 | Merges with plain git on any host; no driver needed | **Real dedup**: identical bytes stored once, across paths, branches and time |
 | Pre-commit / pre-push guards | **Create-only uploads**: the server refuses overwrites |
 | Any backend (S3, rclone, local, command) | **Local content cache**: offline branch switches, no worktree re-downloads, a recovery copy of local bytes |
-| `--json`, skill, self-describing pointers, size recorded | **Hydration hooks** after checkout/merge/rebase (opt-in) |
-| SHA-256 interop where it matters (LFS import) | **Fast hash** for new content (BLAKE3), if K3 approves |
+| `--json`, skill, self-describing pointers, size recorded | **Restore hooks** after checkout/merge/rebase (opt-in) |
+|  | **Fast hash** for content (BLAKE3), if K3 approves |
 
-Additionally:
-- fix B-1/H-3 (unsafe overwrites) via the recoverability rule;
-- fix B-2 (pre-push uploads the wrong thing);
+Also in scope:
+- fix B-1 and H-3 (unsafe overwrites) via the recoverability rule;
+- fix B-2 (pre-push uploads from the wrong place);
 - record the exec bit.
 
 ## Non-Goals
 
-- Collection manifests (UC-2) and snapshots (UC-3/UC-5): later phases.
-  This plan only makes sure they can share the key function, the hash, and the cache.
-- A repo-wide lock file like `gat.lock`. Per-file pointers stay; collections get
+- **Backward compatibility of any kind.** No dual readers, migrations, aliases or
+  rollout coordination.
+- **Collection manifests (UC-2) and snapshots (UC-3/UC-5).** These are later phases.
+  This plan only makes sure they can share the key function, the hash and the cache.
+- **A repo-wide lock file like `gat.lock`.** Per-file pointers stay; collections get
   per-directory manifests later.
-- Smudge/clean filters, file locking, merge drivers for `.bref`.
-- Single-binary distribution (round 9 §7.4; independent of this work).
-- Rewriting history or re-homing existing objects automatically (`migrate-keys` is a
-  separate, explicit command).
+- **Smudge/clean filters, file locking, merge drivers for `.bref`.**
+- **Single-binary distribution** (round 9 §7.4).
+- **User-configurable key templates.** The layout is fixed (see Design).
 
 ## Background
 
@@ -63,413 +71,375 @@ Additionally:
 
 The default key template is
 `{iso_date_secs}-{content_sha256_short}/{repo_path}{compress_suffix}` (`config.ts:50`,
-`transfer.ts:295`). It contains the push time, so the key cannot be known until push:
+`transfer.ts:295`). It contains the push time, so the key cannot be known until push.
+That causes four problems:
 
-- `pushFile` returns `refUpdates` (`transfer.ts:278–343`), which callers write back into
-  the `.bref` at four sites (`commands-stage2.ts:334–343, 719–724, 747–754,
-  2112–2120`).
-- The pre-push hook writes keys into the working tree *after* the outgoing commits are
-  fixed, so teammates receive pointers without keys (bead `pqyt`).
-- `track` must clear `remote_key` whenever content changes (`cli.ts:938–945,
-  1065–1075`), so restoring old bytes re-uploads them.
-- About a dozen call sites treat “`remote_key` present” as “pushed” (`stage2:181, 245,
-  251, 288, 419, 456, 558, 1062, 1922, 1961, 2077`), so status is wrong whenever the key
-  exists but the blob doesn’t, or vice versa.
+- **Write-back.** `pushFile` returns `refUpdates` (`transfer.ts:278–343`), which callers
+  write back into the `.bref` at four sites (`commands-stage2.ts:334–343, 719–724,
+  747–754, 2112–2120`).
+- **Pushed commits lack keys.** The pre-push hook writes keys into the working tree
+  *after* the outgoing commits are fixed, so teammates receive pointers without keys
+  (bead `pqyt`).
+- **No dedup on revert.** `track` must clear `remote_key` whenever content changes
+  (`cli.ts:938–945, 1065–1075`), so restoring old bytes re-uploads them.
+- **Wrong status.** About a dozen call sites treat “`remote_key` present” as “pushed”
+  (`stage2:181, 245, 251, 288, 419, 456, 558, 1062, 1922, 1961, 2077`). Status is wrong
+  whenever the key exists but the blob doesn’t, or the reverse.
 
 ### How Gat avoids it
 
 The key is a pure function of the content ID (`blake3/xx/yy/<oid>`) and is never stored.
-`gat add` writes the final lock row before any upload.
-Push is “upload if absent”, with a create-only write.
+`gat add` writes the final lock row before any upload, and push is “upload if absent”
+with a create-only write.
 There is nothing to write back.
 
-### Measured hash speed (this machine, 2026-10-22)
+### Hash performance (measured)
 
-The test machine is an Intel cloud VM with AVX-512 but **no SHA-NI** (no SHA-256
-hardware acceleration), on Node 22. These are the lead reviewer’s measurements
-(scratchpad `hashbench/`).
+Full results are in
+`docs/project/research/current/research-2026-10-22-hash-performance-node-bun-rust.md`.
+They were measured on an Intel cloud VM with 4 vCPUs and **no SHA-NI**, hashing a 1 GiB
+file from the page cache.
 
-| Hash (Node) | In-memory, 256 MB | File, 1 GiB, page cache |
-| --- | --- | --- |
-| `crypto` SHA-256 (OpenSSL) | 341 MB/s | 3.0–3.2 s/GiB (~330 MB/s) |
-| `crypto` SHA-512 | 560 MB/s | — |
-| `hash-wasm` BLAKE3 (WASM) | 482 MB/s | — |
-| `@napi-rs/blake-hash` BLAKE3 (native, v1.4.0, 14 prebuilt platforms) | 4.46 GB/s | 0.40–0.53 s/GiB (~2.0–2.6 GB/s) |
-| `hash-wasm` xxh128 (non-cryptographic, reference only) | 2.8 GB/s | — |
-| `cat` (read only) | — | 0.16 s/GiB |
+|  | Node 22 | Bun 1.4 | Rust |
+| --- | --- | --- | --- |
+| SHA-256 | 337 MB/s | 283 MB/s | 315 MB/s (`ring`) |
+| BLAKE3, single thread (native addon in JS) | 2.85 GB/s | 2.73 GB/s | 2.95 GB/s |
+| BLAKE3, all 4 cores, inside one file | — | — | 11.9 GB/s |
+| BLAKE3 WASM | 465 MB/s | 213 MB/s | — |
 
-So:
-- **Native BLAKE3 is 6–8× faster** than SHA-256 per file here, and close to disk read
-  speed.
-- **WASM BLAKE3 is only ~1.4× faster**, so the win requires the native addon.
-- **On CPUs with SHA hardware acceleration** (Apple M-series, AMD Zen, recent Intel),
-  OpenSSL SHA-256 is typically 1.5–2 GB/s per core, so the gap should shrink to roughly
-  1.5–2.5× [I — measure before deciding].
-- **The `blake3` npm package is unusable**: it pins a nonexistent `blake3-wasm` version.
+What this shows:
 
-Hashing matters for:
-- the first `add` of large data;
-- `verify`;
-- pull verification on fast links;
-- snapshot publish/restore (later phases).
-
-Once the hash cache is wired in (Step 2), unchanged files are not rehashed at all.
-So the fast hash speeds up *new and changed bytes*, not steady-state `status`.
+- **The hash matters ~8.5×; the runtime barely matters.** Node and Bun match Rust once
+  files are read with `fs.read` into 1 MB buffers.
+  - With `createReadStream`, Node loses ~20%.
+  - With `Bun.file().stream()`, Bun loses ~75%: each small chunk crosses into the native
+    addon separately.
+- **Rust’s only real extra is multi-core hashing within a single file.** It matters for
+  single very large files on very fast disks.
+- **SHA-NI hardware narrows the gap.** On Apple M-series, AMD Zen and recent Intel,
+  SHA-256 likely reaches 1.5–2 GB/s, so the gap is probably ~1.5–2.5× [I]. Measure
+  before deciding K3.
+- **Hashing only touches new and changed bytes.** Once the hash cache is wired in (Step
+  2), unchanged files are not re-hashed.
+  The fast hash speeds up first `add`, `verify` and pull verification, not steady-state
+  `status`.
 
 ## Design
 
 ### Approach
 
-**1. Compute the key at `add` time and record it in the pointer.** It is never assigned
-at push and never written back afterwards.
+**1. The pointer holds only content facts.** The storage key is *derived*, never stored
+(Gat-style; decision K1).
 
 ```yaml
 # blobsy -- https://github.com/jlevy/blobsy
 # Run: blobsy status | blobsy --help
 
 format: blobsy-bref/0.2
-hash: blake3:9f2c0e7b…            # or sha256:… (algorithm prefix, see K3)
+hash: blake3:9f2c0e7b…        # algorithm is part of the value (K3 picks one)
 size: 300000
-remote_key: blake3/9f/2c/9f2c0e7b….zst
-compressed: zstd                  # decided at add time; absent = stored as-is
-executable: true                  # only when the exec bit is set
+compressed: zstd              # decided at add time; absent = stored as-is
+executable: true              # only when the exec bit is set
 ```
 
-Why record the key rather than derive it on every read, as Gat does (decision K1):
+- **No `remote_key`, no `compressed_size`.** The pointer is complete the moment `add`
+  writes it. Push never touches it.
+- **The reader is strict.** It accepts exactly `blobsy-bref/0.2` and one hash algorithm.
+  Anything else fails with “unsupported pointer format; re-run `blobsy add
+  <path>`”.
 
-|  | Record at add (recommended) | Derive on read (Gat-style) |
-| --- | --- | --- |
-| One commit per change | yes | yes |
-| Plain `git mv` of a pointer | still pulls (key travels with the pointer) | breaks if the template uses `{filename}`/`{repo_path}` |
-| Changing the template or hash later | old pointers keep working | every old pointer’s derived key changes; old objects become unreachable |
-| Legacy 0.1 pointers | same field, same code path | a second code path forever |
-| GC reachability | the set of `remote_key` strings in history | must re-derive per pointer, plus handle legacy keys |
-| Pull needs repo config to locate the object | no | yes |
-| Cost | one more line in the pointer and in diffs | none |
-| Untrusted pointer names an arbitrary key | content is hash-verified on pull; key containment already enforced (threat model rule 2) | n/a |
+Why derive rather than record the key at add time:
+- with a fixed content-only layout, a key doesn’t depend on path;
+- so `git mv`, renames and promotion into a collection never change it;
+- with no backward compatibility there are no old keys to preserve.
 
-The invariant that matters is unchanged from round 9: **no push-time state is ever
-written into a committed file.** A key computed at add time satisfies it.
+Deriving gives a smaller pointer, no stored key for a hostile pointer to forge, and GC
+reachability equal to the set of hashes in git.
+(An earlier draft of this plan recommended recording the key; every reason for that was
+a compatibility reason.)
 
-**2. Pure content keys by default, with the filename as metadata** (decision K2).
+**2. Fixed storage layout; no key templates.**
 
-- Default template: `{hash_algo}/{h0}/{h1}/{hash}{compress_suffix}`, e.g.
-  `blake3/9f/2c/9f2c….zst`. This gives maximum dedup, free renames, and the same object
-  whether a file lives in a pointer or (later) in a collection manifest.
-  Moving between the two never re-uploads.
-- **Revision to round 9 D2:** round 9 leaned toward `{content_sha256}/{filename}` for
-  bucket readability. With collections deriving keys per line, a filename in the key
-  would make a rename inside a collection change its key.
-  Readability moves instead to:
-  - **object metadata** at upload (`x-amz-meta-blobsy-path`, and `Content-Disposition:
-    attachment; filename=…` on S3/GCS/Azure), so consoles show and download the original
-    name;
-  - `blobsy ls --remote`, which renders a path view from the pointers.
-  - Backends that can’t set metadata (command, some rclone remotes) simply skip it.
-- **Allowed template variables:** only entry-derived ones — `{hash}`, `{hash_algo}`,
-  `{h0}`, `{h1}`, `{hash_short}`, `{compress_suffix}`, `{filename}`, `{repo_path}`.
-  `{iso_date_secs}` is rejected.
-  A custom template is evaluated once, at add, and recorded.
+```
+<backend prefix>/<algo>/<h0h1>/<h2h3>/<hash>[.zst]
+e.g.  s3://bucket/project/blake3/9f/2c/9f2c0e7b….zst
+```
 
-**3. Compression is decided at `add` time.** Apply the existing rules (`compress.ts`
-`shouldCompress`). For candidate files, compress once and keep the result only if it is
-≥5% smaller.
-The decision determines the key suffix, so it must be made before the key is
-recorded. If the local cache is on, the compressed bytes go there, so push doesn’t
-compress again.
+- **Removed:** `remote.key_template`, its eight variables, `sanitizeKeyComponent`, and
+  most of `template.ts`. The backend URL prefix is the only placement control.
+- **One layout serves everything.** Pointers, future collection manifests, and the local
+  cache all use it, so moving a file between a pointer and a collection never
+  re-uploads.
+- **Readability comes from object metadata.** At upload, blobsy sets
+  `x-amz-meta-blobsy-path` and `Content-Disposition: attachment; filename=…` on
+  S3/GCS/Azure, so consoles show and download the original name.
+  Backends that can’t set metadata skip it.
+  `blobsy ls --remote` renders a path view from the pointers.
+- **Command backends** receive the derived key as `{remote}`, as today.
+
+**3. Compression is decided at `add` time.**
+- Apply the existing rules (`compress.ts` `shouldCompress`).
+- For candidate files, compress once and keep the result only if it is ≥5% smaller.
+- The decision sets the key suffix, so it is made before the pointer is written.
+- If the local cache is on, the compressed form is kept there so push doesn’t compress
+  again.
+- Only `zstd` and `none` (round 9 S9).
 
 **4. Upload is “put if absent”.**
 
 - **Create-only writes where the backend supports them:**
-  - S3 SDK: `IfNoneMatch: '*'` on `PutObject` and on `CompleteMultipartUpload` via
+  - S3 SDK: `IfNoneMatch: '*'`, on `PutObject` and on `CompleteMultipartUpload` via
     `lib-storage` params;
-  - local: `link()`/`O_EXCL`;
+  - local: `link()` / `O_EXCL`;
   - aws-cli ≥ 2.33: `s3 cp --no-overwrite`.
-- **Everywhere else** (rclone GCS/Azure, command backends): `exists` then `put`.
-- **Outcomes:** HTTP 412 or “exists” both count as success.
-  An object that exists but fails a sampled size check is reported, never overwritten.
-- **Probe:** `doctor` checks that the backend actually honors create-only writes by
-  writing a sentinel object twice.
+- **Everywhere else** (rclone GCS/Azure, command backends): exists-then-put.
+- **Outcomes:** a 412 or “exists” both count as success.
+  An existing object whose size doesn’t match is reported, never overwritten.
+- **Check:** a `doctor` probe confirms create-only behavior by writing a sentinel twice.
 
 **5. “Pushed” is remote state, recorded locally.**
-
-- A successful push or pull records `{hash, key, at}` in the hash cache.
-- `status`, offline, shows: `pushed` (recorded on this machine), `not pushed` (no record
-  and no evidence), or `unknown` (a teammate’s pointer, never synced here).
+- A successful push or pull records `{hash, at}` in the hash cache.
+- Offline `status` shows `pushed` (recorded here), `not pushed`, or `unknown` (a
+  teammate’s pointer never synced here).
 - `status --remote`, `doctor --remote` and the pre-push check verify existence in batch:
-  - `list` on the key prefix when there are many keys;
-  - `HEAD` per key when there are few.
+  `list` on the prefix for many keys, `HEAD` for few.
 
 **6. The recoverability rule** (round 9 §5.2) replaces the merge base.
 `pull` overwrites a local file only if its bytes are recoverable.
 That means at least one of:
 - (a) the hash cache records that this hash was pushed or pulled here;
 - (b) the local content cache holds the bytes;
-- (c) `exists(key-of-local-hash)` on the backend.
+- (c) the derived key for the local hash exists on the backend.
 
-Otherwise it refuses, naming the two explicit choices.
+Otherwise it refuses and names the two explicit choices.
 `sync` becomes `pull` then `push`, with no decision logic of its own.
 
-**7. Local content cache** (Gat’s best idea; decision K4).
+**7. Local content cache** (decision K4).
 
 - **Location:**
-  `$(git rev-parse --git-common-dir)/blobsy/objects/<algo>/<h0>/<h1>/<hash>`, shared by
-  all worktrees of a clone.
-  Optionally a user-level cache (`~/.cache/blobsy/objects`) shared across clones.
-- **Contents:** original (uncompressed) bytes, read-only files.
-  Optionally the compressed upload form alongside.
-- **Populated on:**
-  - pull: download → verify → cache → materialize;
-  - push: copy before upload;
-  - add: when the opt-in `cache.on_add: true` is set.
-    This doubles disk use, but unpushed edits then always have a recovery copy.
-- **Materialization:** reflink (`cp --reflink` / `copyFile` with `COPYFILE_FICLONE`)
-  when the filesystem supports it, else a copy.
-  **Never hardlinks by default** — an edit would corrupt the cache, which Gat warns
-  about too.
+  `$(git rev-parse --git-common-dir)/blobsy/objects/<algo>/<h0h1>/<h2h3>/<hash>`, shared
+  by every worktree of a clone.
+  A user-level cache (`~/.cache/blobsy/objects`) shared across clones is optional.
+- **Contents:** original bytes in read-only files, plus the compressed upload form when
+  one was made.
+- **Populated:**
+  - on pull: download → verify → cache → materialize;
+  - on push: copy before upload;
+  - on add: only with the opt-in `cache.on_add: true`, which doubles disk use but gives
+    unpushed edits a recovery copy.
+- **Materialization:** reflink (`copyFile` with `COPYFILE_FICLONE`) when supported, else
+  copy. Never hardlink by default, since an edit would corrupt the cache.
 - **Eviction:** `blobsy cache status | prune [--max-size 20G] [--older-than 30d]`. The
   cache is never a GC root and never required for correctness.
-- **Effects:**
-  - branch switches and `pull --force` after a refusal work offline for cached content;
-  - a second worktree costs reflinks, not downloads;
-  - B-1-class losses become recoverable.
 
-**8. Hooks: keep the guards, add opt-in hydration.**
+**8. Hooks: keep the guards, add opt-in restore.**
 
-- **Pre-commit (kept):** staged pointers match their payloads (using the hash cache, so
-  it’s fast), plus a **large-file guard** that refuses a staged payload with a sibling
-  `.bref` (B-3).
+- **Pre-commit (kept):**
+  - staged pointers match their payloads, checked via the hash cache, so it’s fast;
+  - a **large-file guard** refuses a staged payload that has a sibling `.bref` (B-3).
 
 - **Pre-push (rewritten):**
-  1. read the `<local ref> <sha> <remote ref> <sha>` lines from stdin;
-  2. list the `.bref` files changed in `<remote sha>..<local sha>` and read each from
-     the *commit* (`git show <sha>:<path>`);
-  3. upload each key the backend lacks, from the local cache or the working tree, after
-     verifying the bytes match the pointer’s hash;
-  4. **abort the push**, naming the path and commit, if neither has the bytes (B-2).
+  1. Read the `<local ref> <sha> <remote ref> <sha>` lines on stdin.
+  2. List the `.bref` files changed in `<remote sha>..<local sha>`, reading each from
+     the *commit* (`git show <sha>:<path>`).
+  3. Upload each derived key the backend lacks, from the cache or the working tree,
+     after a hash check.
+  4. **Abort the push**, naming the path and commit, if neither has the bytes (B-2).
 
-  It no longer writes to the working tree, and there is no “commit your keys” message.
+  It never writes to the working tree.
 
-- **Hydration (new, opt-in):** `blobsy hooks install --hydrate` adds `post-checkout`,
+- **Restore (new, opt-in):** `blobsy hooks install --hydrate` adds `post-checkout`,
   `post-merge` and `post-rewrite` hooks that run `blobsy pull --cache-only --quiet`.
-  - No network access unless `hydrate.fetch: true`.
+  - No network unless `hydrate.fetch: true`.
   - They always exit 0, printing one line on failure.
-  - Installed via `git rev-parse --git-path hooks`, so `core.hooksPath` (husky,
-    lefthook) is honored; Gat gets this wrong.
-  - `cherry-pick`, `stash`, `reset` and `restore` fire no hooks.
-    `status` prints “N files behind their pointers: run `blobsy pull`”.
+  - Installed via `git rev-parse --git-path hooks`, so `core.hooksPath` is honored.
+  - `cherry-pick`, `stash`, `reset` and `restore` fire no hooks, so `status` prints “N
+    files behind their pointers: run `blobsy pull`”.
 
-- **Correctness never depends on any of these** (round 9 X-1). The CI check
-  (`blobsy doctor --remote --ci`) is the backstop for jj, `--no-verify` and hosted
-  merges.
+- **Correctness never depends on any hook** (round 9 X-1). `blobsy doctor --remote --ci`
+  is the CI backstop for jj, `--no-verify` and hosted merges.
 
-**9. Hash algorithm agility** (decision K3).
+**9. One hash algorithm** (decision K3). There is no algorithm agility to maintain.
 
-- Pointers already carry an algorithm prefix (`sha256:`), and keys get an algorithm
-  namespace (`sha256/…`, `blake3/…`). Both algorithms are readable forever.
-- `hash.algorithm` in the committed `.blobsy.yml` selects the algorithm for *new*
-  content: `blake3` (recommended default for new repos) or `sha256`.
-- **Implementation:** `@napi-rs/blake-hash` native BLAKE3 as an optional dependency,
-  with a `hash-wasm` BLAKE3 fallback.
-  The fallback is correct but only ~1.4× faster than SHA-256. SHA-256 stays on Node’s
-  built-in `crypto`.
-- **`import-lfs` keeps SHA-256:** LFS oids are SHA-256, so imported pointers stay
-  `sha256:` with no rehash or download.
-  A repo may mix algorithms.
-  The same bytes added under both algorithms are stored twice, which is acceptable.
-- **Lost with BLAKE3:**
-  - S3’s server-side `x-amz-checksum-sha256` verify-without-download.
-    Transfer integrity still comes from the provider’s default CRC64NVME/CRC32C, and
-    identity is verified on download as today.
-  - `sha256sum` as the manual check; it becomes `b3sum`.
-- **Gained besides speed:** Gat also uses BLAKE3, so a future `import-gat` needs no
-  rehash.
+- **BLAKE3 (recommended):** `@napi-rs/blake-hash` native, with a `hash-wasm` fallback
+  that is correct but slow.
+- **SHA-256 (alternative):** Node’s built-in `crypto`, no dependency.
+- **Hashing I/O:** read via `fs.read` with 1 MB buffers, not streams, in both Node and
+  Bun.
+- **Parallelism:** files are hashed in parallel by a bounded worker pool.
+- **If BLAKE3:**
+  - `import-lfs` must read each LFS object once to rehash it.
+    It is local, from `.git/lfs/objects`, and it copies the object into the store
+    anyway.
+  - S3’s server-side SHA-256 checksum is lost.
+    Transfer integrity uses the provider default (CRC64NVME/CRC32C), and identity is
+    verified on download.
+  - Manual verification uses `b3sum`.
+  - A future `import-gat` needs no rehash, because Gat also uses BLAKE3.
 
 ### Components
 
 | File | Change |
 | --- | --- |
-| `types.ts` | `Bref` adds `executable?`; `BREF_FORMAT = 'blobsy-bref/0.2'`; `compressed_size` read-only (still parsed, no longer written) |
-| `hash.ts` | Algorithm-agile `computeHash(path, algo)`, `parseHash` accepting `sha256:`/`blake3:`; native BLAKE3 with WASM fallback |
-| `template.ts` | One `deriveKey(entry, config)`; new variables; reject `{iso_date_secs}`; new default template |
-| `config.ts`, `config-schema.ts` | `hash.algorithm`, `cache.*`, `hydrate.*`; new default template; drop the timestamp default literal (also in `transfer.ts:295`) |
-| `compress.ts` | Add-time decision with keep-if-smaller trial |
-| `cli.ts` (`trackSingleFile`, `trackDirectory`, `mv`) | Compute hash, compression, key and exec bit at add; never clear `remote_key`, recompute it; `mv` keeps the key |
-| `transfer.ts` | `pushFile` uploads to `ref.remote_key` (or derives one for keyless 0.1 pointers) and returns no `refUpdates`; `pullFile` consults the local cache first and restores the exec bit; object metadata on upload |
-| `backend-*.ts`, `types.ts` `Backend` | `putIfAbsent`, `list(prefix)`, `capabilities.conditionalPut`, optional `setMetadata` |
-| `commands-stage2.ts` | Delete the 4 write-back sites; replace “`remote_key` present = pushed” (~12 sites) with `isPublished()` (local record ∨ batched remote check); `decideSyncAction` → recoverability rule; rewrite the pre-push hook; add hydration hook handlers |
-| `stat-cache.ts`, `paths.ts` | Move under `$(git rev-parse --git-path blobsy)`; add the pushed/pulled record; wire `getCachedHash` (size + mtime, racy-clean rule: re-hash when mtime ≥ the cache entry’s write time) |
-| new `cache.ts` | Local content cache: put/get/materialize (reflink → copy)/prune |
-| `hooks.ts` | `--hydrate` hook set |
-| docs, `SKILL.md`, README | One-commit flow; remove two-phase guidance; dedup claim becomes true |
+| `types.ts` | `Bref` = `{format, hash, size, compressed?, executable?}`; `BREF_FORMAT = 'blobsy-bref/0.2'`; remove `remote_key`, `compressed_size` |
+| `hash.ts` | One algorithm; large-buffer `fs.read` loop; native BLAKE3 with WASM fallback (if K3) |
+| `template.ts` | Replace with a ~20-line `keyFor(hash, compressed)`; delete the template variables and `sanitizeKeyComponent` |
+| `config.ts`, `config-schema.ts` | Remove `remote.key_template` and the default literal (also `transfer.ts:295`); add `cache.*`, `hydrate.*` |
+| `ref.ts` | Strict reader: exact format, exact hash prefix, fail fast |
+| `compress.ts` | Add-time decision with keep-if-smaller; zstd only |
+| `cli.ts` (`trackSingleFile`, `trackDirectory`, `mv`) | Write the final pointer at add; delete key clearing; `mv` touches only the path |
+| `transfer.ts` | `pushFile`/`pullFile` take the derived key and return no `refUpdates`; pull reads the cache first and restores the exec bit; object metadata on upload |
+| `backend-*.ts`, `Backend` interface | `putIfAbsent`, `list(prefix)`, `capabilities.conditionalPut`, optional metadata |
+| `commands-stage2.ts` | Delete the 4 write-back sites; replace ~12 “`remote_key` present” checks with `isPublished()`; replace `decideSyncAction`’s merge base with the recoverability rule; rewrite the pre-push hook; add restore-hook handlers |
+| `stat-cache.ts`, `paths.ts` | Move under `$(git rev-parse --git-path blobsy)`; pushed/pulled record; wire `getCachedHash` (size + mtime, racy-clean) everywhere |
+| new `cache.ts` | Content cache put/get/materialize/prune |
+| `hooks.ts` | `--hydrate` set |
+| docs, `SKILL.md`, README | One-commit flow; the dedup claim becomes true; remove template docs |
 
-### API changes (user-visible)
+### User-visible changes
 
-- **The `add` → commit → `git push` flow is complete** (the hook uploads).
-  No second commit.
-- **`blobsy status`:** new `pushed` / `not pushed` / `unknown` wording; `--remote` flag.
-- **New:** `blobsy cache status|prune`, `blobsy hooks install --hydrate`,
-  `blobsy pull --cache-only`.
-- **New config keys:** `hash.algorithm`, `cache.enabled` (default on), `cache.on_add`,
-  `cache.max_size`, `hydrate.fetch`.
-- **Removed:** the `{iso_date_secs}` template variable; the “commit the remote_key
-  update” messaging; `check-unpushed`’s key-presence semantics (folded into
-  `status --remote` per round 9 S3).
+- **One commit:** `add` → commit → `git push` (the hook uploads) is complete.
+- **New commands and flags:** `blobsy status [--remote]`, `blobsy cache status|prune`,
+  `blobsy hooks install --hydrate`, `blobsy pull --cache-only`.
+- **New config:** `cache.enabled` (default on), `cache.on_add`, `cache.max_size`,
+  `hydrate.fetch`.
+- **Removed:** `remote.key_template` and its variables; `remote_key` and
+  `compressed_size` in pointers; the “commit the remote_key update” messaging.
+  `check-unpushed` is removed outright, with `status --remote` and
+  `doctor --remote --ci` covering it (round 9 S3; no alias).
 
 ## Implementation Plan
 
-Steps 1 and 2 are the core.
-Each step is shippable on its own.
+Each step is shippable; Steps 1–2 are the core.
 
 ### Step 0: Decisions (owner)
 
-- [ ] **K1:** record the key at add time (recommended), or derive it on read.
-- [ ] **K2:** default template: pure content key + filename as object metadata
-  (recommended), or `{hash}/{filename}`.
-- [ ] **K3:** default hash for new content: BLAKE3 native with WASM fallback
-  (recommended, subject to the cross-hardware benchmark below), or stay SHA-256.
-- [ ] **K4:** local cache on by default (populated on pull and push; `on_add` opt-in).
-- [ ] **K5:** hydration hooks opt-in (recommended) or on by default.
-- [ ] **Benchmark before K3 is final:** SHA-256 vs native BLAKE3 on Apple M-series, AMD
-  Zen, AWS Graviton, and an Intel CI runner (GitHub `ubuntu-latest`). Keep the plan’s
-  default if BLAKE3 is ≥3× faster on at least two of the four; otherwise stay on SHA-256
-  and rely on the hash cache plus parallel hashing across files.
+- [ ] **K1:** derive keys on read and store none (recommended), or record them at add.
+- [ ] **K2:** the fixed layout `<algo>/<h0h1>/<h2h3>/<hash>[.zst]`, with the filename as
+  object metadata (recommended).
+- [ ] **K3:** BLAKE3 (recommended, subject to a benchmark) or SHA-256.
+  - Benchmark SHA-256 vs native BLAKE3 on Apple M-series, AMD Zen, AWS Graviton and a
+    GitHub `ubuntu-latest` runner.
+  - Choose BLAKE3 if it is ≥3× faster on at least two of the four; otherwise SHA-256.
+- [ ] **K4:** local cache on by default (filled on pull and push; `on_add` opt-in);
+  restore hooks opt-in.
 
-### Step 1: Pointer 0.2 with computed keys (closes `pqyt`)
+### Step 1: Pointer 0.2 with derived keys (closes `pqyt`)
 
-- [ ] `deriveKey` + allowed-variable validation; new default template.
-- [ ] Algorithm-agile hashing (BLAKE3 behind `hash.algorithm`, if K3).
-- [ ] Add-time compression decision with keep-if-smaller.
-- [ ] `track`/`add` write `remote_key`, `compressed` and `executable` at add; `mv` keeps
-  the key.
-- [ ] `pushFile` without `refUpdates`; delete the 4 write-back sites and the `track`
-  key-clearing.
-- [ ] `putIfAbsent` on local and S3 SDK; aws-cli `--no-overwrite` with a version check;
+- [ ] `keyFor()` and the fixed layout; delete template machinery and `key_template`.
+- [ ] Hashing per K3, with large-buffer reads and a parallel pool across files.
+- [ ] Add-time compression with keep-if-smaller.
+- [ ] `add` writes the final pointer; delete key clearing.
+- [ ] `pushFile` without `refUpdates`; delete the 4 write-back sites.
+- [ ] `putIfAbsent` on local and the S3 SDK; aws-cli `--no-overwrite` (require ≥ 2.33);
   exists-then-put elsewhere; `doctor` probe.
-- [ ] Object metadata (path, filename) on S3/GCS/Azure uploads where supported.
-- [ ] Reader accepts 0.1 (keyed or keyless) and 0.2. Keyless 0.1 pointers derive a key
-  with the current template on push and pull.
+- [ ] Object metadata on upload where supported.
+- [ ] Strict 0.2 reader; delete 0.1 handling.
 
-### Step 2: Pushed record and recoverability rule (fixes B-1, H-3)
+### Step 2: Pushed record and the recoverability rule (fixes B-1, H-3)
 
-- [ ] Move the hash cache under the git dir; `doctor --fix` runs `git rm --cached` on
-  committed `.blobsy/stat-cache`.
+- [ ] Move the hash cache under the git dir; delete `.blobsy/` from the working tree.
 - [ ] Wire the size + mtime hash skip (racy-clean) into status, verify, push, pull and
-  the hooks.
-- [ ] Record pushed/pulled `{hash, key, at}`; `isPublished()` with batched remote
-  checks.
-- [ ] Replace `decideSyncAction`’s merge base with the recoverability rule; `sync` =
-  `pull` then `push`.
-- [ ] Replace ~12 “`remote_key` present” checks.
+  hooks.
+- [ ] Pushed/pulled record; `isPublished()` with batched checks; replace ~12
+  key-presence checks.
+- [ ] Recoverability rule; `sync` = `pull` then `push`; delete the merge-base code.
 
-### Step 3: Pre-push hook reads pushed refs (fixes B-2) and the large-file guard (B-3)
+### Step 3: Pre-push from pushed refs (B-2) and the large-file guard (B-3)
 
-- [ ] Parse stdin ref lines; diff `.bref` files per range; read pointers from commits.
-- [ ] Upload from cache or working tree after a hash check; abort with path and commit
-  otherwise.
-- [ ] Pre-commit large-file guard; `doctor --remote --ci` for CI.
+- [ ] Parse the stdin ref lines; diff `.bref` per range; read pointers from commits.
+- [ ] Upload from cache or working tree after a hash check; otherwise abort, naming the
+  path and commit.
+- [ ] Pre-commit large-file guard; `doctor --remote --ci`.
 
 ### Step 4: Local content cache
 
-- [ ] `cache.ts` with put/get/materialize (reflink → copy) and prune; worktree-shared
-  location.
-- [ ] Pull reads the cache first; push and (opt-in) add populate it; the recoverability
-  rule consults it.
+- [ ] `cache.ts`; pull reads the cache first; push and opt-in add fill it; the
+  recoverability rule consults it.
 
-### Step 5: Hydration hooks (opt-in)
+### Step 5: Restore hooks (opt-in)
 
-- [ ] `hooks install --hydrate`; `pull --cache-only`; hook handlers that never fail the
-  git operation.
-- [ ] `status` hint for operations that fire no hooks.
+- [ ] `hooks install --hydrate`; `pull --cache-only`; non-failing hook handlers.
+- [ ] `status` hint for git operations that fire no hooks.
 
 Rough size [I]:
-- Steps 1–2 change ~900–1,200 LOC and are net negative (the write-back paths, merge
-  base, key clearing and timestamp handling go away).
+- Steps 1–2 change ~900–1,200 LOC and are clearly net negative.
+  The template system, write-back paths, merge base, key clearing and 0.1 handling go
+  away.
 - Steps 3–5 add ~500–700 LOC.
 
 ## Testing Strategy
 
 **Unit tests:**
-- `deriveKey` vectors for both algorithms;
-- 0.1/0.2 pointer parsing;
+- `keyFor` vectors;
+- the strict pointer reader, including rejection of other formats;
 - the recoverability decision table;
-- `putIfAbsent` semantics per backend (local and the s3rver mock);
+- `putIfAbsent` per backend (local, s3rver);
 - cache put/get/materialize/prune;
-- the racy-clean hash skip.
+- the racy-clean hash skip;
+- hash test vectors for the chosen algorithm.
 
-**New golden tryscripts** (they run the CLI from `$PATH`):
-1. **One-commit flow:** `add` → `git commit` → `git push` (hook uploads) → the working
-   tree is clean → a fresh clone runs `blobsy pull` successfully.
-2. **Dedup:** restore old bytes → `add` → push uploads nothing; the same bytes at two
+**New golden tryscripts:**
+1. **One-commit flow:** `add` → `git commit` → `git push` (hook uploads); the working
+   tree is clean; a fresh clone runs `blobsy pull` successfully.
+2. **Dedup:** restoring old bytes → `add` → push uploads nothing; the same bytes at two
    paths are stored as one object.
-3. **Plain `git mv`:** `git mv a.bref b.bref && mv a b` → a fresh clone pulls `b` (the
-   key travels with the pointer).
-4. **B-2:** commit on `feature`, check out `main`, `git push origin feature` → the hook
-   uploads from the cache, or aborts with the path named.
-5. **B-1 and red-team variants** are all refused:
+3. **Plain `git mv`:** `git mv a.bref b.bref && mv a b` → a fresh clone pulls `b`.
+4. **B-2:** commit on `feature`, check out `main`, `git push origin feature` → upload
+   from the cache, or abort naming the path.
+5. **B-1 and the red-team variants are refused:**
    - `track` + `stash` + `sync`;
    - `checkout -- f.bref`;
    - pushed-but-uncommitted;
    - `commit` + `revert` + `pull`.
-6. **Teammate update / revert / cherry-pick:** `pull` succeeds without `--force` (H-3).
-7. **Cache:** a second worktree pulls with the network disabled (unreachable local
-   backend path); `cache prune --max-size`.
-8. **Hydration:** `checkout` of another branch materializes from cache; `core.hooksPath`
-   respected.
-9. **Mixed algorithms:** an imported `sha256:` pointer next to new `blake3:` pointers;
-   both pull.
-10. **Create-only:** a second push of the same key is a no-op.
-    A pre-existing object with different bytes under the key is reported, not
-    overwritten.
+6. **Teammate update, revert, cherry-pick:** `pull` succeeds without `--force` (H-3).
+7. **Cache:**
+   - a second worktree pulls with the backend unreachable;
+   - `cache prune --max-size`.
+8. **Restore hooks:** `checkout` of another branch materializes from cache;
+   `core.hooksPath` respected.
+9. **Create-only:** a second push is a no-op; an existing mismatched object is reported,
+   not overwritten.
+10. **Old pointer:** a 0.1 pointer fails fast with the “re-run `blobsy add`” message.
 
-**Existing goldens:** the `REMOTE_KEY` pattern in `tryscript.config.ts` and ~20 goldens
-change shape (budget for it).
-Run the golden suite against both the npm build and a `bun build --compile` binary.
+**Existing goldens:**
+- Rewrite every golden whose output shows keys or 0.1 pointers.
+- Update the `REMOTE_KEY` pattern in `tryscript.config.ts` to the fixed layout.
+- Run the suite against the npm build and a `bun build --compile` binary.
 
-**Benchmarks:** `add` of 1 GiB and 10k × 100 KB; no-op `status` and `sync` on 10k files
-(target ≤1 s warm); recorded in the PR.
+**Benchmarks**, recorded in the PR:
+- `add` of 1 GiB and of 10k × 100 KB;
+- no-op `status` and `sync` on 10k files (target ≤1 s warm);
+- Node vs Bun hashing throughput, using the large-read loop.
 
 ## Rollout Plan
 
-- **One release** ships Step 1 and Step 2 together.
-  Shipping the new default template without derive-when-absent and the new pushed
-  semantics would let mixed clients disagree.
-- **Mixed teams (old + new blobsy):**
-  - Old clients keep writing timestamped `remote_key`s, which new clients read as-is.
-  - Old clients reading 0.2 pointers see `remote_key` and assume “pushed”, so their
-    status is optimistic but pull fails clearly if a blob is missing.
-  - `.blobsy.yml` gains an optional `min_version`, which old clients ignore and new ones
-    enforce.
-- **Existing objects stay where they are.** `blobsy migrate-keys` (explicit, later)
-  re-homes them to content keys with create-only copies.
-- **Existing repos keep their hash algorithm** unless they opt in.
-  New repos get the K3 default.
+- Ship as one breaking release.
+- No migration, dual reading, or compatibility shims.
+- Existing test repos re-run `blobsy add` after deleting old pointers, and objects from
+  old layouts are abandoned.
+- Docs and the skill describe only the new model.
 
 ## Open Questions
 
-- K1–K5 above.
-- Should `executable` generalize to Gat-style `kind` (`f|x|l`) now, ahead of UC-3
-  snapshots, or stay a boolean in pointers?
-- Should native BLAKE3 also hash in parallel *within* a large file (BLAKE3’s tree mode;
-  ~4× more on 4 cores in Rust)?
-  Check `@napi-rs/blake-hash` support before relying on it.
-- Should the cache store compressed upload forms as well, so pushes never recompress, or
-  only original bytes?
-- Should the user-level cache (shared across clones) default on, given disk use?
+- K1–K4 above.
+- Should `executable` become Gat-style `kind` (`f|x|l`) now, ahead of UC-3 snapshots?
+- Does `@napi-rs/blake-hash` expose multi-threaded hashing within one file?
+  If not, is a tiny napi-rs binding over `blake3`’s rayon API worth it for very large
+  files?
+- Should the user-level cache (shared across clones) default on?
 
 ## References
 
 - Round 9 review: `docs/project/design/current/blobsy-design-review-round9-use-cases.md`
-  (§4.3, §5.1–§5.2, §6.2 invariants, §9.1, D2/D3)
+  (§4.3, §5.1–§5.2, §6.2, §9.1, D2/D3/D15)
+- Hash benchmarks:
+  `docs/project/research/current/research-2026-10-22-hash-performance-node-bun-rust.md`
 - Gat deep dive: `docs/project/research/current/research-2026-10-22-competitor-gat.md`
-  (§3 data model, §4 lifecycles, §5 hooks, §12 comparison)
 - Object-store capabilities:
   `docs/project/research/current/research-2026-10-22-object-store-capabilities-refresh.md`
-  (create-only writes, checksums, metadata)
-- Language review:
-  `docs/project/design/current/round9-subreviews/language-typescript-vs-rust.md` (hash
-  benchmarks; native addon distribution)
-- Bead `blobsy-pqyt` (two-phase `remote_key`)
+- `.tbd/docs/guidelines/backward-compatibility-rules.md` (DO NOT MAINTAIN)
+- Bead `blobsy-pqyt`
 
 <!-- This document follows common-doc-guidelines.md.
 See github.com/jlevy/practical-prose and review guidelines before editing.
