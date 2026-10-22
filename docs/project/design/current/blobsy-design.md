@@ -15,6 +15,45 @@ A standalone CLI for per-file sync of large files between local gitignored paths
 remote storage, with committed `.bref` pointer files for tracking.
 Git is the manifest.
 
+> **Round 9 review (2026-10-22):** this document describes the shipped per-file design.
+> [blobsy-design-review-round9-use-cases.md](blobsy-design-review-round9-use-cases.md)
+> reviews it against the pain points and use cases below, and proposes how to cover
+> them: content-derived keys, collection manifests, and immutable snapshots.
+> Those proposals are pending owner decisions (round 9 §11) and are not yet reflected in
+> the sections that follow.
+
+## Problem Statement: Pain Points and Use Cases
+
+Blobsy exists to solve the problems of keeping large volumes of file data in git
+repositories.
+
+**Pain points:**
+
+| ID | Pain |
+| --- | --- |
+| PAIN-1 | No individual file over a few MB should be in git: it is a permanent performance penalty. |
+| PAIN-2 | Very large numbers of files are slow to manage and cause noisy diff churn in PRs. |
+| PAIN-3 | Large files tied into git’s hash tree make retroactive removal very hard. |
+| PAIN-4 | Git LFS, the official answer, is widely disliked, partly because of PAIN-3 and the cost of LFS on GitHub. |
+| PAIN-5 | Backend storage for large files isn’t pluggable (S3, GCS, custom), so it doesn’t fit other tools and workflows. |
+
+**Use cases:**
+
+| ID | Use case | What git holds | Status (round 9) |
+| --- | --- | --- | --- |
+| UC-1 | A few files stored externally but versioned: PRs and diffs show the metadata, the bytes live in a storage backend. | One `.bref` pointer per file. | **Shipped** (this document). Two-phase `remote_key` and data-safety fixes pending. |
+| UC-2 | A collection of hundreds or thousands of files managed as a unit: git holds a manifest of the files, not a placeholder per file. | One manifest per collection. | **Not covered.** Today a directory expands into per-file pointers; collection manifests proposed (round 9 §5.3). |
+| UC-3 | A very large tree (node_modules, cargo `target/`) synced or cached externally with no manifest in git at all. | Nothing per tree (a config stanza at most). | **Not covered.** Immutable snapshots proposed (round 9 §5.4). |
+| UC-4 | Standard git merge workflows for externalized files: the merged data is external, merges happen in git on the metadata (UC-1, UC-2). | — | **Partly covered.** Pointer merges work with plain git; payload hydration and some git operations are unsafe today (round 9 §3–§4). |
+| UC-5 | Fixed assets with immutable names, separate from git workflows (the substrate for UC-3). | Nothing, or one pin line. | **Not covered.** Same snapshot primitive as UC-3 (round 9 §5.4). |
+| UC-6 | Run/output archives mirrored to path-shaped prefixes with receipts (from round 8). | A receipt, optionally. | **Proposed** (round 8 mirror mode). |
+| UC-7 | Adoption: convert existing large files (and Git LFS pointers) in history to blobsy references. | — | **Not covered.** `import-lfs` and history import proposed (round 9 §5.5). |
+
+Two workloads are easy to conflate under UC-3. **Derived caches** take their identity
+from an input hash, have racing writers, are safe to lose, and expire.
+**Run archives** (UC-6) are path-browsable, have one writer, and are never deleted.
+They need different primitives.
+
 ## Goals and Principles
 
 1. **Simple:** Simple usage is easy.
@@ -68,6 +107,10 @@ Git is the manifest.
 9. **One primitive:** The entire system reduces to: one file, one `.bref`, one blob.
    Directories, sync, conflicts, GC -- all follow from this.
    There is no second kind of thing.
+   *(Round 9 proposes rewording this principle as “one storage contract, one entry
+   format, three reference disciplines”, because UC-2, UC-3 and UC-5 cannot be covered
+   by per-file pointers.
+   See round 9 §6.1.)*
 
 10. **Unopinionated where it doesn’t matter:** Blobsy doesn’t care what compression you
     use or which transfer tool you prefer.
@@ -168,9 +211,11 @@ Git-native large file tracking via pointer files and a custom transfer protocol.
 - **Relevant:** Closest architectural model -- pointer files in git, data stored
   externally.
 - **Gaps:** Tied to hosting provider (requires server-side LFS support).
-  No pluggable backends.
-  No compression control.
-  Requires Git hooks and `git lfs install` setup.
+  Backends are pluggable only through custom transfer agents or proxies (e.g. LFS-to-S3
+  adapters), not natively.
+  Removing objects on GitHub requires deleting and recreating the repository (PAIN-3);
+  GitHub LFS is metered beyond 10 GiB storage/bandwidth (PAIN-4). No compression
+  control. Requires Git hooks and `git lfs install` setup.
   No bidirectional sync outside of Git push/pull.
   No branch-isolated storage.
 
@@ -224,12 +269,49 @@ OCI container registries repurposed for arbitrary artifact storage.
   Registry size limits.
   Awkward granularity model.
 
+### Newer entrants (2025–2026)
+
+See the October 2026 research refresh
+(`docs/project/research/current/research-2026-10-22-*.md`) and round 9 §9.
+
+- **Gat** (getgat.dev, Sept 2026, Rust).
+  The closest competitor.
+  It has:
+  - one committed repo-wide `gat.lock` manifest;
+  - content-derived keys;
+  - a per-path merge driver;
+  - hydration hooks and a local content cache;
+  - OpenDAL backends.
+
+  It covers UC-1/UC-2/UC-4 but not UC-3/UC-5.
+
+- **Native git large-object promisors** (Git 2.49–2.56). They reduce clone cost but
+  don’t remove large files from history (PAIN-3 is untouched).
+
+- **Others.** DVC was acquired by lakeFS (Nov 2025). Hugging Face added mutable Storage
+  Buckets (Mar 2026). Epic’s Lore and Oxen are non-git VCSs.
+  s3lfs is a small S3-only manifest tool.
+
+- **jj (Jujutsu).** Runs no git hooks and ignores `.gitattributes`. Blobsy’s correctness
+  must not depend on hooks.
+
 ### Assessment
 
 No existing tool combines: committed pointer files for git integration, pluggable
 backends, content-addressable remote storage with dedup, push/pull sync with per-file
 compression, and a simple standalone CLI. `blobsy` fills this gap as a per-file sync
 coordinator that delegates heavy lifting to existing tools.
+
+*(Updated October 2026:)* Gat now combines most of these for the repo-files use cases
+(UC-1/UC-2/UC-4). Blobsy’s distinct position is the full set together:
+- per-file pointers that merge on any host;
+- per-collection manifests;
+- immutable snapshots for trees and assets (UC-3/UC-5, which no tool reviewed covers);
+- any storage, including command and rclone backends;
+- hook-independent safety;
+- an agent-first CLI.
+
+See round 9 §9.3.
 
 ## Core Concepts
 
