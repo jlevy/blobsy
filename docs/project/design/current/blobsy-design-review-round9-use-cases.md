@@ -636,7 +636,46 @@ S6–S7 are what keep the next modes from tripling the plumbing.
 
 ### 7.4 Implementation language: TypeScript vs Rust
 
-<!-- LANGUAGE-PLACEHOLDER -->
+Full report:
+[`round9-subreviews/language-typescript-vs-rust.md`](round9-subreviews/language-typescript-vs-rust.md)
+[S]. Gat, jj, Xet, Oxen and Lore are all Rust, and the landscape research calls
+single-binary distribution “the category norm”, so the question is fair.
+The evidence says it is not a language problem.
+
+| Concern | Finding |
+| --- | --- |
+| Startup | `blobsy --version` 0.53–0.58 s vs bare `node` 0.03 s [V]. The cost is eager imports: `marked-terminal` ~160 ms, `@aws-sdk/client-s3` ~133 ms, `zod` ~64 ms, `yaml` ~36 ms [S]. A lazily-loaded TS CLI starts in ~100–150 ms; Rust CLIs (gat, jj) in 8–14 ms. A merge driver runs once per conflicted *manifest*, not per data file, so ~100 ms is invisible. |
+| Hot paths | Node is within 1.0–1.5× of Rust: SHA-256 (OpenSSL) 1 GiB in 4.3–4.9 s vs Rust `sha2` 6.7 s on this CPU; 100k-file walk+stat 340 ms vs 209–288 ms; zstd of 179 MB 2.1–2.3 s vs 1.7–1.8 s [S]. Only BLAKE3 is a large Rust win, and that is a hash choice, not a language choice; the Gat comparison recommends keeping SHA-256. |
+| Single binary | `bun build --compile` produced a working 84 MB blobsy binary in 2.8 s [S]. Node SEA is maturing. Claude Code and Codex ship native binaries via per-platform npm packages; the same packaging works for a bun/SEA build or a Rust binary, so install UX is independent of language. |
+| Ecosystem | Create-only writes are available in every option: AWS SDK v3 `IfNoneMatch`; `aws-sdk-s3`; Rust `object_store`; and **OpenDAL’s npm bindings**, which could give in-process GCS/Azure preconditions without rclone (closing the gap in §6.4) [S]. |
+| Supply chain | A wash: 166 npm packages in blobsy’s prod tree (94 are AWS SDK/Smithy) vs ~276 crates for a blobsy-shaped Rust CLI (Gat: 455) [S]. |
+| Velocity | Rust clean release builds take minutes (Gat ~7 min); vitest and goldens iterate in seconds. Coding agents still pay a compile-fix tax in Rust [S]. The three blockers (B-1..B-3) are policy bugs that no type system prevents; error-shape drift is the one place Rust’s `Result` would genuinely help. |
+| Switch cost | After Phases 1–2: ~5–6k LOC TS → ~7–9k Rust, 3–6 weeks plus release engineering [I]. Porting *before* Phase 1 would port code that is about to be deleted. The 71 golden tryscripts run `blobsy` from `$PATH` and carry over unchanged to any binary with identical output [S]. A napi-rs hybrid is the worst option: all of Rust’s build matrix for ≤1.5× gains. |
+
+**Recommendation: stay in TypeScript through Phase 3** (no rewrite, no hybrid).
+Do these now regardless:
+- Lazy-load `@aws-sdk`, `marked-terminal` and `zod`, with a CI startup budget
+  (`--version` < 200 ms).
+- Give the merge driver and hooks a minimal-import entry point.
+- Ship bun-compiled binaries alongside npm as an experiment, and run the golden suite
+  against them.
+- Loosen `engines` to Node ≥ 22.15 (the zstd floor).
+- Make the formats language-neutral: a normative spec with test vectors for `.bref` 0.2,
+  `.brefs`, `tree_id`, the deterministic tar flavor, key derivation and `--json`
+  schemas. That makes a later port, or a second implementation, cheap.
+
+**Decision rule:** switch to Rust after Phase 2 only if one of these is *measured*:
+1. After Phase 1 and lazy imports, a real workload is more than 2× over budget and the
+   profile blames the runtime.
+   Suggested budgets:
+   - `status`/`verify` on a 10k-entry manifest: ≤ 1 s warm;
+   - `--version`, hooks and the merge driver: ≤ 150 ms;
+   - publishing a 15k-file / 170 MB snapshot: ≤ 10 s.
+2. Both `npx` and a single binary are unacceptable in a target environment.
+3. Blobsy becomes a library product that needs in-process git or non-JS embedding.
+4. An npm supply-chain incident makes the dependency tree unacceptable.
+
+If none fires by the end of Phase 3, the question is settled.
 
 ### 7.5 Documentation
 
@@ -850,6 +889,7 @@ trees; CDC/sub-file dedup; a server.
 | D10 | Compression: zstd + none only; decided at track/add time; none in collections v1? | zstd + none; keep-if-smaller; allow in collections via `stored` |
 | D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes |
 | D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first; revisit `import-gat` only if Gat gains traction |
+| D13 | Implementation language: stay TypeScript, rewrite in Rust, or hybrid. | Stay TypeScript through Phase 3; lazy imports + startup budget; ship bun single binary alongside npm; switch only per the §7.4 decision rule |
 
 Bead dispositions: `blobsy-pqyt` → close via D2; `blobsy-aad8` → re-point at the UC-2
 collection design (§5.3); `blobsy-4vpk` → drop (S1); `blobsy-s2tr` → resolve via D8.
@@ -869,6 +909,8 @@ session’s ephemeral workspace):
   collection manifest design, merge experiments and Monte-Carlo, driver prototype.
 - [`round9-subreviews/uc3-uc5-snapshots.md`](round9-subreviews/uc3-uc5-snapshots.md) —
   taxonomy, snapshot primitive, conditional-write matrix, `node_modules` profile.
+- [`round9-subreviews/language-typescript-vs-rust.md`](round9-subreviews/language-typescript-vs-rust.md)
+  — TypeScript vs Rust: startup, hot-path benchmarks, distribution, switch cost.
 
 Research (October 2026 refresh), in `docs/project/research/current/`:
 
