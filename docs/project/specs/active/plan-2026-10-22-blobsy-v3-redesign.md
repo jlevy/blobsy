@@ -84,9 +84,14 @@ Phase 1 gives UC-1 and UC-2 one-commit flows, safe pulls and pushes, and CI chec
   - commands `init`, `track`, `untrack`, `verify`, `health`, `check-unpushed`,
     `pre-push-check`, `hooks`, `readme`, `skill`, `sync`, `config`, `mv`, with no
     aliases.
+- [ ] **`.gitattributes`** with `*.bref merge=blobsy text eol=lf`, written by first-run
+  `setup`. `eol=lf` is needed now for Windows.
+  `merge=blobsy` is harmless without a driver: git falls back to its text merge
+  (verified).
 - [ ] **Manifest format** (§5.1–5.2):
   - parser, serializer and validator for the header and the five columns;
-  - kinds `f x l d` (reject `t` until Phase 3);
+  - kinds `f x l d` (reject `t` until Phase 3), the `.` row rule, and symlink-target
+    confinement with `hash(target)` checked on placement;
   - pinned escaping and sorting;
   - `tree_id`;
   - test vectors in `tests/vectors/`.
@@ -104,11 +109,13 @@ Phase 1 gives UC-1 and UC-2 one-commit flows, safe pulls and pushes, and CI chec
   - batched `exists` returning sizes;
   - readers try both encodings;
   - uploads only from verified immutable bytes;
-  - `_blobsy/store.yaml` and `_blobsy/repos/`;
+  - `_blobsy/store.yaml`, and `_blobsy/repos/` markers written by every command with
+    write credentials;
   - probe in `setup` and `doctor --probe` only;
   - per-permission diagnosis.
 - [ ] **Local state** (§5.6):
-  - hash cache with the `here` flag;
+  - hash cache, one file per target, with the `here` flag (cleared by `clean`) and the
+    snapshot a target was last restored from;
   - content cache (filled at add, push, pull and displacement; 0444; materialize list;
     verify on materialize; LRU prune that never drops unsynced bytes);
   - known logs keyed by store id;
@@ -116,7 +123,7 @@ Phase 1 gives UC-1 and UC-2 one-commit flows, safe pulls and pushes, and CI chec
 - [ ] **Entry loop and the recoverability rule** (§11): decide and displace, online and
   offline.
 - [ ] **Commands:** `setup` (first run vs join, `--hash`), `add` (files and directories,
-  refusals from §7.2, `--prune`, `--rehash`, jj-aware), `rm` (keeps files), `clean`,
+  refusals from §7.2, `--prune`, jj-aware), `rm` (keeps files), `clean` (online only),
   `push [--repair]`, `pull [--only] [--all] [--offline] [--force]`, `status`,
   `doctor [--fix] [--ci [--range]] [--probe]`, `docs [--skill]`.
 - [ ] **Machine output** (§7.3): one JSON envelope, plan schema, error codes, exit
@@ -127,24 +134,26 @@ Phase 1 gives UC-1 and UC-2 one-commit flows, safe pulls and pushes, and CI chec
   size notice).
 - [ ] **Validator** (§9) in pre-commit and `doctor --ci`, including cross-ref overlap,
   tracked files inside targets, ignore lines and orphaned payloads.
-- [ ] **Config** (§12): `.blobsy.yml` with a strict schema and `${VAR}`; `git config
-  blobsy.*`; `backendOverride` reported loudly.
+- [ ] **Config** (§12): `.blobsy.yml` with a strict schema and no environment
+  interpolation; `git config blobsy.*`; `backendOverride` reported loudly and ignored by
+  hooks and `doctor --ci`; store id includes the endpoint.
 - [ ] **Backends:** S3 SDK, local, rclone, command.
   Read-only `https://` too, if the cut allows; otherwise in Phase 4.
 - [ ] **Distribution and startup** (§14): lazy imports with a 150 ms CI budget; a
   `bun build --compile` binary built in CI and run against the golden suite (released
   when green and the addon embeds).
-- [ ] **Docs:** README, the v3 SKILL (usability review §31 draft), `docs credentials`,
-  `docs ci`.
+- [ ] **Docs:** README, the v3 SKILL (adapted from the usability review §31 draft to the
+  final command surface), `docs credentials`, `docs ci`.
 
 ### Phase 2: Merges and review
 
 - [ ] `merge3` with the per-path rules; whole-file conflict on parse failure or header
   mismatch.
-- [ ] `merge-driver` and `merge-driver --inner`; `setup` registers
-  `merge.blobsy.driver`, `merge.blobsy.recursive = blobsy-inner` and `.gitattributes`.
+- [ ] `merge-driver` and `merge-driver --inner` (base row for conflicting paths; header
+  only on unparsable input); `setup` registers `merge.blobsy.driver` and
+  `merge.blobsy.recursive = blobsy-inner`.
 - [ ] `blobsy resolve` (directory and file refs).
-- [ ] `merge-driver --jj` and `setup --jj`.
+- [ ] `merge-driver --jj`; `setup` writes the jj merge-tool stanza when `.jj/` exists.
 - [ ] `blobsy diff [--markdown] [--fail-above]`.
 - [ ] Auto-pull hooks: `setup --auto-pull`, running `pull --offline --quiet`.
 - [ ] `git sparse-checkout` integration and persisted `blobsy.only`.
@@ -154,16 +163,18 @@ Phase 1 gives UC-1 and UC-2 one-commit flows, safe pulls and pushes, and CI chec
 Smallest cut:
 - [ ] Store manifests with `#key value` lines; the layout `snap/<name>/manifest.bref` +
   `snap/<name>/<tree_id>.tar.zst`; name validation.
-- [ ] `snap publish` (packed and files modes; manifest written last, create-only; 412
-  handling).
+- [ ] `snap publish` (packed and files modes; `cache/` prefix rule; pack rows hashed
+  from the archived bytes; manifest written last, create-only; 412 handling with
+  `lost-race` and `E_NAME_TAKEN`; refuses unignored paths without `--pin`).
 - [ ] `snap restore` (restore guard, extraction hardening, swap with `.blobsy-old-*`,
-  files-mode incremental restore, `--atomic`, `--latest`, `--require`, miss exit 0 for
-  caches).
+  files-mode incremental restore with per-file placement and `ignore` respected,
+  `--latest`, `--require`, miss exit codes; recoverability of files placed from a
+  snapshot).
 - [ ] Cache stanzas with pure templates.
 
 Then:
 - [ ] Pin refs (`t` rows, `--pin`, `pull` restores pins, pre-push verifies pins).
-- [ ] `--fallback`, `--only`, and `snap ls`.
+- [ ] Stanza `fallback:`, `--only`, pin states (`partial (N of M)`), and `snap ls`.
 - [ ] The lifecycle-rule check in `doctor`.
 - [ ] The cargo mtime experiment, which settles K8.
 
@@ -228,8 +239,16 @@ depend on the merge driver.
 14. **jj colocated:** `jj git push` with no hooks; `doctor --ci --range` catches the
     missing objects; `merge-driver --jj` resolves a directory-ref merge.
 15. **Restoring without blobsy:** fetch a file with `rclone copy` using the derived key.
-16. **gc safety** (Phase 4): refuses on a shared prefix, without fetch, and without a
-    recovery window; spares stash and reflog roots.
+16. **Final-review cases:**
+    - updating a packed pin replaces the tree with no refusals (files placed from a
+      snapshot count as recoverable);
+    - `clean` then `add --prune` keeps every entry;
+    - a `.bref` or store manifest with an escaping symlink target is rejected;
+    - criss-cross modify/delete still conflicts under the inner driver;
+    - two publishers racing on a `--name` produce `E_NAME_TAKEN` and no pin.
+17. **gc safety** (Phase 4): refuses on a shared prefix, without fetch, and without a
+    recovery window; refuses when `_blobsy/repos/` lists a fork it wasn’t told about;
+    spares stash and reflog roots.
 
 **Benchmarks** (CI-tracked):
 - `--version`;

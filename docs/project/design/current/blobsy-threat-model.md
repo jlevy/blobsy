@@ -48,13 +48,17 @@ table before merging.
    - Store manifests are verified by recomputing `tree_id`, and against the pin when
      there is one.
    - Archives are extracted into a temp directory without following symlinks.
-     Absolute paths and `..` segments in paths or link targets are rejected, and
-     symlinks are created only after every file is verified.
+     Absolute paths and `..` segments in paths are rejected, and symlinks are created
+     only after every file is verified.
+   - **Link targets are confined and hash-checked** wherever they come from (a ref, a
+     store manifest or an archive).
+     They must be relative and stay inside the target when resolved lexically, and
+     `hash(target)` must match the row.
    - A backend writer can deny service but can’t substitute content undetected for
      pinned or git-referenced data.
-5. **Unpinned caches trust their writers.** A cache snapshot restored by stanza or
-   `--fallback` is whatever an authorized writer published (CVE-2025-36852 “CREEP”).
-   Mitigations:
+5. **Unpinned caches trust their writers.** A cache snapshot restored by stanza
+   (including its fallback) is whatever an authorized writer published (CVE-2025-36852
+   “CREEP”). Mitigations:
    - write segregation, so only trusted CI writes `snap/cache/`;
    - provenance lines in manifests;
    - the hardening of rule 4;
@@ -70,10 +74,16 @@ table before merging.
    - User hooks are never modified.
    - `--no-hooks` skips installation.
    - `BLOBSY_NO_HOOKS=1` disables installed blobsy hooks at runtime.
-8. **Metadata derived from repo paths is sanitized** before it reaches the store (for
-   example `Content-Disposition` filenames: quotes and control characters).
-9. **`--quiet` and `--json` never change a safety decision.** They affect output, not
-   behavior.
+8. **Repository content never chooses which environment variables are read.** There is
+   no interpolation in `backend:`; snapshot-name `{env:…}` expands only names starting
+   with `BLOBSY_`. (Otherwise a committed config could leak a secret through a hostname
+   or a key name.)
+9. **Hooks and `doctor --ci` ignore `blobsy.backendOverride`**, so a machine-local
+   override can never let a push through against the wrong store.
+10. **Metadata derived from repo paths is sanitized** before it reaches the store (for
+    example `Content-Disposition` filenames: quotes and control characters).
+11. **`--quiet` and `--json` never change a safety decision.** They affect output, not
+    behavior.
 
 ## Non-goals
 
