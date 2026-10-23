@@ -1,5 +1,10 @@
 # Blobsy: Backend and Transport Layer Design
 
+> **Partly superseded by design v3 (2026-10-23).** Still useful: URL parsing, error
+> categories, health checks.
+> Superseded: key templates, the aws-cli backend, compression placement, and
+> `remote_key` handling — see [blobsy-design.md](blobsy-design.md) §4.3, §11–§12.
+
 **Date:** 2026-02-21
 
 **Status:** Draft

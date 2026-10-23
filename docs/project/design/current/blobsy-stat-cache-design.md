@@ -1,5 +1,10 @@
 # Blobsy: Stat Cache Design
 
+> **Superseded by design v3 (2026-10-23).** v3 removes the stat-cache merge base and
+> three-way sync in favor of the recoverability rule, and moves the hash cache under the
+> git directory ([blobsy-design.md](blobsy-design.md) §4.6, §10). This document
+> describes the v2 implementation only.
+
 **Date:** 2026-02-21
 
 **Status:** Draft

@@ -1,5 +1,10 @@
 # Blobsy Testing Design
 
+> **Partly superseded by design v3 (2026-10-23).** The golden-test approach stands; the
+> v3 test plan is in
+> [plan-2026-10-22-blobsy-v3-redesign.md](../../specs/active/plan-2026-10-22-blobsy-v3-redesign.md)
+> (Testing Strategy). Examples here show v2 output.
+
 **Date:** 2026-02-21
 
 **Status:** Draft
