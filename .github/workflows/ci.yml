@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm format:check
+
+      - run: pnpm lint:check
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm publint
+
+      # apt's rclone on ubuntu-latest is too old for `rclone serve s3` (needs
+      # v1.63+, which the s3-backend golden uses as a hermetic local endpoint),
+      # so install the current upstream build instead.
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Run golden test suite
+        working-directory: packages/blobsy
+        run: pnpm test:golden
+
+      - name: Check golden coverage conventions
+        working-directory: packages/blobsy
+        run: bash scripts/check-golden-coverage.sh
+
+      - run: pnpm test:coverage
+
+      - name: Coverage Report
+        uses: davelosert/vitest-coverage-report-action@v2
+        if: always() && matrix.node-version == 24
+        with:
+          working-directory: packages/blobsy
+          json-summary-path: coverage/coverage-summary.json
+          json-final-path: coverage/coverage-final.json
+          file-coverage-mode: "${{ github.event_name == 'pull_request' && 'changes' || 'all' }}"

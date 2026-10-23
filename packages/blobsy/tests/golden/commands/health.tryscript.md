@@ -1,0 +1,57 @@
+---
+sandbox: true
+before: |
+  git init -q -b main
+  git config user.name "Blobsy Test"
+  git config user.email "blobsy-test@example.com"
+  rm -rf ../remote && mkdir -p ../remote
+  cat > .blobsy.yml << 'YAML'
+  backends:
+    default:
+      url: "local:../remote"
+  YAML
+  git add -A && git commit -q -m "init"
+---
+# Health check passes for local backend
+
+```console
+$ blobsy health
+Backend is reachable.
+? 0
+```
+
+# Health check fails when remote directory doesn’t exist
+
+```console
+$ rm -rf ../remote
+? 0
+```
+
+```console
+$ blobsy health 2>&1
+Health check failed: Local backend directory not found: [LOCAL_PATH]
+? 1
+```
+
+# Health check fails when remote directory isn’t writable
+
+```console
+$ mkdir -p ../remote
+? 0
+```
+
+```console
+$ chmod 000 ../remote
+? 0
+```
+
+```console
+$ blobsy health 2>&1
+Health check failed: Local backend directory is not writable: [LOCAL_PATH]
+? 1
+```
+
+```console
+$ chmod 755 ../remote
+? 0
+```

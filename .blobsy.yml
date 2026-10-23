@@ -1,3 +1,0 @@
-backends:
-  default:
-    url: local:../hk04-backend

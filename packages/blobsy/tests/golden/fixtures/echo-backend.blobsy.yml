@@ -1,0 +1,9 @@
+backends:
+  default:
+    type: command
+    bucket: test-bucket
+    push_command: 'node $ECHO_BACKEND push {local} {remote}'
+    pull_command: 'node $ECHO_BACKEND pull {remote} {local}'
+    exists_command: 'node $ECHO_BACKEND exists {remote}'
+compress:
+  algorithm: none
