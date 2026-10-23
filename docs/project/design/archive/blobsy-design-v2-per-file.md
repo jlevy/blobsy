@@ -6,17 +6,18 @@
 
 **Companion documents:**
 
-- [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) --
-  backend types, transfer delegation, atomic writes, error handling, health checks
-- [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) -- stat cache entry format,
-  storage layout, three-way merge algorithm, cache update rules, and recovery
+- [blobsy-backend-and-transport-design.md](../current/blobsy-backend-and-transport-design.md)
+  -- backend types, transfer delegation, atomic writes, error handling, health checks
+- [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md) -- stat cache
+  entry format, storage layout, three-way merge algorithm, cache update rules, and
+  recovery
 
 A standalone CLI for per-file sync of large files between local gitignored paths and
 remote storage, with committed `.bref` pointer files for tracking.
 Git is the manifest.
 
 > **Round 9 review (2026-10-22):** this document describes the shipped per-file design.
-> [blobsy-design-review-round9-use-cases.md](blobsy-design-review-round9-use-cases.md)
+> [blobsy-design-review-round9-use-cases.md](../current/blobsy-design-review-round9-use-cases.md)
 > reviews it against the pain points and use cases below, and proposes how to cover
 > them: content-derived keys, collection manifests, and immutable snapshots.
 > Those proposals are pending owner decisions (round 9 §11) and are not yet reflected in
@@ -94,7 +95,7 @@ They need different primitives.
 | Concern | Delegated to | Blobsy’s role |
 | --- | --- | --- |
 | Manifest / file tracking | Git (`.bref` files are git-versioned) | Creates and updates `.bref` files |
-| Conflict resolution | Git (standard merge on `.bref` files) | Detects payload-vs-ref desync (see [stat cache](blobsy-stat-cache-design.md)); git handles `.bref` merges |
+| Conflict resolution | Git (standard merge on `.bref` files) | Detects payload-vs-ref desync (see [stat cache](../current/blobsy-stat-cache-design.md)); git handles `.bref` merges |
 | File transfer | External CLI tools (`aws-cli`, `rclone`) or template commands | Orchestrates concurrency |
 | Storage | Cloud providers (S3, GCS, Azure, etc.) | Constructs keys, issues commands |
 | Compression | Node.js built-in `node:zlib` (`zstd`, `gzip`, `brotli`) | Decides what to compress, applies rules |
@@ -165,8 +166,8 @@ double-execution.
 Pure CLI. Each invocation reads ref files and config from disk, does work, updates ref
 files, exits. No background processes, no lock files, no coordination between
 invocations. The only persistent local state is the stat cache (see
-[blobsy-stat-cache-design.md](blobsy-stat-cache-design.md)), which is machine-local and
-gitignored.
+[blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md)), which is
+machine-local and gitignored.
 
 This simplicity means blobsy works in any environment (containers, CI runners, remote
 shells) without setup, and never has stale state from a crashed daemon.
@@ -195,8 +196,8 @@ This ensures:
 - CI fails on any unintentional output change; intentional changes require explicit
   snapshot updates.
 
-See [blobsy-testing-design.md](blobsy-testing-design.md) for the full testing plan,
-including error scenario test cases, integration test structure, and golden test
+See [blobsy-testing-design.md](../current/blobsy-testing-design.md) for the full testing
+plan, including error scenario test cases, integration test structure, and golden test
 implementation patterns.
 
 ## Related Work
@@ -443,7 +444,7 @@ is evaluated with variables like `{content_sha256}` and `{repo_path}`.
 - ✅ Implemented: `{iso_date_secs}`, `{content_sha256}`, `{content_sha256_short}`,
   `{repo_path}`, `{filename}`, `{dirname}`, `{compress_suffix}`
 - ⏸️ Deferred to V2: `{git_branch}` (see implementation rationale in
-  [issues-history.md](issues-history.md#L101))
+  [issues-history.md](../current/issues-history.md#L101))
 
 The `{git_branch}` variable and branch-isolated storage mode are fully designed for V2
 but not implemented in V1. If you specify a template containing `{git_branch}` in V1,
@@ -1048,7 +1049,7 @@ decision flow:
    Run 'git add -A && git commit' to commit them.
    ```
 3. **Proceed to stat cache merge** → Use three-way merge algorithm (see
-   [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md#three-way-merge-algorithm))
+   [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md#three-way-merge-algorithm))
 4. **Error if ambiguous** → No merge base exists (see line 356-368 of
    stat-cache-design.md):
    ```
@@ -1262,9 +1263,9 @@ The stat cache is **mandatory** for operations that modify `.bref` files (`track
 Uses file-per-entry storage (one JSON file per tracked file) with atomic writes to
 eliminate concurrent-write conflicts between parallel blobsy processes.
 
-See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for full design: entry
-format, storage layout, API, three-way merge algorithm, cache update rules, and
-recovery.
+See [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md) for full
+design: entry format, storage layout, API, three-way merge algorithm, cache update
+rules, and recovery.
 
 ### Future: Remote Staleness Detection via Provider Hashes
 
@@ -1411,7 +1412,7 @@ The URL scheme determines the backend type (`s3://` -> s3, `gs://` -> gcs, `azur
 azure, `local:` -> local).
 Bucket/prefix or directory path are parsed from the URL. Cloud schemes require a prefix.
 See
-[Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
+[Backend URL Convention](../current/blobsy-backend-and-transport-design.md#backend-url-convention)
 for full parsing rules and validation.
 
 On first run without a URL, `blobsy init` prints a usage error with examples (not a
@@ -1421,7 +1422,7 @@ prompt). On subsequent runs, the URL is optional -- the existing config is used.
 to the git repo root, not the current working directory.
 This matches the convention Git uses for `.gitignore` and submodule paths.
 See
-[Backend URL Convention](blobsy-backend-and-transport-design.md#backend-url-convention)
+[Backend URL Convention](../current/blobsy-backend-and-transport-design.md#backend-url-convention)
 for details.
 
 Also installs two git hooks: a pre-commit hook that validates `.bref` hashes, and a
@@ -1827,11 +1828,12 @@ warnings).
    - Fail fast with clear error if backend is unreachable
    - Skip with `--skip-health-check` flag (advanced use)
    - See
-     [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md#health-check)
+     [blobsy-backend-and-transport-design.md](../current/blobsy-backend-and-transport-design.md#health-check)
 
 2. **For each `.bref` file**, apply the three-way merge algorithm using the stat cache
-   as merge base. See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for the
-   full decision table and per-file sync logic.
+   as merge base. See
+   [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md) for the full
+   decision table and per-file sync logic.
 
    Summary:
    - **Local matches cache, .bref matches cache** -- up to date
@@ -2540,8 +2542,9 @@ backends:
     exists_command: aws s3 ls s3://{remote}
 ```
 
-See [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) for
-full details: backend configuration, S3-compatible endpoint setup, transfer tool
+See
+[blobsy-backend-and-transport-design.md](../current/blobsy-backend-and-transport-design.md)
+for full details: backend configuration, S3-compatible endpoint setup, transfer tool
 selection, command template variables, atomic write implementation, error message format
 (human + JSON), all common error scenarios, and health check behavior.
 
@@ -2624,8 +2627,8 @@ Blobsy uses a three-layer defense:
    conflict detection during sync.
    For each file, blobsy compares the local hash, the `.bref` hash, and the cached hash
    (last known state) to determine the correct action.
-   See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md) for the full decision
-   table and algorithm.
+   See [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md) for the
+   full decision table and algorithm.
 
 3. **Attribution (Tertiary):** When a blob is missing from remote storage, error
    messages use git blame to identify who committed the `.bref` without pushing, with
@@ -2717,7 +2720,7 @@ branches are kept until those references are also gone.
 - **Trash** for soft-deleted refs (see above).
 - **Stat cache** at `.blobsy/stat-cache/` (gitignored, machine-local).
   One JSON file per tracked file.
-  See [blobsy-stat-cache-design.md](blobsy-stat-cache-design.md).
+  See [blobsy-stat-cache-design.md](../current/blobsy-stat-cache-design.md).
 
 ### What `.blobsy/` Does Not Contain
 
@@ -3123,9 +3126,9 @@ resolution guidance where ambiguous.
 
 ### Testing
 
-See [blobsy-testing-design.md](blobsy-testing-design.md) for the full testing plan: unit
-tests, integration tests, golden/snapshot tests, conflict detection tests, and CI
-configuration.
+See [blobsy-testing-design.md](../current/blobsy-testing-design.md) for the full testing
+plan: unit tests, integration tests, golden/snapshot tests, conflict detection tests,
+and CI configuration.
 
 ## Initial Release Scope
 
@@ -3472,12 +3475,12 @@ the merge).
 | **In-repo blob encryption** | Cloud provider encryption sufficient; key management adds complexity |
 
 **Rationale Sources:**
-- See [issues-history.md](issues-history.md) for detailed rationale and review
-  discussions
+- See [issues-history.md](../current/issues-history.md) for detailed rationale and
+  review discussions
 - V1.1 timeline based on implementation complexity estimates
 - V2 features dependent on user feedback and demand signals
 
 ## Review Issues Resolution
 
-See [issues-history.md](issues-history.md) for the full mapping of design review issues
-to their resolution in this design.
+See [issues-history.md](../current/issues-history.md) for the full mapping of design
+review issues to their resolution in this design.
