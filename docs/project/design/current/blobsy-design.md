@@ -1,64 +1,92 @@
 # blobsy: Large File Storage for Git Repos (Design v3)
 
-**Status:** Target design, proposed 2026-10-22, for owner review.
-**Not yet implemented.** The shipped code implements v2
+**Status:** Target design, revised 2026-10-23 after four senior reviews, for owner
+review. **Not yet implemented.** The shipped code implements v2
 ([archive/blobsy-design-v2-per-file.md](../archive/blobsy-design-v2-per-file.md)). The
 implementation plan is
 [plan-2026-10-22-blobsy-v3-redesign.md](../../specs/active/plan-2026-10-22-blobsy-v3-redesign.md).
 
-**Date:** 2026-10-22
+**Date:** 2026-10-23
 
-**Basis:** the round 9 review
-([blobsy-design-review-round9-use-cases.md](blobsy-design-review-round9-use-cases.md)),
-its sub-reviews, the October 2026 research (including the Gat deep dive and the hash
-benchmarks), and the owner’s policy of **no backward compatibility** (pre-alpha).
+**Basis:**
+- the round 9 review
+  ([blobsy-design-review-round9-use-cases.md](blobsy-design-review-round9-use-cases.md))
+  and its sub-reviews;
+- the October 2026 research (Gat deep dive, competitor refresh, jj, object stores, tree
+  manifests, hash benchmarks);
+- four reviews of the first v3 draft: simplicity, flexibility, usability, and data
+  safety. The data-safety review reproduced its key findings in experiments.
+- the owner’s policy of **no backward compatibility** (pre-alpha, `CLAUDE.md`).
 
 **Companion docs:**
-- [blobsy-threat-model.md](blobsy-threat-model.md) (trust boundaries; still normative);
+- [blobsy-threat-model.md](blobsy-threat-model.md) (trust boundaries; normative, updated
+  for v3);
 - [blobsy-backend-and-transport-design.md](blobsy-backend-and-transport-design.md) (URL
   parsing, error categories and health checks remain useful; its key-template, aws-cli
-  and compression sections are superseded by this document).
+  and compression sections are superseded).
 
 * * *
 
 ## 1. Summary
 
 Blobsy keeps large files out of git while keeping their *versions* in git.
-It is a standalone CLI: no server, no smudge/clean filters, and storage in any bucket or
-tool you choose.
+It is a standalone CLI. It needs no server and no smudge/clean filters, and it stores
+bytes in any bucket or tool you choose.
 
-- **One storage contract.** File contents are stored once, under a name computed from
-  their hash. Every write is create-only, and every read is hash-verified.
-- **One reference format.** A small committed `.bref` text file sits next to the thing
-  it describes. It can describe:
-  - a **file** (UC-1);
-  - a **whole directory** (UC-2: one line per file, one file in git);
-  - a **pinned snapshot** (UC-5: one line naming an immutable tree in the store).
-- **Snapshots for trees that git shouldn’t see** (UC-3): build caches and environments,
-  published and restored by name, with nothing committed per tree.
+The whole design rests on four ideas:
 
-Git merges the `.bref` files.
-Blobsy moves the bytes, never changes a committed file after the fact, and never depends
-on hooks being installed for correctness.
+1. **One storage contract.** Bytes are stored once, under a name computed from their
+   hash. Writes are create-only, and reads are hash-verified.
 
-**What v3 takes from Gat** (`research-2026-10-22-competitor-gat.md`):
-- storage names computed from content (one commit per change, real dedup);
-- a manifest with per-path merging for collections;
-- a local content cache;
-- restore-after-checkout hooks;
-- a fast hash.
+2. **One manifest format.** A `.bref` file is a small sorted text table with one line
+   per file: path, kind, size, hash, storage.
+   It sits in **git** next to what it describes:
+   - a **file** (UC-1);
+   - a **directory** (UC-2);
+   - a **pin** naming a snapshot (UC-5).
 
-**What it keeps from blobsy:**
-- a reference that sits next to the payload;
-- references that merge on any host with plain git;
-- commit and push guards;
-- readable storage, and any backend;
-- `--json`, and agent-first UX;
-- immutable snapshots for big trees, which no other tool reviewed offers.
+   The *same format* also sits in the **store** as a **snapshot**: a named, immutable
+   tree with nothing in git (UC-3, UC-6).
+
+3. **Never destroy unrecoverable bytes.** Blobsy replaces or deletes a local file only
+   when the store, or this machine’s record of what it synced, proves the bytes can come
+   back. Even then, it first moves the old bytes into the local cache.
+
+4. **Plain git is always safe.** Hooks, the merge driver and auto-pull are conveniences.
+   A validator in pre-commit and a read-only `doctor --ci` are the backstop.
+
+Everything else follows from these.
+Moving a directory between git-versioned and store-named never re-uploads a byte,
+because both use the same objects and the same rows.
 
 * * *
 
-## 2. Problem and Use Cases
+## 2. Design at a Glance: Gat’s Simplicity, Blobsy’s Flexibility
+
+Gat (`research-2026-10-22-competitor-gat.md`) is simple because it has one idea:
+content-addressed storage plus a manifest in git.
+v3 keeps that idea and changes only *where manifests live* and *how bytes are packed*.
+
+| Dimension | Gat | Blobsy v3 | Why |
+| --- | --- | --- | --- |
+| Storage names | derived from the hash | **same** | one commit per change; dedup; free renames |
+| Manifest | one repo-wide `gat.lock` | one `.bref` per file or directory, *or* in the store | edits stay local; no repo-wide conflict hotspot; works with no merge driver |
+| Merges | per-path driver; on parse failure leaves *ours* with no markers | per-path driver with markers only on conflicting rows; inner driver for criss-cross merges; validator; `resolve` | the other side’s clean changes are never silently dropped |
+| Trees git shouldn’t see | none | **snapshots**: the same manifest format, stored under a name | build caches, environments, versioned outputs |
+| Packing | none | per snapshot: one archive (caches) or per-file objects (incremental data) | tiny-file trees and incremental data both work |
+| Safety | relies on hooks | recoverability rule, guard hooks, validator, `doctor --ci` | correct with plain git, GitHub merges, jj and fresh clones |
+| Local cache | yes | **same**, also the safety net for displaced bytes | offline switches; reversible pulls |
+| Backends | OpenDAL (closed set) | S3 SDK, rclone (70+), local, custom command, read-only `https://` | any store; public read |
+| Hash | BLAKE3 | BLAKE3 default, SHA-256 option, named in each ref | speed; LFS import |
+| Distribution | single binary | npm + `npx` + single binary | category norm for hooks and CI |
+
+**What v3 deletes from v2:** key templates, push-time write-back, the stat-cache merge
+base, `.blobsy/` in the working tree, YAML pointers, three config scopes, and nine
+commands. Details are in §18.
+
+* * *
+
+## 3. Problem and Use Cases
 
 | ID | Pain |
 | --- | --- |
@@ -68,76 +96,97 @@ on hooks being installed for correctness.
 | PAIN-4 | Git LFS is disliked, for PAIN-3 and for GitHub’s LFS cost. |
 | PAIN-5 | Storage isn’t pluggable (S3, GCS, custom), so it doesn’t fit other tools. |
 
-| ID | Use case | Blobsy v3 answer |
+| ID | Use case | v3 answer |
 | --- | --- | --- |
-| UC-1 | A few large files, versioned; PRs show the metadata. | **File ref:** `model.bin.bref` holds one line. |
-| UC-2 | A collection of hundreds–thousands of files; git holds one manifest, not a placeholder per file. | **Directory ref:** `images.bref` holds one line per file; the directory is ignored by a single gitignore line. |
-| UC-3 | A very large tree (node_modules, `target/`) cached externally with nothing in git. | **Cache snapshot:** a named, packed, immutable tree. The name is derived from inputs (e.g. the lockfile hash); git holds only a config stanza. |
-| UC-4 | Standard git merges over externalized files. | Git merges `.bref` text. A per-path merge driver removes false conflicts in directory refs; plain git stays safe without it; a validator catches bad merges. |
-| UC-5 | Fixed assets with immutable names, separate from git workflows. | **Asset snapshot:** a chosen immutable name, optionally pinned by a one-line ref. |
-| UC-6 | Run/output archives, path-browsable (from round 8). | Deferred (§17). |
-| UC-7 | Adopting blobsy in repos that already have large files or LFS. | `blobsy import lfs`; history import later (§17). |
+| UC-1 | A few large files, versioned; PRs show the metadata | **File ref:** `model.bin.bref`, one row |
+| UC-2 | A collection of hundreds to tens of thousands of files; git holds one manifest | **Directory ref:** `images.bref`, one row per file; one gitignore line |
+| UC-3 | A very large derived tree (`target/`, a package store) cached externally, nothing in git | **Cache snapshot:** packed, named from inputs (e.g. the lockfile hash), expired by lifecycle |
+| UC-4 | Standard git merges over externalized files | Git merges `.bref` text. A per-path driver removes false conflicts; plain git stays safe; a validator catches bad merges |
+| UC-5 | Fixed assets with immutable names, outside git workflows | **Asset snapshot** under a chosen name, optionally **pinned** by a one-row ref |
+| UC-6 | Versioned directories (datasets, run outputs) synced incrementally, with no manifest in git | **Per-file snapshot** under a new name each version; only changed files move (§8.6) |
+| UC-7 | Adopting blobsy where large files or LFS already exist | `blobsy import lfs`; history import later (§19) |
+| UC-8 | Public or credential-free read (open data, CI on forks) | Read-only `https://` backend (§13) |
+| UC-9 | One asset used by several repos | Pins to asset snapshots in a shared store (§8.5) |
 
 * * *
 
-## 3. Principles
+## 4. Principles
 
 1. **Simple things are one command.** `blobsy add`, `git commit`, `git push`. A clone
-   needs `blobsy pull`. Nothing else is required.
-2. **Committed files are final when written.** No command writes back into a committed
-   file after push. Every `.bref` change is one commit.
-3. **Content identity is the hash.** Storage names are computed from it.
-   Identical bytes are stored once, across paths, branches, collections and time.
-4. **The store is immutable.** Writes are create-only.
-   Deletion happens only through explicit GC or lifecycle rules for caches.
-5. **Never destroy unrecoverable bytes.** Blobsy overwrites or deletes a local file only
-   when its exact bytes are known to be recoverable (§10).
-6. **Correctness never depends on hooks or drivers.** Plain git, GitHub merges, jj and
-   fresh clones must all be safe.
-   Hooks and the merge driver only add convenience.
-   CI checks are the backstop.
+   runs `blobsy pull`.
+2. **Correctness needs nothing per clone.** A clone can pull and push with plain git.
+   `blobsy setup` adds guards, the merge driver and auto-pull; CI’s `doctor --ci`
+   catches what unguarded clones miss.
+3. **Committed files are final when written.** No command writes back into a committed
+   file. Every `.bref` change is one commit.
+4. **Content identity is the hash.** Storage names are computed from it.
+   Identical bytes are stored once, across paths, branches, collections, snapshots and
+   time.
+5. **The store is create-only.** Only `gc`, lifecycle rules, and the two explicit
+   repairs in invariant 1 delete or overwrite content.
+6. **Never destroy unrecoverable bytes** (§11).
 7. **One discipline per path.** Every path is plain git, inside exactly one ref’s
    target, or a snapshot path.
    Overlaps are errors.
-8. **Explicit over automatic.** Network transfers happen only in commands that name them
-   (`push`, `pull`, `snap …`) and in the opt-in pre-push upload.
-   Removal is never implied.
-9. **Transparent and pluggable.** `.bref` files are plain text with a self-describing
-   header. The store keeps original filenames as metadata.
-   Any S3-compatible store, anything rclone reaches, a local directory, or a custom
-   command can be the backend.
-10. **Agent-first.** Every command is non-interactive, supports `--json` and
-    `--dry-run`, refuses ambiguous destructive actions with an actionable message, and
-    is documented by `blobsy docs`.
+8. **Network only in commands that name it.** `push`, `pull`, `clean`, `snap …`, `gc`,
+   `doctor` and the pre-push upload use the network.
+   No other hook does, and neither do `add`, `rm`, `status`, `resolve` or `diff`.
+9. **Transparent and pluggable.** `.bref` files are plain text.
+   The store keeps original filenames as metadata.
+   Any S3-compatible store, anything rclone reaches, a local directory, a custom
+   command, or a read-only HTTPS server can be the backend.
+10. **Agent-first.** Commands are non-interactive and support `--json` and `--dry-run`.
+    Ambiguous destructive actions are refused with the choices listed.
+    Everything is documented by `blobsy docs`.
 11. **No backward compatibility while pre-alpha.** Readers accept exactly the current
     format and fail fast on anything else.
 
 * * *
 
-## 4. Core Model
+## 5. Core Model
 
-### 4.1 Entries
+### 5.1 Entries
 
-An **entry** describes one filesystem object:
+An **entry** describes one filesystem object.
+Every manifest, in git or in the store, is a sorted list of entries.
 
-| Field | Values |
+| Column | Meaning |
 | --- | --- |
-| `path` | Relative to the ref’s target; `.` means the target itself. Paths use POSIX `/`, are NFC-normalized, contain no `.` or `..` segments, and escape control characters as `\xhh`. |
-| `kind` | `f` regular file · `x` executable file · `t` pinned snapshot tree · `l:<target>` symlink (snapshots only) · `d` empty directory (snapshots only) |
-| `size` | Bytes of the original content (for `t`, total bytes of the tree). |
-| `hash` | Lowercase hex digest of the original bytes (for `t`, the `tree_id`). The algorithm is named once in the ref header. |
-| `extra` | For `f`/`x`: storage encoding, `-` (as-is) or `zstd`. For `t`: the snapshot name. |
+| `path` | Relative to the manifest’s target. `.` means the target itself (only as the sole row). |
+| `kind` | One character: `f` file · `x` executable file · `l` symlink · `d` empty directory · `t` pinned snapshot |
+| `size` | Bytes of the original content |
+| `hash` | Lowercase hex digest of the original content; the algorithm is named in the header |
+| `storage` | Where the bytes are kept. Never part of identity. |
 
-**Canonical entry line** (used for `tree_id` and in refs): `path ⇥ kind ⇥ size ⇥ hash`,
-with `extra` appended as a fifth column where needed.
+**Kind-specific values:**
 
-**Tree identity:** `tree_id = hash(sorted canonical lines, first four columns only)`.
-The extra column is excluded, so the same bytes give the same id however they are
-stored. Lines sort bytewise by `path`.
+| kind | size | hash | storage |
+| --- | --- | --- | --- |
+| `f`, `x` | file bytes | hash of the bytes | `-` own object, raw · `zstd` own object, compressed · `pack` inside the snapshot’s archive (store manifests only) |
+| `l` | byte length of the link target | hash of the target string | the target, escaped |
+| `d` | `0` | `-` | `-` |
+| `t` | total bytes of the tree | `tree_id` of the snapshot | `snap:<name>` |
 
-### 4.2 Ref files (`.bref`)
+**Tree identity.**
+`tree_id = hash(each row’s first four columns, tab-joined, each line ending in \n, in
+manifest order)`. Storage is excluded, so the same tree has the same id whether it is
+stored raw, compressed or packed.
+A symlink’s target is covered through its hash.
 
-A ref file is named after its **target** with `.bref` appended, and sits next to it.
+**Paths are pinned so that every implementation agrees:**
+- UTF-8, `/` separators, no empty, `.` or `..` segments (except the sole `.` row).
+- `\` is escaped as `\\`. Every byte below 0x20, plus 0x7F, is escaped as `\xhh`
+  (lowercase hex). So is a leading `#`, `<`, `=`, `>` or `|`. Symlink targets use the
+  same escaping.
+- Rows sort bytewise on the escaped `path` column.
+- No normalization is applied.
+  `add` refuses a directory containing invalid UTF-8 names, or two names that are equal
+  after NFC normalization or case folding: they cannot be restored portably.
+- Test vectors live in the repo (`tests/vectors/`) and gate every implementation.
+
+### 5.2 Ref files in git (`.bref`)
+
+A **ref** is named after its **target** with `.bref` appended, and sits next to it:
 
 ```text
 data/model.bin          <- target (gitignored)
@@ -147,646 +196,1091 @@ data/model.bin.bref     <- ref (committed)
 **Format:**
 
 ```text
-# blobsy ref -- https://github.com/jlevy/blobsy -- run: blobsy status <target>
-#blobsy-ref 1 blake3
-<path>	<kind>	<size>	<hash>	<extra>
+#blobsy-ref 1 blake3 https://github.com/jlevy/blobsy
+<path>	<kind>	<size>	<hash>	<storage>
 …
 ```
 
-- **Header.** Line 1 is a free comment.
-  Line 2 (`#blobsy-ref <version> <algo>`) is required and **static**: it holds no
-  counts, totals, tree hash or timestamps.
-  Values that change on every edit would make every concurrent edit conflict.
-- **Body.** One TSV row per entry, sorted bytewise by path.
-  No duplicates. No file/directory prefix collisions (`a` and `a/b`). No blank lines.
-- **Strict reader.** Exactly version `1`, and the repo’s configured hash algorithm.
-  Anything else fails with an actionable message (“re-run `blobsy add <target>`”).
+- **Header.** Exactly one line: `#blobsy-ref <version> <algo> <url>`. It is static: it
+  never holds counts, totals, timestamps or the target’s name, so two sides of a merge
+  never differ in the header unless the algorithm changed.
+- **Body.** One TSV row per entry, sorted, LF line endings.
+  No duplicates, no blank lines, and no prefix collisions (`a` and `a/b`).
+- **Strict reader.** Version must be `1`. The algorithm must be `blake3` or `sha256`,
+  and readers use the algorithm the ref names.
+  A `\r`, conflict marker, unknown kind or unsorted row fails with “run
+  `blobsy add <target>` to rewrite” or “`blobsy resolve <ref>`”.
 
-**Three target shapes**, all in the same format:
+**Three shapes, one format:**
 
-| Shape | Target | Rows | Example ref | Gitignore line |
-| --- | --- | --- | --- | --- |
-| **File ref** (UC-1) | a file | exactly one, path `.`, kind `f`/`x` | `.	f	300000	9f2c…	zstd` | `model.bin` |
-| **Directory ref** (UC-2) | a directory | one per file (kind `f`/`x`), paths relative to the directory | `cats/001.jpg	f	48213	07ab…	-` | `images/` |
-| **Pin ref** (UC-5) | a directory or file materialized from a snapshot | exactly one, path `.`, kind `t`, extra = snapshot name | `.	t	16060000000	3c1f…	assets/llama-3-8b/v2` | `llama-3-8b/` |
-
-Examples:
-
-```text
-# data/model.bin.bref
-# blobsy ref -- https://github.com/jlevy/blobsy -- run: blobsy status data/model.bin
-#blobsy-ref 1 blake3
-.	x	300000	9f2c0e7b…	zstd
-```
+| Shape | Target | Rows | Gitignore line |
+| --- | --- | --- | --- |
+| **File ref** (UC-1) | a file | one: `.	f	300000	9f2c…	zstd` | `/model.bin` |
+| **Directory ref** (UC-2) | a directory | one per file, symlink or empty directory | `/images/` |
+| **Pin ref** (UC-5) | a directory restored from a snapshot | one: `.	t	16060000000	3c1f…	snap:assets/llama-3-8b/v2` | `/llama-3-8b/` |
 
 ```text
 # data/images.bref
-# blobsy ref -- https://github.com/jlevy/blobsy -- run: blobsy status data/images
-#blobsy-ref 1 blake3
+#blobsy-ref 1 blake3 https://github.com/jlevy/blobsy
 cats/001.jpg	f	48213	07ab13c9…	-
 cats/002.jpg	f	51877	c4d1aa02…	-
 tables/2026-10.parquet	f	734003200	a81c4f3e…	zstd
+tools/run.sh	x	812	5be0…	-
 ```
-
-```text
-# models/llama-3-8b.bref
-# blobsy ref -- https://github.com/jlevy/blobsy -- run: blobsy status models/llama-3-8b
-#blobsy-ref 1 blake3
-.	t	16060000000	3c1f9a…	assets/llama-3-8b/v2
-```
-
-**Why one format for all three:**
-- one parser, one validator, one merge driver;
-- one gitignore rule per ref, so `git status` stays fast;
-- reviewers see path, size and hash on one line;
-- promoting files into a collection, or demoting them out, is a metadata edit, because
-  the storage keys are the same.
 
 **Rules:**
-- A ref’s target must not contain another ref’s target.
-  Refs don’t nest.
-- A directory ref covers *every* file in its directory (minus `ignore` patterns).
-  Mixed directories — some files in git, some external — use file refs (`add --each`,
-  §6).
+- **Refs don’t nest.** No ref’s target contains another ref or its target.
+- **A directory ref owns every file in its directory**, minus `ignore` patterns.
+  `add <dir>` refuses a directory that git tracks files in (§7.2).
+- **Ignore lines** live in a managed block in the `.gitignore` of the directory holding
+  the ref. They are anchored (`/model.bin`, not `model.bin`). The block is delimited by
+  `# >>> blobsy (managed) >>>` and `# <<< blobsy <<<`. `doctor --fix` regenerates it
+  from the refs present.
+- **`.gitattributes`** (written by `setup`) holds `*.bref merge=blobsy text eol=lf`.
+- **Splitting huge collections** means finer directory refs (`data/images/cats.bref`,
+  `data/images/dogs.bref`). `add` prints a hint above 50k rows.
 
-### 4.3 Store
+### 5.3 Store
 
-**Object key** (fixed layout; there are no templates):
+**Content objects** (fixed layout; no templates):
 
 ```text
-<backend prefix>/<algo>/<h0h1>/<h2h3>/<hash>[.zst]
+<prefix>/<algo>/<h0h1>/<h2h3>/<hash>[.zst]
 e.g.  s3://bucket/project/blake3/9f/2c/9f2c0e7b….zst
 ```
 
-- **The key is a pure function of** `(algo, hash, encoding)`. It is never stored in a
-  ref, never depends on a path, and never changes on rename.
+- **The key is a pure function of `(algo, hash, storage)`.** It is never stored, never
+  depends on a path, and never changes on rename.
 
-- **Encoding (zstd or none)** is decided at `add` by the compression rules.
-  A candidate is compressed once and the result kept only if ≥5% smaller.
-  The decision is recorded in the `extra` column, so every machine derives the same key.
+- **Compression** is decided once, when `add` first sees a hash:
+  - files under `compress.min_size` (default 100 KB) are stored raw;
+  - so are names on a built-in incompressible list (`.zst .gz .zip .parquet .png .jpg
+    .mp4 …`), which `compress.never` extends;
+  - otherwise the file is compressed once, and the result kept only if it is at least 5%
+    smaller.
 
-- **Create-only writes.**
+  `add` on an unchanged hash keeps the existing row, so a rule change causes no churn.
+
+- **Readers tolerate both encodings.** `pull`, `exists` and `status --remote` try the
+  recorded encoding first, then the other.
+  A hit under either counts as present.
+  This makes encoding disagreements between machines harmless.
+
+- **Create-only writes:**
   - S3 SDK: `If-None-Match: *`.
-  - GCS/Azure: native preconditions where the backend reaches them.
-  - Local: `O_EXCL`/`link`.
-  - Otherwise: exists-then-put.
+  - GCS: `ifGenerationMatch=0` where reachable.
+  - Local: write a temp file in the destination directory, `fsync`, then `link()` to the
+    key (EEXIST means it already exists).
+    The key is never opened for writing.
+  - rclone and command backends: exists-then-put, plus a size check after put.
 
   “Already exists” counts as success.
-  An existing object whose size mismatches is reported, never overwritten.
+  Where create-only is unavailable, two writers of one content key write identical
+  bytes, so last-writer-wins is harmless.
 
-- **Metadata.** On upload, blobsy sets `blobsy-path` (repo path) and
-  `Content-Disposition: attachment; filename=<name>` where the backend supports it, so
-  consoles show and download original names.
-  `blobsy status --remote --keys` prints path → key mappings.
+- **Uploads read immutable bytes only.** `push` uploads the content-cache copy, which
+  was hashed as it was copied.
+  With the cache disabled for a file, it uploads a stream hashed in flight, and commits
+  it only if the hash matches:
+  - multipart: complete the upload only on a match;
+  - local: `link()` only on a match;
+  - command backends: upload from a verified temp copy.
 
-- **Integrity.** Transfers rely on the provider’s checksums; blobsy verifies identity by
-  hashing on download, before anything is replaced.
+  A file rewritten during upload can never poison a key.
 
-### 4.4 Snapshots
+- **Metadata.** Uploads set `blobsy-path` (repo path) and a sanitized
+  `Content-Disposition: attachment; filename=<name>`, where the backend supports it, so
+  consoles show original names.
 
-A **snapshot** is an immutable tree, or single file, stored packed under a name.
+- **Verification.** Every download is hash-verified before it replaces anything.
+  Decompression stops at `size` bytes.
+  An existing raw object whose size differs from the entry counts as missing.
+
+- **Store marker.** `_blobsy/store.yaml` holds `format: 1`, `layout: 1` and the probed
+  capabilities (`conditional_put`). `_blobsy/repos/<id>.yaml` is one create-only file
+  per repository that ran `setup` against the prefix.
+  `gc` uses it to detect sharing (§16).
+
+### 5.4 Snapshots in the store
+
+A **snapshot** is an immutable tree stored under a **name**. Its manifest is a `.bref`
+file in the store:
 
 ```text
-<prefix>/snap/<name>/data.tar.zst      deterministic tar (sorted, uid/gid 0, fixed in-archive mtime), zstd
-<prefix>/snap/<name>/manifest.tsv.zst  canonical entry lines (§4.1) + restore metadata (mtime) as extra columns
-<prefix>/snap/<name>/ref.yaml          written LAST, create-only: the commit point
+<prefix>/snap/<name>/manifest.bref       the commit point: written last, create-only
+<prefix>/snap/<name>/<tree_id>.tar.zst   archive of the `pack` rows (packed snapshots only)
 ```
 
-```yaml
-# ref.yaml
-format: blobsy-snap/1
-tree_id: 3c1f9a…
-algo: blake3
-files: 14711
-bytes: 171355937
-archive_bytes: 39895989
-created_at: 2026-10-22T15:11:21Z
-provenance: { by: ci@runner-7, branch: main, commit: 04a3d1a, run: gh-123456 }
+```text
+# snap/cache/target/linux-x64/5e1c…/manifest.bref
+#blobsy-ref 1 blake3 https://github.com/jlevy/blobsy
+#tree 3c1f9a…
+#files 14711
+#bytes 171355937
+#archive 39895989
+#created 2026-10-22T15:11:21Z
+#by ci@runner-7 main 04a3d1a gh-123456
+debug/build/libc-3e1/out/x.rs	f	1820	4be2…	pack
+…
 ```
 
-- **Two kinds of name**, one primitive:
-  - **Cache snapshot (UC-3).** The name is derived from a stanza in `.blobsy.yml`, e.g.
-    `cache/target/linux-x64/{hash:Cargo.lock}`. Template variables are pure:
-    `{hash:<file>}`, `{os}`, `{arch}`, `{env:NAME}`; there is no `{cmd:…}`. These
-    snapshots expire, by bucket lifecycle rule or `blobsy gc --snapshots`, and nothing
-    is committed per tree.
-  - **Asset snapshot (UC-5).** The name is chosen at publish time, e.g.
-    `assets/llama-3-8b/v2`. It never expires, and a **pin ref** can record it in git.
+- **Store manifests may carry `#key value` lines** after the header, because they are
+  immutable and never merged.
+  Git refs may not. Readers recompute `tree_id` and compare it with `#tree`.
 
-- **Publish:**
-  1. walk the tree, recording symlinks, exec bits and empty dirs;
-  2. write the archive, then the manifest, then a create-only `ref.yaml`;
-  3. if the ref write returns 412, read the existing ref.
-     A matching `tree_id` means already published; a different one is an error for
-     assets and a warning for caches.
+- **Two storage modes**, chosen per snapshot:
 
-- **Restore:**
-  1. read the ref, then the manifest, and verify the tree id (and the pin, if any);
-  2. fetch the archive through the local cache;
-  3. extract to a sibling temp directory and hash-verify every file;
-  4. swap into place with two renames.
+| Mode | Rows | Best for | Default for |
+| --- | --- | --- | --- |
+| **packed** | `pack`: all files in one `tar.zst` | 10k–1M tiny files restored whole | cache stanzas |
+| **files** | `-`/`zstd`: each file is an ordinary content object | large files; incremental updates; dedup across versions | named assets and data |
 
-  `--fallback` restores the newest name under the parent prefix (actions/cache-style).
-  `--only <glob>` restores part of the tree.
+  Files mode reuses `push`’s transfer and `pull`’s entry loop unchanged.
+  A directory ref and a files-mode snapshot of the same directory share every object.
 
-- **Names are write-once.** There is no “latest” and no mutation.
+- **Why the archive is keyed by `tree_id`.** Two publishers of different trees under one
+  name each write their own archive.
+  Only one manifest wins the create-only write, and it names its own archive.
+  Name, manifest and archive are consistent by construction, even on backends without
+  conditional writes. The loser’s archive is an orphan that `gc` removes.
 
-### 4.5 Hashing
+- **The archive** is a tar with real mtimes, uid/gid 0, sorted entries, zstd.
+  It is not byte-deterministic, and does not need to be: identity is the manifest’s
+  `tree_id`.
 
-- **One algorithm per repo,** set by `hash:` in the project config.
-  The default is `blake3`; `sha256` is the alternative.
-  - **BLAKE3** uses the native addon `@napi-rs/blake-hash`, falling back to WASM
-    (`hash-wasm`; correct but slow).
-  - **SHA-256** uses Node’s built-in `crypto`.
-- **Why BLAKE3.** Measured on a cloud VM without SHA hardware acceleration, native
-  BLAKE3 hashes files ~8.5× faster than SHA-256 in Node, Bun and Rust alike.
-  Node and Bun match Rust single-threaded once reads use 1 MB buffers.
-  (`research-2026-10-22-hash-performance-node-bun-rust.md`.)
-  - The gap should be smaller on CPUs with SHA hardware.
-    The default is confirmed by a cross-hardware benchmark (decision K3).
-  - A repo that will run `import lfs` at scale may choose `sha256`. LFS object ids are
-    SHA-256, so import then needs no rehashing.
-- **Implementation rules:**
-  - read via `fs.read` into 1 MB buffers, never `Bun.file().stream()`;
+- **Names:**
+  - characters `[A-Za-z0-9._-]` in `/`-separated segments;
+  - no empty segment, no `..`, no leading or trailing `/`;
+  - no segment equal to `manifest.bref`, and none that looks like a tree id.
+
+  A name’s objects are exactly the keys listed above, so operations on `cache/a` never
+  touch `cache/a/b`. Names are write-once.
+  “Latest” means the newest name under a prefix by listing (`--latest`), never a mutable
+  pointer.
+
+**Two kinds of name, one primitive:**
+
+- **Cache snapshots (UC-3)** take their name from a stanza in `.blobsy.yml`, built from
+  pure inputs:
+  - `{hash:<file>}`: the first 16 hex characters of the file’s hash;
+  - `{os}`: `linux`, `darwin` or `windows`;
+  - `{arch}`: `x64` or `arm64`;
+  - `{env:NAME}`: an unset variable is an error.
+
+  There is no `{cmd:…}`. They live under `snap/cache/` and expire by bucket lifecycle
+  rule or `gc --expire`.
+
+- **Asset snapshots (UC-5, UC-6)** have a name chosen at publish, e.g.
+  `assets/llama-3-8b/v2` or `results/2026-10-23T1402`. They never expire.
+  A pin ref may name one.
+
+### 5.5 Hashing
+
+- **Algorithm per ref.** `hash:` in `.blobsy.yml` (default `blake3`) applies when `add`
+  *creates* a ref. Existing refs keep their algorithm; `add --rehash` converts one and
+  requires every entry to be present locally.
+  Keys embed the algorithm, so mixed algorithms in one store are fine.
+- **BLAKE3** uses `@napi-rs/blake-hash` (native), falling back to `hash-wasm`.
+  **SHA-256** uses Node `crypto`.
+  - Measured on a VM without SHA hardware, native BLAKE3 runs at ~2.85 GB/s in Node,
+    about 8.5× SHA-256. Node and Bun match single-threaded Rust with 1 MB reads.
+  - The WASM fallback is slower than SHA-256 on Bun (213 MB/s), so blobsy makes it
+    visible. `doctor`, `setup` and `--version --json` print `hasher: native|wasm`. `add`
+    warns once when the WASM path hashes more than 256 MB.
+  - Trade-off, recorded for decision K3: SHA-256 allows S3 server-side checksums
+    (verification without download, for raw single-part objects) and zero-rehash LFS
+    import. `setup --hash sha256` selects it.
+- **Rules:**
+  - read with `fs.read` into 1 MB buffers;
   - hash files in parallel through a bounded worker pool;
-  - never re-hash a file whose size, mtime and ctime match the hash cache.
-    The racy-clean rule re-hashes when mtime ≥ the cache entry’s write time.
+  - stat before and after hashing, and re-hash if size, mtime or ctime changed (torn
+    reads);
+  - skip re-hashing when size, mtime, ctime and inode match the hash cache, unless the
+    file’s mtime is at or after the cache file’s own filesystem mtime (racy-clean, as in
+    git).
 
-### 4.6 Local state
+### 5.6 Local state
 
 All machine-local state lives under the git directory.
-Nothing is ever committable, nothing needs a gitignore line, and jj never snapshots it.
+None of it can be committed, none of it needs an ignore line, and jj never snapshots it.
 
 | State | Location | Contents |
 | --- | --- | --- |
-| Hash cache | `$(git rev-parse --git-path blobsy)/hashcache/` (per worktree) | path → size, mtime, ctime, hash; plus **synced records**: which hashes this machine pushed or pulled |
-| Content cache | `$(git rev-parse --git-common-dir)/blobsy/objects/<algo>/<h0h1>/<h2h3>/<hash>` (shared by all worktrees), or `cache.dir` | read-only original bytes; snapshot archives keyed by `tree_id`; optional compressed forms |
-| Local config | `$(git rev-parse --git-dir)/blobsy/config.yml` | machine-specific settings (§11) |
+| **Hash cache** | `$(git rev-parse --git-path blobsy)/hashcache/` (per worktree, one file per ref) | path → size, mtime, ctime, inode, hash, and `here` (materialized in this worktree) |
+| **Content cache** | `$(git rev-parse --git-common-dir)/blobsy/objects/<algo>/<h0h1>/<h2h3>/<hash>` (shared by worktrees), or `blobsy.cacheDir` | read-only (0444) original bytes; packed snapshot archives under `snap/<tree_id>` |
+| **Known logs** | `…/blobsy/known/<store-id>.txt` (shared) | append-only list of hashes pushed to or pulled from that store by this machine |
+| **Lock** | `$(git rev-parse --git-path blobsy)/lock` | held by commands that write refs, ignore blocks or the working tree; reports the holder’s pid |
 
-**The content cache:**
-- is filled on pull (download → verify → cache → materialize) and on push (copied before
-  upload), and on `add` when `cache.on_add: true`;
-- materializes by reflink when the filesystem supports it, otherwise by copy, and never
-  by hardlink;
-- is never required for correctness and never a GC root;
-- is pruned by `blobsy cache prune --max-size/--older-than`.
+- **`store-id`** is a short hash of the canonical backend location (scheme, bucket or
+  host, prefix). It excludes credentials, profiles and endpoints.
+  Evidence recorded for one store never counts for another.
+- **The content cache is filled by** `add` (by reflink, else copy; turn off per machine
+  with `blobsy.cacheOnAdd false`), `push`, `pull`, `snap restore`, and every displaced
+  file (§11).
+- **Materializing from the cache** uses `blobsy.materialize` (default `reflink,copy`;
+  `hardlink` is opt-in and relies on 0444 objects).
+  Materializing re-hashes the bytes, and evicts and refetches an object on mismatch.
+- **Pruning** happens automatically after writes, down to `blobsy.cacheMaxSize` (default
+  20 GB), least recently used first.
+  It **never removes bytes that are not in the current store’s known log**, because
+  those may exist only here.
+  `blobsy clean --cache [--unsynced]` prunes on demand.
 
 * * *
 
-## 5. Invariants
+## 6. Invariants
 
-1. **The store is create-only.** No command overwrites an object.
-   Only `gc` deletes, and only objects no ref in history reaches.
-   Lifecycle rules may expire `snap/cache/`.
+1. **The store is create-only.** No command overwrites a content object or a snapshot
+   name, with two exceptions:
+   - `push --repair <path>` replaces an object only after downloading it and proving its
+     bytes don’t match the key;
+   - `gc --purge` deletes immediately and writes a tombstone (§16).
+
+   Otherwise, only `gc` deletes, and only what no root reaches.
+
 2. **Keys are a function of committed content facts.** No push-time state is written to
    any committed file.
-3. **A path belongs to at most one discipline.** `doctor`, `add` and `snap` refuse
-   overlaps.
-4. **Bytes are verified before they replace anything.** Pulled and restored bytes are
-   hash-verified in a temp file, then renamed into place.
-5. **Local bytes are destroyed only if recoverable** (§10).
-6. **Hooks are optional.** Every guard a hook provides also exists as a command
-   (`doctor --ci`) for CI.
+
+3. **A path belongs to at most one discipline.** `add`, `snap`, the pre-commit validator
+   and `doctor --ci` refuse overlaps.
+   That includes overlaps created by clean git merges.
+
+4. **Bytes are verified before they replace anything.** Downloads, cache materialization
+   and snapshot extraction are verified in a temp location and renamed into place.
+
+5. **Local bytes are destroyed only if recoverable, and are displaced into the cache
+   first** (§11).
+
+6. **Hooks are optional.** Every hook check also runs in `doctor --ci`.
+
+7. **One writer per store prefix by default.** A prefix shared by several repositories
+   is detected, and `gc` refuses unless it is told about every other repository (§16).
 
 * * *
 
-## 6. Commands
+## 7. Commands
 
-Global flags: `--json`, `--dry-run`, `--quiet`, `--verbose`, `--color`.
+### 7.1 Surface
 
-Exit codes:
-- `0`: success;
-- `1`: error (network, config, validation);
-- `2`: refused to protect data, or an unresolved conflict.
+Global flags: `--json`, `--dry-run`, `--quiet`, `--verbose`, `--color=auto|always|never`
+(and `NO_COLOR`).
+
+Paths are cwd-relative on input and repo-root-relative on output.
+A path inside a ref’s target scopes the command to matching entries.
+A `.bref` path means its target.
 
 | Command | What it does |
 | --- | --- |
-| `blobsy setup [<backend>] [--no-hooks] [--hydrate]` | Idempotent. It writes `.blobsy.yml` on first run, installs the guard hooks (and restore hooks with `--hydrate`), registers the merge driver in local git config, adds `*.bref merge=blobsy` to `.gitattributes`, and installs agent docs. `--remove-hooks` reverses the hook steps. |
-| `blobsy add <path>…` | A **file** becomes a file ref. A **directory** becomes a directory ref (it creates the ref or updates its entries; it never removes entries). `--each <dir>` creates file refs for files matching the `externalize` rules, keeping the rest in git. `--prune` drops entries whose files are gone. `add` hashes, decides encoding, writes the ref and the gitignore line, and runs `git add` on both. No network. |
-| `blobsy rm <path>… [--keep-local]` | Removes a ref (or entries from a directory ref) and the ignore line, and deletes local files. `--keep-local` keeps the files and stops tracking them. Stored objects are untouched; `gc` reclaims them. |
-| `blobsy mv <src> <dst>` | Moves files and rewrites refs: file ref ↔ file ref, rows within or between directory refs, or a file into or out of a collection. Keys never change, so nothing is re-uploaded. |
-| `blobsy push [<path>…]` | Uploads objects that the backend lacks for the given refs (default: all). It verifies each file against its entry first, prefers the content cache, and never edits refs. |
-| `blobsy pull [<path>…] [--include <glob>] [--cache-only] [--force]` | Materializes entries (and pinned snapshots) that are absent or differ. It overwrites only under the recoverability rule (§10); `--force` overrides. `--cache-only` makes no network calls. |
-| `blobsy sync [<path>…]` | `pull`, then `push`. It has no logic of its own. |
-| `blobsy status [<path>…] [--remote] [--verify] [--all]` | Per-ref and per-entry state (§10). `--remote` batch-checks object presence. `--verify` re-hashes everything, ignoring the hash cache. Directory refs show counts unless `--all`. |
-| `blobsy diff [<rev>[..<rev>]] [<path>…]` | A semantic diff of refs between revisions: files added, removed and changed, with sizes. Suitable as a PR comment. |
-| `blobsy resolve <ref> [--ours\|--theirs] [<path>…]` | Finishes a conflicted ref merge from git’s index stages, or from conflict markers, using the per-path rules of §8. |
-| `blobsy snap publish <stanza\|path> [--name <name>] [--pin]` | Publishes a snapshot. With `--name`, it is an asset; `--pin` writes or updates the pin ref. |
-| `blobsy snap restore <stanza\|name\|pin-path> [--fallback] [--only <glob>]` | Restores a snapshot by atomic swap. |
-| `blobsy snap ls [<prefix>]` / `snap show <name>` | Lists snapshots, or shows one’s manifest summary or diff. |
-| `blobsy gc [--dry-run] [--older-than 30d] [--snapshots]` | Deletes objects unreachable from every ref in every branch and tag (§14). |
-| `blobsy cache status\|prune` | Inspects or trims the content cache. |
-| `blobsy import lfs [<paths>]` | Converts Git LFS pointers in the working tree into blobsy refs and copies their objects into the store. |
-| `blobsy doctor [--fix] [--ci]` | Checks config, backend health and create-only support (probe), hooks and driver, ref validity, overlaps, ignore lines and the large-file guard. `--ci` also verifies that every object referenced at HEAD exists remotely. `--fix` makes safe repairs only (regenerating ignore blocks, installing the driver config). |
-| `blobsy config [<key> [<value>]] [--global\|--local] [--show-origin]` | Gets or sets config at a scope. |
-| `blobsy docs [<topic>] [--skill]` | Bundled docs; `--skill` prints the agent skill. |
+| `blobsy setup [<backend>] [--hash sha256] [--no-hooks] [--auto-pull] [--jj]` | **First run** (no `.blobsy.yml`): writes and stages `.blobsy.yml`, `.gitattributes` and the agent skill, probes the store, and writes the store marker. **Join** (config exists): touches only the git dir (hooks, driver config) and prints backend, credential posture and hasher. |
+| `blobsy add <path>… [--prune] [--rehash]` | A file becomes a file ref; a directory becomes a directory ref (created, or entries updated). Hashes, decides storage, caches the bytes, writes the ref and ignore line, and stages both. No network. Never removes entries unless `--prune`. |
+| `blobsy rm <path>…` | Removes refs or entries and their ignore lines, and stages the result. **Keeps the files**, which are now untracked; the large-file guard stops them reaching git. Never touches the store. |
+| `blobsy clean <path>… \| --cache [--unsynced]` | Frees disk. Deletes materialized payloads whose bytes are recoverable from the store, keeping refs. `--cache` prunes the content cache. |
+| `blobsy push [<path>…] [--repair]` | Uploads missing objects for the given refs (default: all), from the content cache. Never edits refs. `--repair` replaces a proven-corrupt object. |
+| `blobsy pull [<path>…] [--only <glob>] [--all] [--offline] [--force]` | Materializes entries and pins that are absent or stale. Applies the recoverability rule (§11). `--offline` uses only the cache. `--force` replaces modified files (displacing them into the cache). |
+| `blobsy status [<path>…] [--remote] [--verify] [--entries]` | Per-ref counts and entry states (§11). `--remote` batch-checks the store. `--verify` re-hashes. `--entries` lists every entry. |
+| `blobsy diff [<rev>[..<rev>]] [<path>…] [--markdown] [--fail-above <size>]` | Semantic diff of refs between revisions, for PR comments and CI gates. |
+| `blobsy resolve <ref> [--ours\|--theirs] [<path>…]` | Finishes a conflicted ref merge from git’s index stages or markers (§9). |
+| `blobsy snap publish <path> [--name <n>] [--pin] [--packed\|--files]` | Publishes a snapshot of a directory. Without `--name`, uses the stanza whose `path:` matches. |
+| `blobsy snap restore <path> [--name <n>\|--latest <prefix>] [--fallback] [--only <glob>] [--atomic] [--require]` | Restores a snapshot into `<path>` (§8.4). |
+| `blobsy snap ls [<prefix>]` | Lists names with tree id, size, age and provenance. |
+| `blobsy gc [--dry-run] [--older-than 30d] [--expire <glob>] [--also-repo <url>…] [--purge <hash\|name>]` | Deletes store objects no root reaches (§16). |
+| `blobsy import lfs [<path>…]` | Converts LFS pointers in the working tree into refs and copies their objects. |
+| `blobsy doctor [--fix] [--ci [--range <a>..<b>]] [--probe]` | Checks config, refs, overlaps, ignore lines, hooks, driver, credentials and hasher. `--ci` is read-only and needs no local setup. `--probe` tests store capabilities (writes a sentinel). `--fix` makes safe repairs only. |
+| `blobsy docs [<topic>] [--skill]` | Bundled docs. `--skill` prints the agent skill with this repo’s context. |
 
 Hidden plumbing:
-- `blobsy hook <name>` (called by installed hooks);
-- `blobsy merge-driver %O %A %B %P`, also usable as a jj merge tool via
-  `blobsy merge-driver --jj $base $left $right $output`.
+- `blobsy hook <name>`;
+- `blobsy merge-driver [--inner] %O %A %B %P`;
+- `blobsy merge-driver --jj $base $left $right $output`.
 
-**Removed from v2:** `init`, `track`, `untrack`, `verify`, `health`, `check-unpushed`,
-`pre-push-check`, `hooks`, `readme`, `skill`. Each is folded into the table above; there
-are no aliases.
+**Deleted, with no aliases:** `init`, `track`, `untrack`, `verify`, `health`,
+`check-unpushed`, `pre-push-check`, `hooks`, `readme`, `skill`, `sync`, `config`,
+`cache`. `mv` is deferred, because `mv && blobsy rm && blobsy add` covers it.
+
+### 7.2 `add` rules
+
+- **`add <dir>` refuses** if git tracks any file inside, if the directory is the repo
+  root, if it contains a ref, if it overlaps another ref or snapshot path, or if it
+  holds special files (sockets, devices) or symlinks pointing outside it.
+  The refusal names the alternatives:
+
+  ```text
+  refused: data/ contains 14 files tracked by git (data/README.md, data/schema.json, …)
+    A directory ref owns every file in its directory.
+    externalize only some files:   blobsy add data/*.parquet data/*.bin
+    move the whole directory:      git rm -r --cached data/ && blobsy add data/
+  exit 2
+  ```
+
+- **`add` on a pinned target refuses** and names
+  `blobsy snap publish <path> --name <new> --pin`.
+
+- **`add` on an LFS-tracked path refuses** (`git check-attr filter`) and names
+  `blobsy import lfs`.
+
+- **Under jj** (`.jj/` present), `add` writes the ignore line first and runs
+  `jj file untrack` if jj already tracks the payload.
+  It skips `git add` and prints the jj next steps.
+  The root is `$JJ_WORKSPACE_ROOT` when set.
+
+- **`--prune`** drops entries only if the hash cache marks them `here` (materialized in
+  this worktree) and they are now gone.
+  Entries never pulled here are kept, and the count is printed.
+
+### 7.3 Results, exit codes and machine output
+
+- Every verb does all the safe work it can, collects refusals and errors per entry, and
+  prints a summary.
+- **Exit codes:** `0` for success; `1` if anything errored; `2` if anything was refused
+  to protect data, or a conflict is unresolved.
+  `--fail-fast` stops at the first problem.
+- **One JSON envelope** for every command:
+
+```json
+{ "blobsy": 1, "command": "pull", "ok": false,
+  "refs": [ { "ref": "data/images.bref", "shape": "dir", "target": "data/images",
+              "counts": { "ok": 10250, "stale": 3, "modified": 1, "absent": 44, "unsynced": 12 } } ],
+  "problems": [ { "code": "E_MODIFIED", "path": "data/images/cats/009.jpg",
+                  "message": "local file differs from the ref and its bytes exist nowhere else",
+                  "choices": [ { "cmd": "blobsy add data/images/cats/009.jpg", "effect": "keep yours" },
+                               { "cmd": "blobsy pull --force data/images/cats/009.jpg", "effect": "discard yours (saved in the cache)" } ] } ] }
+```
+
+- **`--dry-run --json`** prints
+  `{"plan":[{"op":"upload|download|place|replace|delete|refuse|skip","path":…,"hash":…,"key":…,"size":…,"reason":…}],"totals":{…}}`.
+  `pull --dry-run` lists the refusals it would make.
+
+- **Error codes** form a published list:
+
+| Code | Code | Code |
+| --- | --- | --- |
+| `E_MODIFIED` | `E_CONFLICT` | `E_INVALID_REF` |
+| `E_OVERLAP` | `E_TRACKED_IN_GIT` | `E_LARGE_FILE` |
+| `E_OBJECT_MISSING` | `E_PURGED` | `E_NO_CREDENTIALS` |
+| `E_READ_ONLY` | `E_OFFLINE` | `E_LOCKED` |
+| `E_CASE_COLLISION` | `E_SHARED_PREFIX` | `E_NOT_A_CACHE` |
+
+  Codes never change meaning.
 
 * * *
 
-## 7. Workflows
+## 8. Workflows
 
-### 7.1 UC-1: a few large files
+### 8.1 First ten minutes
 
 ```bash
-blobsy setup s3://my-bucket/my-project?region=us-east-1     # once per repo
-blobsy add data/model.bin          # writes data/model.bin.bref, ignores the payload, git-adds both
+npm install -g blobsy                      # or: npx blobsy@1 …, or the release binary
+blobsy setup local:../blobsy-store         # try it with no credentials; later: blobsy setup s3://bucket/prefix
+blobsy add data/model.bin                  # data/model.bin.bref + /model.bin in data/.gitignore, both staged
 git commit -m "Add model"
-git push                           # pre-push hook uploads the object (or run `blobsy push`)
+git push                                   # pre-push hook uploads the object (or run blobsy push first)
 
-# Another machine
-git clone … && cd … && blobsy setup     # installs hooks/driver; config already committed
+# a teammate
+git clone … && cd … && blobsy setup        # join: hooks + driver only
 blobsy pull
+```
 
-# Change it
+Moving from `local:` to a bucket: `rclone copy ../blobsy-store s3:bucket/prefix`, edit
+`backend:`, commit. Keys don’t depend on the backend, so nothing else changes.
+
+### 8.2 UC-1: a few large files
+
+```bash
 python train.py                    # rewrites data/model.bin
-blobsy add data/model.bin          # one-line change in the ref
+blobsy add data/model.bin          # one-row change in the ref
 git commit -am "Retrain" && git push
 ```
 
-The PR shows one changed line: `.	f	300000	9f2c…` → `.	f	312004	1a7e…`. Restoring an old
-version (`git checkout <old> -- data/model.bin.bref && blobsy pull`) downloads nothing
-if the cache holds those bytes.
-Pushing it again uploads nothing, because the object exists.
+The PR shows one changed row: `.	f	300000	9f2c…	zstd` → `.	f	312004	1a7e…	zstd`.
+Checking out an old version and running `blobsy pull` downloads nothing if the cache
+holds those bytes. Re-pushing it uploads nothing.
 
-### 7.2 UC-2: a collection
+### 8.3 UC-2: a collection
 
 ```bash
-blobsy add data/images             # writes data/images.bref (one line per file), ignores images/
-git commit -m "Add image set" && git push
-
-# Add 40 new files
+blobsy add data/images             # data/images.bref, one row per file; /images/ ignored
 cp new/*.jpg data/images/cats/
-blobsy add data/images             # +40 lines in images.bref
+blobsy add data/images             # +40 rows
 git commit -am "More cats" && git push
 
-blobsy pull data/images --include 'cats/**'    # partial working set
-blobsy add --prune data/images                 # explicit removal of entries whose files are gone
-blobsy diff HEAD~1 data/images                 # "+40 files (+2.1 MB)"
+blobsy pull data/images --only 'cats/**'   # partial; remembered in git config blobsy.only
+blobsy add --prune data/images             # drops entries deleted here; keeps never-pulled ones
 ```
 
-**`add` never removes entries implicitly.** A user who pulled only `cats/**` must not
-lose the rest of the collection on the next `add`.
+- **Working sets.**
+  - `--only` persists per clone, and later plain `pull`s and auto-pull honor it.
+  - `pull --all` clears it.
+  - When `git sparse-checkout` is active, entries outside the sparse cone are skipped
+    too (`git sparse-checkout check-rules`).
+  - `status` reports “N entries outside the working set” instead of N rows.
+- **Choosing a shape:** file refs for a handful of files; a directory ref above a few
+  dozen, or for any directory that receives files in batches.
 
-**Choosing a shape:** file refs (or `add --each`) for up to ~50 files per directory; a
-directory ref above ~300 files, or for any directory that receives files in batches.
-`add --each` prints a suggestion when it would create more than 200 refs in one
-directory.
-
-### 7.3 UC-3: build caches
+### 8.4 UC-3: build caches
 
 ```yaml
 # .blobsy.yml
 snapshots:
-  target:
+  cargo-target:
     path: target
     name: "cache/target/{os}-{arch}/{hash:rust-toolchain.toml}/{hash:Cargo.lock}"
-    exclude: ["**/incremental/**"]
-    fallback: true
+    ignore: ["**/incremental/**"]
+    fallback: true                    # restore the newest name under the parent prefix on a miss
 ```
 
 ```bash
-blobsy snap restore target || true     # hit, fallback, or miss
+blobsy snap restore target         # hit, fallback or miss: all exit 0 (--require makes a miss exit 1)
 cargo build
-blobsy snap publish target             # exit 0 "already published" if another job won
+blobsy snap publish target         # "already published" exits 0 if another job won
 ```
 
-- **Write credentials.** Only protected-branch CI gets them for `snap/cache/`; PR builds
+**Restore of a packed snapshot:**
+1. Read the manifest, and verify `tree_id` (and the pin, if any).
+2. Fetch the archive through the content cache.
+3. Extract into a sibling temp directory, without following symlinks.
+   - Reject any path or link target that is absolute or contains `..`.
+   - Create symlinks only after every file is verified.
+4. Swap it in by renaming the old tree to `<path>.blobsy-old-<rand>`, then deleting that
+   only after success. On failure, reverse the renames.
+   `doctor --fix` cleans up leftover temp and old directories.
+
+**Restore guard.** `snap restore` refuses (`E_NOT_A_CACHE`) to replace a path that:
+- contains a git-tracked file, a ref or a ref target;
+- or is not ignored by git.
+
+`--force` overrides.
+A typo’d or hostile stanza can’t delete real work.
+
+- **Write credentials.** Only protected-branch CI publishes to `snap/cache/`. PR builds
   and laptops are read-only.
-- **Expiry.** A bucket lifecycle rule on `snap/cache/` expires old caches; `doctor`
-  warns when it is missing.
-- **JS and Python.** Cache the package-manager store (pnpm store, uv cache) rather than
+- **Expiry.** A bucket lifecycle rule on `snap/cache/` (`doctor` warns when it is
+  missing), or `gc --expire 'cache/**' --older-than 14d`. A manifest whose archive has
+  expired is a miss.
+- **JS and Python.** Cache the package-manager store (pnpm store, uv cache), not
   `node_modules` or `.venv`.
 
-### 7.4 UC-5: pinned assets
+### 8.5 UC-5 and UC-9: pinned assets
 
 ```bash
-blobsy snap publish models/llama-3-8b --name assets/llama-3-8b/v2 --pin
-git commit -m "Pin llama v2" models/llama-3-8b.bref .gitignore
-
-blobsy pull models/llama-3-8b          # restores the pinned snapshot, verifying tree_id
+blobsy snap publish models/llama-3-8b --name assets/llama-3-8b/v2 --pin   # files mode: shards are content objects
+git commit -m "Pin llama v2" models/llama-3-8b.bref models/.gitignore
+blobsy pull models/llama-3-8b              # restores the pin; verifies tree_id
 ```
 
-Upgrading means publishing `v3` and committing a one-line change to the pin.
+- **Upgrading** means publishing `v3` (only changed shards upload) and committing a
+  one-row change to the pin.
+- **Cross-repo use (UC-9).** Another repository using the same store pins the same name.
+  Nothing is cloned or copied.
+- **`push` and pre-push verify pins:** the named manifest must exist, with the same tree
+  id.
 
-### 7.5 Teams and branches
+### 8.6 UC-6: versioned directories with no manifest in git, synced incrementally
 
-- **Feature branch:** `blobsy add` → commit → push → merge.
-  Objects already exist, so merging needs no transfer.
-- **After `git pull`, `checkout`, `merge` or `rebase`:** run `blobsy pull`, or install
-  restore hooks (`setup --hydrate`) to do this from the cache automatically.
-  `cherry-pick`, `stash`, `reset` and `restore` fire no hooks; `status` reports “N files
-  behind their refs”.
-- **A teammate changed a file you hadn’t touched:** `pull` replaces it.
-  Your old bytes were synced, so they are recoverable.
-- **You changed it too:** `pull` refuses with exit 2, offering `blobsy add` (keep yours)
-  or `pull --force` (take theirs).
-
-### 7.6 CI
+The answer is a **files-mode snapshot**, published under a new name for each version.
+The manifest lives in the store, not in git, and nothing is archived as a whole.
 
 ```bash
-blobsy doctor --ci        # refs valid, no markers or overlaps, every object at HEAD exists remotely
-blobsy pull --include 'test-fixtures/**'
+blobsy snap publish data/results --name results/2026-10-23T1402
+blobsy snap restore data/results --latest results/
 ```
 
-`doctor --ci` is what makes hooks optional.
-It catches pushes made with `--no-verify`, from jj, or from clones without hooks.
+**Publish is incremental.**
+1. Walk the tree. The hash cache means only changed files are re-hashed.
+2. Run one batched `exists` against the content keys.
+3. Upload only missing objects.
+4. Write the new manifest last (create-only).
 
-### 7.7 Agents
+Unchanged files are never re-sent, even across names.
+Cost scales with the changed bytes.
 
-`blobsy docs --skill` gives the full operating guide.
-The rules an agent needs:
-- `add`, then commit, then push;
-- after any git operation that changes refs, run `blobsy pull`;
-- never pass `--force` without reading the refusal message;
-- use `--json` for state.
+**Restore is incremental.**
+1. Compare the local tree (via the hash cache) with the target manifest.
+2. Download only missing or different files.
+3. Apply them per file, atomically.
 
-`--dry-run --json` prints the exact plan, with resolved keys, before any transfer.
+Files not in the manifest are deleted under the recoverability rule.
+`--atomic` stages the whole tree beside the old one (reflinking or copying unchanged
+files) and swaps it in.
+
+**Versions are immutable and cheap.** Each is one small manifest; the objects are
+shared.
+
+**Git holds nothing**, or a one-row pin if a commit should name an exact version.
+
+**Scale:**
+- One flat manifest is fine up to about 100k rows (roughly 3 MB compressed).
+- For tens of thousands of tiny files that are always restored whole, use `--packed`.
+- For more, see the deferred sharded manifests and grouped packs (§19).
+
+**If no manifest is wanted anywhere** (bucket browsable by path), that is the deferred
+mirror mode (§19). It gives up immutable versions, atomic publish and dedup.
+
+### 8.7 Teams and branches
+
+- **After `git pull`, `checkout`, `merge`, `rebase` or `stash pop`,** run `blobsy pull`.
+  `setup --auto-pull` does this from the cache after checkout, merge and rewrite.
+- **Payloads are gitignored, so git never stashes, resets or checks them out.** After
+  any git operation, `blobsy status` says whether each file is `⇣ stale` (run `pull`) or
+  `~ modified` (your bytes; `pull` refuses).
+  `git stash pop` restores the ref, and nothing is lost.
+- **A teammate changed a file you hadn’t touched:** your copy is `⇣ stale`, and `pull`
+  replaces it.
+- **You changed it too:** `pull` refuses that file and lists `blobsy add` (keep yours)
+  first, `--force` last.
+- **Big pushes.** The pre-push hook prints the total before uploading (“Ctrl-C aborts
+  the push, not the commit”). For anything over ~1 GB, run `blobsy push` before
+  `git push`.
+
+### 8.8 CI
+
+```yaml
+- uses: actions/checkout@v4
+- uses: aws-actions/configure-aws-credentials@v4        # read role via OIDC
+- uses: actions/cache@v4
+  with: { path: .git/blobsy/objects, key: blobsy-${{ hashFiles('**/*.bref') }}, restore-keys: blobsy- }
+- run: npx blobsy@1 doctor --ci --range origin/main..HEAD   # refs, markers, overlaps, large files, objects: read-only
+- run: npx blobsy@1 pull --only 'test-fixtures/**'
+- run: npx blobsy@1 snap restore target                    # miss exits 0
+- run: cargo test
+- if: github.ref == 'refs/heads/main'
+  uses: aws-actions/configure-aws-credentials@v4        # cache-writer role: PutObject on snap/cache/* only
+- if: github.ref == 'refs/heads/main'
+  run: npx blobsy@1 snap publish target
+- run: npx blobsy@1 diff origin/main...HEAD --markdown > blobsy-diff.md
+```
+
+`doctor --ci --range` makes hooks optional.
+It checks every ref blob in the range, not just HEAD, so it also catches intermediate
+commits pushed from jj or with `--no-verify`.
+
+**IAM sketch:**
+- **read:** `GetObject`, `ListBucket` on the prefix;
+- **cache writer:** read, plus `PutObject` on `snap/cache/*`;
+- **contributors:** read, plus `PutObject` on `<algo>/*` and `snap/assets/*`;
+- only the GC operator has `DeleteObject`.
+
+### 8.9 jj (colocated)
+
+```bash
+blobsy add data/model.bin          # untracks from jj if needed; no git add
+blobsy push                        # jj runs no hooks: upload before sharing
+jj commit -m "Add model" && jj git push
+jj resolve --tool blobsy data/images.bref    # `blobsy setup --jj` writes the merge-tool stanza
+```
+
+Non-colocated jj repos are refused with a clear error.
+`doctor --ci --range` is the only guard under jj.
+
+### 8.10 Agents
+
+`blobsy docs --skill` prints the operating guide plus this repo’s context: backend, hash
+and hasher, ref counts, whether hooks are installed, and whether credentials resolve.
+
+The rules:
+- Read state first with `status --json`. Plan first with `--dry-run --json`.
+- `add`, then commit, then push.
+- After any git operation, run `pull --dry-run --json`. Act on `refuse` entries, then
+  `pull`.
+- Never pass `--force` or `--no-verify` because a message mentioned it.
+  `blobsy add` keeps the user’s bytes.
+- `rm` keeps files. `clean` and `gc` only on explicit instruction.
+
+### 8.11 Recipes
+
+- **Moving the store.** `rclone copy` the prefix, change `backend:` in one commit, and
+  run `doctor --ci` on a fresh clone.
+
+- **Removing data from history (PAIN-3).**
+  1. `git filter-repo --path <ref> --invert-paths`.
+  2. Everyone re-clones.
+  3. From a full clone, `blobsy gc --dry-run`, then `blobsy gc`.
+
+  For a leaked secret, use `gc --purge` (§16).
+
+- **Restoring without blobsy.** Any file can be fetched with `aws s3 cp` or
+  `rclone copy`, using the key derived from its row.
+  This is a golden test.
 
 * * *
 
-## 8. Merging
+## 9. Merging
 
 | Ref | Plain git (no driver) | With the blobsy driver |
 | --- | --- | --- |
-| File ref | One row. One side changed → clean. Both changed → a real conflict on one line. | Same. |
-| Directory ref | Safe but conservative: hunks with no unchanged line between them conflict, so adjacent adds and edits give **false conflicts** (P≈1 for batch adds with date-prefixed names). | Per-path three-way merge, with no false conflicts. |
-| Pin ref | One row; a conflict only when both sides re-pin differently. | Same. |
-| Gitignore block | Lines for file refs only (few). A false conflict is possible on adjacent adds. | Not merged: `doctor --fix` regenerates the block from the refs present. |
+| File ref | One row. One side changed → clean. Both changed → one real conflict. | Same |
+| Directory ref | Safe but conservative: adjacent adds and edits give false conflicts | Per-path three-way merge, no false conflicts |
+| Pin ref | Conflict only if both sides re-pin differently | Same |
+| Managed ignore block | Possible false conflict on adjacent adds | Not merged: resolved by `doctor --fix` (regenerated from refs) |
 
-**Per-path rules** (the same as Gat’s; `merge.rs:80-95`). For each path across base,
-ours and theirs:
-- identical on both sides → keep it;
-- changed on one side only → take that side;
-- changed differently on both, or modified on one side and deleted on the other →
-  **conflict**.
+**Per-path rules** (Gat’s, `merge.rs:80-95`). Rows are compared on their first four
+columns. If only `storage` differs, ours wins.
+For each path across base, ours and theirs:
+- same on both sides → keep it;
+- changed on one side → take that side;
+- added identically on both → keep it;
+- changed differently, or modified on one side and deleted on the other → **conflict**;
+- prefix collisions (`a` vs `a/b`) → conflict.
 
-The merged file always contains every clean change.
-Conflicting paths get `<<<<<<< / ======= / >>>>>>>` markers around that one row only.
-Prefix collisions (`a` vs `a/b`) are conflicts.
-The header is taken from ours (it is static).
+**Output.** The merged file contains every clean change.
+Conflicting paths get `<<<<<<< / ======= / >>>>>>>` around that one row only.
 
-This differs from Gat deliberately.
-Gat leaves the file as *ours* with no markers; in testing, a naive `git add` then
-silently dropped the other side’s clean additions.
+**Failure cases never fall back to “ours”:**
+- **Unparsable input:** the driver writes a whole-file conflict (ours, then theirs) and
+  exits 1.
+- **Headers differ** (algorithms changed on one side): whole-file conflict.
+- **Criss-cross merges.** Git builds a virtual ancestor by calling the driver
+  recursively. `setup` registers `merge.blobsy.recursive = blobsy-inner`, which runs
+  `merge-driver --inner`. The inner merge omits every conflicting path and exits 0.
+  Those paths then surface as add/add conflicts in the real merge, so no marker reaches
+  a parser, and no clean row is lost.
+  (Verified: without this, git used the driver’s marker output as the base, and the
+  other side’s clean addition silently disappeared, exactly as in Gat.)
 
 **Installation and fallback:**
-- `.gitattributes` (committed) holds `*.bref merge=blobsy`. `setup` also writes
-  `merge.blobsy.driver` into local git config.
-- **Without the driver config** (a fresh clone, a GitHub web merge, jj), git silently
-  uses its text merge.
-  That is safe, and only conservative.
+
+- `.gitattributes` (committed) holds `*.bref merge=blobsy text eol=lf`. `setup` writes
+  the driver commands into local git config.
+  A repo can name a driver but never choose the executable.
+
+- **Without the driver** (a fresh clone, a GitHub web merge, jj), git uses its text
+  merge. That is safe, only conservative.
+
 - **Repairs:**
-  - `blobsy resolve <ref>` re-runs the per-path merge from index stages after a local
-    driverless merge;
-  - jj calls `merge-driver --jj` as a merge tool;
-  - **hosted merges** are covered by the validator.
-- **The validator** checks format, sort order, duplicates, prefix collisions and
-  markers. It runs in pre-commit, `doctor` and `doctor --ci`, so a bad hand-merge or web
-  merge can’t reach main unnoticed.
-- **No network in merges.** Hydration happens afterwards (`pull`, or restore hooks).
-- **No content-level merges inside `git merge`.**
+  - `blobsy resolve <ref>` re-runs the per-path merge from the index stages;
+  - on a file ref, it prints both candidates and exits 2 until `--ours` or `--theirs`;
+  - jj calls `merge-driver --jj` as a merge tool.
+
+- **The validator** runs on staged content in pre-commit, and in `doctor` and
+  `doctor --ci`. It checks:
+  - format, sort order, duplicates, prefix collisions and markers (including jj styles
+    and markers longer than seven characters);
+  - that no ref nests in another;
+  - that git tracks no file inside a ref target;
+  - that every ref has its ignore line.
+
+  So a clean git merge that creates an overlap is caught too.
+
+- **Rename detection** can move a ref away from its payload, for example when one side
+  ran `git mv` on the ref.
+  `doctor` reports orphaned payloads (ignored files with no ref).
+  The ignore block keeps their lines until they are deleted or re-added.
+
+- **No network inside merges.** Bytes arrive afterwards, through `pull` or auto-pull.
 
 * * *
 
-## 9. Hooks
+## 10. Hooks
 
-Installed by `setup` into `git rev-parse --git-path hooks`, so `core.hooksPath` (husky,
-lefthook) is honored.
-Each managed hook is identified by an exact marker line, and user hooks are never
-modified. `BLOBSY_NO_HOOKS=1` disables them at runtime.
+`setup` installs hooks into `git rev-parse --git-path hooks`, so `core.hooksPath`
+(husky, lefthook) is honored.
+It refuses a hooks path inside the working tree, which would be repo-chosen code.
+
+Each managed hook carries an exact marker line, and user hooks are never modified.
+`BLOBSY_NO_HOOKS=1` disables every hook, leaving CI as the only check.
+
+**The shim** is POSIX `sh`:
+1. Run `blobsy`, or `npx -y blobsy@1` if blobsy isn’t on PATH.
+2. If neither exists, exit 0 unless the operation touches a `.bref`. In that case, print
+   the install line and block.
+
+A missing blobsy never blocks unrelated git work.
 
 | Hook | Default | Action |
 | --- | --- | --- |
-| `pre-commit` | on | Validate staged refs (§8 validator) and check they match local payloads (fast path via the hash cache). **Large-file guard:** refuse staged files that sit inside a ref target, or exceed `git_max_file_size` (default 5 MB; PAIN-1). |
-| `pre-push` | on | Read `<local ref> <sha> <remote ref> <sha>` from stdin. For refs changed in each pushed range (read from the commits), upload objects the backend lacks, from the cache or the working tree, after hash verification. **Abort the push** naming the commit and path if the bytes are unavailable. |
-| `post-checkout`, `post-merge`, `post-rewrite` | off (`--hydrate`) | `blobsy pull --cache-only --quiet` (with `hydrate.fetch: true`, plain `pull`). Never fails the git operation; prints one line on problems. |
+| `pre-commit` | on | Runs the validator on staged refs (§9), the payload check and the large-file guard. |
+| `pre-push` | on | Uploads what the pushed commits need (steps below) or aborts. |
+| `post-checkout`, `post-merge`, `post-rewrite` | off (`setup --auto-pull`) | `blobsy pull --offline --quiet`. No network, never fails the git operation, prints one line naming what is still absent. |
+
+**Pre-commit checks:**
+
+- **Payload check:** refuses only when a local file exists, differs from its staged row,
+  and the staged hash is neither cached nor known.
+  Merge, revert and cherry-pick commits pass.
+
+- **Large-file guard:**
+  - refuses newly staged files inside a ref target;
+  - refuses newly staged files over `max_git_file_size` (default 5 MB) unless they match
+    `max_git_file_size_allow`;
+  - refuses newly staged files whose hash matches an entry in any ref (an escaped
+    payload).
+
+  It prints the exact `blobsy add <paths>` to run.
+
+**Pre-push steps.** For each stdin line with a non-zero local sha:
+1. Enumerate every distinct `.bref` blob in the range with
+   `git rev-list --objects <local> --not <remote sha | --remotes=<remote>>`. This covers
+   every intermediate version, not just the endpoint.
+2. Parse each blob, then batch `exists`.
+3. Upload what is missing from the content cache, or from the working tree when its hash
+   still matches (through the cache).
+4. Verify that pinned manifests exist.
+5. If bytes are unavailable, abort, naming the commit and path.
+
+Deletions are skipped.
+Shallow history below the graft counts as already pushed.
 
 * * *
 
-## 10. Status and the Recoverability Rule
+## 11. Recoverability rule and status
 
-**Entry states:**
+### 11.1 Entry states
 
 | Symbol | State | Meaning | Next action |
 | --- | --- | --- | --- |
 | `✓` | ok | Local bytes match the entry | — |
-| `~` | modified | Local bytes differ from the entry | `blobsy add` (keep) or `blobsy pull --force` (discard) |
-| `↓` | absent | Not materialized locally | `blobsy pull` |
-| `↑` | unpushed | Matches, but this machine has no record of the object in the store | `blobsy push` |
-| `!` | conflict | Ref has conflict markers or is invalid | `blobsy resolve` / edit |
-| `?` | unknown remote | Matches; not synced from this machine (a teammate’s) | `status --remote` to check |
+| `⇣` | stale | Local bytes are an older *recoverable* version; the ref moved | `blobsy pull` (safe) |
+| `~` | modified | Local bytes differ and are not known to exist anywhere else | `blobsy add` (keep) · `pull --force` (discard) |
+| `↓` | absent | Not materialized here (never pulled, deleted, or outside the working set) | `blobsy pull` |
+| `↑` | unsynced | Matches, but this machine has no evidence the store has it | `blobsy push`, or `status --remote` |
+| `!` | invalid | The ref has markers or fails validation | `blobsy resolve` / edit |
 
-With `--remote`, every entry also shows `remote: present|missing` (batched `list`/HEAD).
+- **Offline** (the default), `stale` and `unsynced` use the known log.
+  With `--remote`, they are refined by a batched `exists`, and every entry also shows
+  `remote: present|missing|purged`.
+- `status` exits 2 if any ref is invalid.
+- Human output prints counts per ref, and entries only for file refs, pins or
+  `--entries`:
 
-**Recoverability rule.** `pull` (and `rm`, which deletes files) destroys a local file
-only if its current bytes are recoverable, meaning at least one of:
-- (a) the hash cache records that this exact hash was pushed or pulled on this machine;
-- (b) the content cache holds the bytes;
-- (c) the object for the local hash exists in the store.
-
-Otherwise the command refuses with exit 2 and prints the explicit choices.
-Git history is never treated as proof that bytes exist remotely: a commit can exist
-without its object ever having been pushed.
-
-This rule replaces v2’s stat-cache merge base.
-It has no ambiguous state, and needs no history of what blobsy last did beyond the
-synced records.
-
-* * *
-
-## 11. Configuration
-
-Three scopes, merged field by field (local > project > global > built-in):
-
-| Scope | File | Committed | Use |
-| --- | --- | --- | --- |
-| Global | `~/.blobsy.yml` (or `$BLOBSY_HOME`) | no | Personal defaults: cache dir, parallelism, trust grants for command backends |
-| Project | `<repo>/.blobsy.yml` | **yes** | Backend, hash, compression and externalize rules, ignore patterns, snapshot stanzas, `git_max_file_size` |
-| Local | `$(git rev-parse --git-dir)/blobsy/config.yml` | no | Machine overrides: a different backend URL or profile, `cache.on_add`, `hydrate.fetch` |
-
-Settings that affect stored bytes or keys are **project-only**; blobsy rejects them at
-other scopes. These are: `hash`, `compress.*`, and the backend prefix when it changes
-object location.
-
-```yaml
-# .blobsy.yml (project)
-backend: s3://my-bucket/my-project?region=us-east-1   # or gs://…, azure://…, rclone:remote:path, local:../store
-hash: blake3
-compress:
-  min_size: 100kb
-  always: ["*.json", "*.csv", "*.jsonl", "*.txt"]
-  never: ["*.zst", "*.gz", "*.zip", "*.parquet", "*.png", "*.jpg", "*.mp4"]
-externalize:            # used by `add --each`
-  min_size: 200kb
-  always: ["*.parquet", "*.bin", "*.safetensors", "*.onnx", "*.pt"]
-  never: ["*.md"]
-ignore: [".DS_Store", "__pycache__/", "*.pyc"]
-git_max_file_size: 5mb
-snapshots:
-  target: { path: target, name: "cache/target/{os}-{arch}/{hash:Cargo.lock}", fallback: true }
+```text
+data/model.bin.bref     file  300 MB          ✓ ok
+data/images.bref        dir   10,324 · 4.2 GB  ✓ 10,250  ⇣ 3  ~ 1  ↓ 44  ↑ 12   (working set: cats/**)
+models/llama-3-8b.bref  pin   assets/llama-3-8b/v2 · 16 GB  ✓ ok
+next: blobsy pull (3 stale) · blobsy add or pull --force (1 modified) · blobsy push (12 unsynced)
 ```
 
-- **Backend forms.** `backend` is a URL string.
-  The command-backend form is an object (§12).
-- **Removed from v2:**
-  - subdirectory configs;
-  - `backends:` maps and named backends;
-  - `remote.key_template`;
-  - `sync.tools`;
-  - `checksum`.
+`--ascii` (or a non-UTF-8 locale) prints the state words instead of the glyphs.
+
+### 11.2 The rule
+
+These commands may replace or delete a local file:
+- `pull` (including pins and auto-pull);
+- `clean`;
+- `snap restore` in files mode.
+
+(`add --prune` only edits refs and never deletes bytes; see §7.2.)
+
+When they do, two steps apply.
+
+1. **Decide.** Proceed only if the current bytes are **recoverable**:
+   - **online:** the store holds them (batched `exists` under either encoding, with a
+     size check for raw objects);
+   - **offline** (`--offline`, auto-pull hooks, or an unreachable store): the current
+     store’s known log lists the hash.
+
+   Otherwise, refuse that entry (exit 2, `E_MODIFIED`) and list the choices, with
+   `--force` last. Git history never counts as proof: a commit can exist without its
+   object ever being pushed.
+
+2. **Displace.** Before replacing a file, move its bytes into the content cache (a
+   rename on the same filesystem, else reflink or copy).
+   With `--force`, print the displaced hash and its cache path.
+   Every replacement is therefore reversible until the cache is pruned, and pruning
+   never removes unsynced bytes.
+
+`clean` frees disk, so it deletes without displacing, and it requires the online check
+unless given `--offline`.
+
+**Edge rules:**
+- `pull` never follows a symlink at a target path.
+- It never removes a directory to place a file (or the reverse) unless every file inside
+  passes the rule.
+
+This replaces v2’s merge base.
+It needs no history of what blobsy last did, and stale evidence can’t cause loss.
+A garbage-collected object fails the online check, and the displaced copy survives
+either way.
 
 * * *
 
-## 12. Backends
+## 12. Configuration
+
+**Two places:**
+
+| Where | Committed | Holds |
+| --- | --- | --- |
+| `.blobsy.yml` | **yes** | Everything that affects bytes, keys or what gets tracked: `backend`, `hash`, `compress`, `ignore`, `max_git_file_size`, `snapshots` |
+| `git config blobsy.*` (global or repo-local) | no | Machine settings and connection options |
+
+`git config` gives global/local layering, `--show-origin` and environment overrides for
+free, and it puts trust grants out of the repo by construction.
+`doctor` prints the effective configuration.
+
+```yaml
+# .blobsy.yml, as written by `setup` (unknown keys are errors)
+backend: s3://my-bucket/my-project?region=us-east-1    # gs://…  azure://…  rclone:remote:path  local:../store  https://…
+hash: blake3                                            # applies to new refs
+# compress: { min_size: 100kb, never: ["*.npz"] }
+# ignore: [".DS_Store", "__pycache__/"]
+# max_git_file_size: 5mb
+# max_git_file_size_allow: ["pnpm-lock.yaml"]
+# snapshots: { cargo-target: { path: target, name: "cache/target/{os}-{arch}/{hash:Cargo.lock}", fallback: true } }
+```
+
+**Backend location is project-owned.** `backend:` may use `${VAR}` interpolation:
+- `${NAME}` only, expanded once, with no defaults;
+- an error names the variable if it is unset.
+
+So `s3://${BLOBSY_BUCKET}/proj` works per environment.
+
+**Machine keys:**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `blobsy.profile` | — | Connection option (S3 profile); never in the project URL |
+| `blobsy.endpoint` | — | Connection option |
+| `blobsy.backendOverride` | — | A different store (replica, scratch). `push` and `snap publish` print it on every run, and `doctor` reports it loudly. |
+| `blobsy.cacheDir` | under the git common dir | Content cache location |
+| `blobsy.cacheMaxSize` | 20 GB | Prune target |
+| `blobsy.cacheOnAdd` | true | Cache bytes at `add` |
+| `blobsy.materialize` | `reflink,copy` | Materialization strategies, in order |
+| `blobsy.jobs` | — | Transfer concurrency |
+| `blobsy.only` | — | Persisted working set |
+| `blobsy.trustCommandBackend` | false | Out-of-repo trust grant for command backends |
+
+`setup` warns if `profile=` appears in the committed URL.
+
+* * *
+
+## 13. Backends
 
 | URL | Implementation |
 | --- | --- |
-| `s3://bucket/prefix?region=…&endpoint=…&profile=…` | Built-in AWS SDK v3: S3, R2, B2, Tigris, MinIO and other S3-compatibles; create-only via `If-None-Match` |
-| `gs://bucket/prefix`, `azure://container/prefix` | rclone (later, optionally, native OpenDAL npm bindings for in-process preconditions) |
-| `rclone:<remote>:<path>` | Any rclone remote (70+ providers) |
-| `local:<path>` | A directory outside the repo; create-only via `O_EXCL`/`link` |
-| `{type: command, get, put, exists, list?, delete?}` | Custom commands, executed without a shell, with per-token expansion of `{local}`, `{key}`, `{path}`. Repo-supplied command backends need an out-of-repo trust grant. |
+| `s3://bucket/prefix?region=…&endpoint=…` | Built-in AWS SDK v3 (S3, R2, B2, Tigris, MinIO), with the standard credential chain (env, profiles, SSO, OIDC, IMDS); create-only via `If-None-Match` |
+| `gs://bucket/prefix`, `azure://container/prefix` | rclone at first; native preconditions later (OpenDAL npm spike) |
+| `rclone:<remote>:<path>` | Any rclone remote (70+ providers), batched with `--files-from0` |
+| `local:<path>` | A directory outside the repo; temp + `link()` |
+| `https://host/prefix` | **Read-only**: `GET`, batched `HEAD`. No `list`, so `--latest`, `--fallback` and `gc` refuse. `push` fails with `E_READ_ONLY`. |
+| `{type: command, get, put, exists, list?, delete?}` | Custom commands, run without a shell, with per-token `{local}`, `{key}` expansion; needs `blobsy.trustCommandBackend` |
 
 **Interface:**
-- `get(key, dest)`
-- `putIfAbsent(src, key, meta)`
-- `exists(keys[])` (batched)
-- `list(prefix)`
-- `delete(key)` (gc only)
-- `health()`
-- `capabilities` = `{ conditionalPut, metadata, list }`
 
-`conditionalPut` is **set by a doctor probe** (write a sentinel twice; expect success,
-then 412), not assumed from the backend type, because some S3-compatibles silently
-ignore the header.
+```ts
+interface Backend {
+  get(key: string, dest: string): Promise<void>;
+  putIfAbsent(src: string, key: string, meta?: Meta): Promise<'created' | 'exists'>;
+  exists(keys: string[]): Promise<Map<string, number /* size */>>;
+  list(prefix: string): AsyncIterable<{ key: string; size: number; mtime: Date }>;
+  delete(key: string, ifMatch?: string): Promise<void>;     // gc only
+  readonly capabilities: { conditionalPut: boolean; list: boolean; write: boolean };
+}
+```
 
-**Transfers are batched:** a concurrency pool for the SDK, `--files-from0` for rclone,
-and per-file processes only for command backends.
-
-**Removed from v2:** the aws-cli backend (the SDK covers S3) and per-file synchronous
-process spawning.
-
-* * *
-
-## 13. Security
-
-[blobsy-threat-model.md](blobsy-threat-model.md) remains normative.
-v3 changes:
-
-- **Refs can no longer name arbitrary keys.** Keys are derived from hex hashes, and
-  snapshot names in pin refs are validated (`[A-Za-z0-9._/-]`, no `..`, no leading `/`).
-- **Local state can’t be committed:** it lives under the git directory.
-- **Shared caches need write segregation** (CVE-2025-36852 “CREEP”). Snapshot refs
-  record provenance; a signature field is reserved.
-- **Unchanged:**
-  - repo config is untrusted;
-  - command backends need an out-of-repo grant;
-  - user paths are confined to the repo;
-  - pulled bytes are verified before use;
-  - `--quiet` and `--json` never change a safety decision.
+- **Probing.** `conditionalPut` comes from a probe, because some S3-compatibles silently
+  ignore `If-None-Match`. The probe writes `_blobsy/probe/<rand>` twice, expecting
+  success then 412, and deletes it.
+  It runs in first-run `setup` and in `doctor --probe`, and records the result in
+  `_blobsy/store.yaml`. `doctor` and `doctor --ci` never write.
+- **Permissions are diagnosed separately** (list, read, write, delete), so a read-only
+  credential reports “read-only: pull works, push will fail”.
+- **Credentials** come from each tool’s own chain (AWS SDK, `rclone.conf`). A missing
+  credential says which sources were checked and points to `blobsy docs credentials`.
+- **Consistency.** S3, GCS, Azure and R2 give strong read-after-write consistency.
+  rclone and command backends are assumed to be consistent.
 
 * * *
 
-## 14. Retention and GC
+## 14. Installation and Platforms
 
-- **Content objects:** `blobsy gc [--dry-run] [--older-than 30d]` works as follows.
-  - **Reachable:** every key derived from every entry in every `.bref` in every commit
-    reachable from all branches and tags, plus the working tree.
-  - **Deleted:** listed objects outside that set that are older than the grace period.
-  - Dry-run is recommended first.
-    Bucket versioning or Object Lock gives a recovery window.
-  - GC refuses to run if any ref in the scanned history fails to parse, rather than
-    treating its objects as orphans.
-- **Cache snapshots:** bucket lifecycle rules on `snap/cache/` (preferred), or
-  `gc --snapshots --older-than`.
-- **Asset snapshots** are never deleted by blobsy.
-- **History removal (PAIN-3):** delete the ref from history with `git filter-repo`, then
-  `gc` reclaims the objects.
-  No repository recreation is needed.
+| Path | For |
+| --- | --- |
+| `npm install -g blobsy` | Humans; hooks find `blobsy` on PATH |
+| `npx blobsy@1 <cmd>` | Agents and CI; nothing installed; pin the major |
+| Release binary (`bun build --compile`, checksum-verified installer) | Sandboxes without Node; hooks and CI. Released once the golden suite passes against it and the native hash addon is embedded. |
+
+- **Node.** Node ≥ 22.15 at runtime (`node:zlib` zstd); ≥ 24 for development.
+- **Native addon.** The BLAKE3 addon is a normal dependency with a WASM fallback.
+  Installation never fails when the addon is missing (tested with `--no-optional` and
+  `--ignore-scripts`).
+- **Startup.** `--version`, hooks and the merge driver load lazily (no AWS SDK, markdown
+  renderer or schema library until needed).
+  Budget: ≤ 150 ms, enforced in CI.
+
+**Windows:**
+- Hooks are `sh` scripts (Git for Windows ships `sh`).
+- `.bref` files are written with LF, and `eol=lf` protects them from `autocrlf`.
+- Symlinks in snapshots or directory refs fall back to copies with a warning when
+  Developer Mode is off, and the restore summary reports the fidelity loss.
+- Reflink is available only on ReFS and Dev Drive; elsewhere it falls back to copy.
+- Long paths use `\\?\`.
+- The local backend uses `O_EXCL` + rename.
+- Case collisions are refused on every platform.
+- The golden suite runs on `windows-latest`.
 
 * * *
 
-## 15. Performance Targets
+## 15. Security
+
+[blobsy-threat-model.md](blobsy-threat-model.md) is normative.
+The v3 points:
+
+- **Refs can’t name arbitrary keys.** Keys are derived from validated hex.
+  Snapshot names are validated (§5.4).
+- **Store manifests are untrusted** until their `tree_id` is verified.
+  Archives are extracted under the hardening rules of §8.4, pinned or not.
+  `--fallback` restores unpinned content by design.
+- **Shared caches need write segregation** (CVE-2025-36852 “CREEP”). Only trusted CI
+  writes `snap/cache/`. Manifests record provenance; a signature line is reserved.
+- **Repo content never chooses an executable.** A command backend needs an out-of-repo
+  grant. `.gitattributes` only names the driver, and the command comes from local git
+  config. Hooks are never installed into a repo-supplied hooks directory.
+- **Local state can’t be committed**, because it lives under the git dir.
+  A `blobsy.cacheDir` shared between users is untrusted, which is one reason
+  materialization verifies.
+- **Unchanged:** user paths are confined to the repo, and `--quiet` and `--json` never
+  change a safety decision.
+
+* * *
+
+## 16. Retention and GC
+
+`blobsy gc` deletes content objects and orphaned snapshot archives that no root reaches.
+
+**Roots:**
+- every key derived from every `.bref` blob reachable from any ref: branches, tags,
+  remote-tracking refs, `refs/stash`, reflogs (`--reflog`) and `refs/jj/*`;
+- the index and the working tree;
+- every manifest under `snap/` in the store, plus its archive and the objects of its
+  files-mode rows.
+
+**Preconditions** (each refusal names its fix):
+1. `git fetch --all --tags --prune` succeeds against every remote.
+2. Every ref in the scanned history parses.
+3. The store has a recovery window (bucket versioning, soft delete or Object Lock), or
+   the operator passes `--no-recovery-window`.
+4. `_blobsy/repos/` lists only this repository, or `--also-repo <url>` names every other
+   one, whose histories are then scanned too (Gat’s `--repository`).
+
+**Deleting:**
+- Only objects older than `--older-than` (default 30 days) are deleted, which protects
+  unmerged work on other machines.
+- Refs are re-read immediately before each delete batch.
+- Deletes are conditional (`If-Match` or `ifGenerationMatch`), so a concurrent re-upload
+  survives.
+- `--dry-run` is recommended first.
+
+**Known gap:** re-adding long-unreferenced bytes doesn’t refresh their age, because the
+push sees “already exists”.
+A gc running while that commit is still unpushed can delete the object.
+The recovery window and `doctor --ci` cover this, and a plain `blobsy push` from a
+machine with the bytes re-uploads it.
+
+**Cache snapshots:** a bucket lifecycle rule on `snap/cache/` (preferred), or
+`gc --expire 'cache/**' --older-than 14d`. Asset snapshots are never expired.
+
+**Emergency purge:** `gc --purge <hash|name>` is for a leaked secret or licence problem.
+- It deletes immediately, with no grace period.
+- It requires the target to be absent from HEAD.
+- It writes `<key>.purged` (who, when, reason), so later pulls report `E_PURGED` instead
+  of a bare 404.
+
+* * *
+
+## 17. Performance Targets
 
 | Operation | Target |
 | --- | --- |
-| `blobsy --version`, hooks, merge driver | ≤ 150 ms (lazy imports; CI budget) |
-| `status` / no-op `sync` on 10k entries | ≤ 1 s warm (hash cache; no rehash) |
-| `add` of 10k × 100 KB | dominated by hashing at disk speed; one ignore write and one `git add` per command |
-| Hashing | ≥ 2 GB/s per file with native BLAKE3 (measured 2.85 GB/s, Node) |
-| Snapshot publish/restore, 15k files / 170 MB | ≤ 10 s each (measured ~5 s restore, local) |
+| `--version`, hooks, merge driver | ≤ 150 ms |
+| `status` on 10k entries, warm | ≤ 1 s, with no re-hashing |
+| `status` on 100k entries, warm | ≤ 5 s |
+| `add` of 10k × 100 KB | hashing at disk speed; one ignore write and one `git add` per command |
+| Hashing | ≥ 2 GB/s per file, native BLAKE3 |
+| Packed snapshot publish/restore, 15k files / 170 MB | ≤ 10 s each |
+| Files-mode publish with 1% changed | dominated by the walk and one batched `exists` |
 
 * * *
 
-## 16. What v3 Removes from v2
+## 18. Architecture
 
-| Removed | Why |
+```text
+cli/      commander wiring; one file per verb: plan(args) → Plan; execute(Plan); one reporter (human | --json | --dry-run)
+core/     config (yaml + git config), paths, git, errors (codes), hash (1 MB reads, worker pool), hashcache, lock
+ref/      Entry, parse/serialize/validate, treeId, merge3, walk(dir) → Entry[]
+store/    Backend + s3 / local / rclone / https / command; objectKey(); ObjectStore (cache-through, known log)
+sync/     the entry loop: plan(entries, local, store, mode) → Action[]; apply(Action[]) with the recoverability rule
+snap/     names and templates, pack/unpack, publish (objects → archive → manifest), restore (guard, extract, swap)
+doctor/   check registry; each module registers its checks
+```
+
+```ts
+type Kind = 'f' | 'x' | 'l' | 'd' | 't';
+interface Entry { path: string; kind: Kind; size: number; hash: string; storage: string }
+interface Manifest { algo: 'blake3' | 'sha256'; entries: Entry[]; meta: Record<string, string> }  // meta: store manifests only
+parseManifest(text, where: 'git' | 'store'): Manifest;  serialize(m): string;  validate(m): Issue[];  treeId(entries): string
+merge3(base, ours, theirs, opts: { inner: boolean }): { merged: Manifest; conflicts: string[] }
+walk(dir, ignore, hashcache): Promise<Entry[]>          // add and snap publish
+objectKey(algo, hash, storage): string                   // pure
+type Action = { op: 'upload' | 'download' | 'place' | 'replace' | 'delete' | 'refuse' | 'skip'; entry: Entry; reason?: string };
+```
+
+**Code reuse:**
+- `push`, `pull`, `status`, `clean`, the pre-push hook, auto-pull, `doctor --ci`, and
+  files-mode publish and restore all call the one entry loop.
+- `add` and `snap publish` share `walk()`.
+- Every manifest, in git or in the store, goes through `parseManifest()`.
+- The only snapshot-specific code is pack/unpack, names, the restore guard and the swap.
+
+**What v3 removes from v2:**
+
+| Removed | Replaced by |
 | --- | --- |
-| Timestamped key templates; `remote_key` in refs; the two-commit flow | Keys are derived; refs are final at `add` |
-| `remote_key`-presence as the “pushed” signal (3 audits) | Pushed is remote state, recorded locally and checked in batch |
-| Stat-cache merge base; 9-state `sync` | The recoverability rule |
-| `.blobsy/` in the working tree; the trash directory | State lives under the git dir; git history is the undo |
-| YAML `.bref` per file only; “no manifests” principle | One TSV ref format for files, collections and pins |
-| Per-file gitignore lines for collections | One line per ref |
-| Five-level config hierarchy; subdirectory configs; named backend maps | Three scopes; one backend URL |
-| 22 commands (8 hidden) | 18 public commands, mostly phased (§6), plus 2 plumbing |
+| Timestamped key templates; `remote_key` write-back; two-commit flow | Derived keys; refs final at `add` |
+| `remote_key` presence as “pushed” | Known logs + batched `exists` |
+| Stat-cache merge base; 9-state sync | Recoverability rule with displacement |
+| `.blobsy/` in the working tree; trash directory | State under the git dir; displaced bytes in the content cache |
+| YAML per-file pointers; the “no manifests” principle | One `.bref` manifest format, in git and in the store |
+| Per-file ignore lines; the gitignore pattern-rewriting machinery | One anchored line per ref in a managed block |
+| Five config levels, subdirectory configs, named backends | `.blobsy.yml` + `git config` |
+| 22 commands | 16 (incl. `snap` sub-verbs), 9 in Phase 1 |
 | aws-cli backend; per-file synchronous spawns | SDK + batched transfers |
-| gzip/brotli | zstd or none |
-| Compression decided at push; compressed output kept when larger | Decided at add; kept only if ≥5% smaller |
+| gzip/brotli; compression at push | zstd or none, decided at `add` |
 
 * * *
 
-## 17. Non-Goals and Deferred Work
+## 19. Non-Goals and Deferred Work
 
 **Non-goals:**
 - a server;
-- smudge/clean filters;
+- smudge/clean filters, FUSE or VFS mounts;
 - file locking;
-- network inside git operations;
+- network inside merges or restore hooks;
 - mutable names;
-- bidirectional sync of derived trees;
-- sub-file delta / CDC;
+- bidirectional or union-merged sync of shared tool caches (cache the package store as a
+  snapshot instead);
+- sub-file delta or CDC (target scale is MB to a few GB per file);
+- client-side encryption (use backend SSE);
 - multiple backends per repo;
-- content-level merges inside `git merge`;
 - backward compatibility (pre-alpha).
 
-**Deferred (designed later, if demand appears):**
-- **Run archives (UC-6, round 8 mirrors).** Start with a `blobsy receipt write|verify
-  <dir>` (`tree_id` + receipt) and an rclone recipe. Fold into
-  `snap publish --unpacked` if needed (round 9 D8).
-- **History import:** `blobsy import history` (filter-repo based).
-- **Routes:** different paths to different backends, as in Gat.
-- **Package-grouped snapshot packs** with range restore.
+**Deferred, designed later if demand appears:**
+- **Mirror mode (path-browsable run archives, round 8).** Start with an rclone recipe
+  and `blobsy receipt write|verify <dir>`.
+- **Grouped packs for files-mode snapshots.** Small files are packed per directory,
+  under a content-addressed pack id (the hash of the member rows), so unchanged
+  directories dedup and request counts stay bounded.
+- **Sharded manifests** for million-file trees: one manifest per subdirectory, as in git
+  trees and restic, so a publish rewrites only the changed path.
+- **`mv`, `blobsy cat [--range]`, ordered fallback lists** for caches.
+- **Routes** (paths to different backends) and cross-store read-only pins.
+- **History import** (`import history`, filter-repo based).
 - **Snapshot signatures.**
-- **Multi-threaded hashing within one file**, through a small native binding.
-- **Single-binary distribution** (`bun build --compile`) alongside npm.
+- **Multi-threaded hashing within one file** (a small native binding).
 
 * * *
 
-## 18. Open Decisions
+## 20. Open Decisions
 
-From the round 9 review §11 and the implementation plan:
-
-| # | Decision | Proposed default |
+| # | Decision | Proposed |
 | --- | --- | --- |
-| K1 | Keys derived, never stored | Yes |
-| K2 | Fixed key layout, filename as metadata | Yes |
-| K3 | Hash: BLAKE3 or SHA-256 | BLAKE3, pending a cross-hardware benchmark (≥3× on 2 of 4 platforms) |
-| K4 | Content cache on by default; restore hooks opt-in | Yes |
-| K5 | One ref format (TSV) for file, directory and pin refs | Yes |
-| K6 | Directory refs never remove entries implicitly (`--prune` to remove) | Yes |
-| K7 | Phase order: directory refs before snapshots, or the reverse | By whichever pain is pressing; snapshots first if build trees are the need |
-| K8 | Run archives: receipts only for now | Yes |
-| K9 | Language: TypeScript through Phase 3 (switch per the round 9 §7.4 rule) | Yes |
+| K1 | Derived keys, never stored | Yes |
+| K2 | Fixed key layout; filename as metadata | Yes |
+| K3 | Default hash | BLAKE3 now. Re-benchmark on Apple M, Graviton and SHA-NI x86 when convenient, weighing SHA-256’s server-side checksums and LFS import. Not a Phase 1 gate. |
+| K4 | Content cache on by default, filled at `add`; auto-pull hooks opt-in | Yes |
+| K5 | One manifest format for refs and snapshots | Yes |
+| K6 | `add` never removes entries implicitly; `--prune` only drops entries deleted here | Yes |
+| K7 | Snapshot default mode: packed for cache stanzas, files for named assets | Yes |
+| K8 | Restore mtime for packed caches: archive mtimes or now | Decide after the cargo experiment (Phase 3) |
+| K9 | `rm` keeps files; `clean` deletes recoverable ones | Yes |
+| K10 | Language: TypeScript, with a single binary; reconsider Rust per the round 9 §7.4 rule | Yes |
 
 <!-- This document follows common-doc-guidelines.md.
 See github.com/jlevy/practical-prose and review guidelines before editing.
