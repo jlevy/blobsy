@@ -1490,7 +1490,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | D9 | Hooks: correctness never depends on them, and hydration hooks are opt-in. | Yes | none |
 | D12 | Positioning vs Gat: interoperate (read `gat.lock`) or differentiate. | Differentiate (§9.3); `import-lfs` first | none |
 | D13 | Implementation language: TypeScript, Rust, or a hybrid. | TypeScript through Phase 3; switch only under the §7.4 rule | none |
-| D15 | One hash for all content: SHA-256 or BLAKE3 (native addon; WASM fallback). Measured on this CPU without SHA-NI: native BLAKE3 ~8.5× faster per file than SHA-256 in Node and Bun, and Node/Bun match Rust single-threaded once reads use 1 MB buffers (`research-2026-10-22-hash-performance-node-bun-rust.md`). Expected ~1.5–2.5× on CPUs with SHA hardware [I]. With BLAKE3, `import-lfs` rehashes each object once. | BLAKE3 if a cross-hardware benchmark shows ≥3× on at least two of four common platforms (plan K3) | Phase 1 |
+| D15 | One hash for all content: SHA-256 or BLAKE3 (native addon; WASM fallback). Measured on this CPU without SHA-NI: native BLAKE3 ~8.5× faster per file than SHA-256 in Node and Bun, and Node/Bun match Rust single-threaded once reads use 1 MB buffers (`research-2026-10-22-hash-performance-node-bun-rust.md`). Expected ~1.5–2.5× on CPUs with SHA hardware [I]. With BLAKE3, `import-lfs` rehashes each object once. | **Decided (owner, 2026-10-23): BLAKE3**, matching Gat, with no benchmark gate; changeable later per design v3 §5.5 | Phase 1 |
 
 Bead dispositions:
 

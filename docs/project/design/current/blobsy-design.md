@@ -407,10 +407,21 @@ Any other name is an asset.
 
 ### 5.5 Hashing
 
+- **BLAKE3 is the default (decided).** It is what Gat uses, and it is ~8.5× faster than
+  SHA-256 without SHA hardware.
+
 - **Algorithm per ref.** `hash:` in `.blobsy.yml` (default `blake3`) applies when `add`
   *creates* a ref. Existing refs keep their algorithm.
   To convert one, run `blobsy rm <target> && blobsy add <target>` with every entry
   present locally. Keys embed the algorithm, so mixed algorithms in one store are fine.
+  Changing the default later is therefore a config change, not a migration:
+  - new refs use the new algorithm;
+  - old refs keep working;
+  - objects under both algorithms coexist in the store.
+
+  The reader accepts a fixed list of algorithms (`blake3`, `sha256`). Adding one is a
+  code change, not a format change.
+
 - **BLAKE3** uses `@napi-rs/blake-hash` (native), falling back to `hash-wasm`.
   **SHA-256** uses Node `crypto`.
   - Measured on a VM without SHA hardware, native BLAKE3 runs at ~2.85 GB/s in Node,
@@ -418,9 +429,10 @@ Any other name is an asset.
   - The WASM fallback is slower than SHA-256 on Bun (213 MB/s), so blobsy makes it
     visible. `doctor`, `setup` and `--version --json` print `hasher: native|wasm`. `add`
     warns once when the WASM path hashes more than 256 MB.
-  - Trade-off, recorded for decision K3: SHA-256 allows S3 server-side checksums
-    (verification without download, for raw single-part objects) and zero-rehash LFS
-    import. `setup --hash sha256` selects it.
+  - SHA-256 stays supported for repos that want S3 server-side checksums (verification
+    without download, for raw single-part objects) or zero-rehash LFS import.
+    `setup --hash sha256` selects it.
+
 - **Rules:**
   - read with `fs.read` into 1 MB buffers;
   - hash files in parallel through a bounded worker pool;
@@ -1354,7 +1366,7 @@ type Action = { op: 'upload' | 'download' | 'place' | 'replace' | 'delete' | 're
 | --- | --- | --- |
 | K1 | Derived keys, never stored | Yes |
 | K2 | Fixed key layout; filename as metadata | Yes |
-| K3 | Default hash | BLAKE3 now. Re-benchmark on Apple M, Graviton and SHA-NI x86 when convenient, weighing SHA-256’s server-side checksums and LFS import. Not a Phase 1 gate. |
+| K3 | Default hash | **Decided (owner, 2026-10-23): BLAKE3**, matching Gat. It stays changeable: each ref names its algorithm and keys embed it (§5.5). SHA-256 remains an option. |
 | K4 | Content cache on by default, filled at `add`; auto-pull hooks opt-in | Yes |
 | K5 | One manifest format for refs and snapshots | Yes |
 | K6 | `add` never removes entries implicitly; `--prune` only drops entries deleted here | Yes |
