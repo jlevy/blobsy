@@ -63,6 +63,7 @@ import {
   findBrefFiles,
   findTrackableFiles,
   isDirectory,
+  isPathInside,
   normalizePath,
   resolveRepoPath,
   stripBrefExtension,
@@ -2022,19 +2023,19 @@ function formatConfigPath(filePath: string, repoRoot?: string): string {
   if (blobsyHome) {
     const resolvedBlobsyHome = resolve(blobsyHome);
     const resolvedFilePath = resolve(filePath);
-    if (resolvedFilePath.startsWith(resolvedBlobsyHome)) {
-      return resolvedFilePath.replace(resolvedBlobsyHome, '~');
+    if (isPathInside(resolvedFilePath, resolvedBlobsyHome)) {
+      return join('~', relative(resolvedBlobsyHome, resolvedFilePath));
     }
   }
 
   // Check actual home directory
   const home = homedir();
-  if (filePath.startsWith(home)) {
-    return filePath.replace(home, '~');
+  if (isPathInside(filePath, home)) {
+    return join('~', relative(home, resolve(filePath)));
   }
 
   // Check repo root for relative paths
-  if (repoRoot && filePath.startsWith(repoRoot)) {
+  if (repoRoot && isPathInside(filePath, repoRoot)) {
     return relative(repoRoot, filePath) || '.';
   }
 

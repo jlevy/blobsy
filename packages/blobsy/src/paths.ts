@@ -35,6 +35,21 @@ export function toRepoRelative(absolutePath: string, repoRoot: string): string {
   return normalizePath(relative(repoRoot, absolutePath));
 }
 
+/**
+ * True if `path` is `root` or lies under it. Compares whole path segments, so
+ * a sibling such as `/repo-remote` is not considered inside `/repo`.
+ * Both arguments are resolved lexically; symlinks are not followed.
+ */
+export function isPathInside(path: string, root: string): boolean {
+  const p = resolve(path);
+  const r = resolve(root);
+  if (p === r) {
+    return true;
+  }
+  // A filesystem root (e.g. "/" or "C:\") already ends with a separator.
+  return p.startsWith(r.endsWith(sep) ? r : r + sep);
+}
+
 /** Strip .bref extension if present: "data/model.bin.bref" -> "data/model.bin" */
 export function stripBrefExtension(path: string): string {
   if (path.endsWith(BREF_EXTENSION)) {

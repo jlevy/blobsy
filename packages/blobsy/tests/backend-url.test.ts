@@ -81,4 +81,20 @@ describe('validateBackendUrl', () => {
       validateBackendUrl(parsed, '/tmp/repo');
     }).not.toThrow();
   });
+
+  it('allows a sibling directory whose name starts with the repo name', () => {
+    for (const url of ['local:../repo-remote', 'local:../reporemote', 'local:/tmp/repo2']) {
+      const parsed = parseBackendUrl(url);
+      expect(() => {
+        validateBackendUrl(parsed, '/tmp/repo');
+      }, url).not.toThrow();
+    }
+  });
+
+  it('rejects the repo root itself', () => {
+    const parsed = parseBackendUrl('local:.');
+    expect(() => {
+      validateBackendUrl(parsed, '/tmp/repo');
+    }).toThrow('outside the git repository');
+  });
 });
