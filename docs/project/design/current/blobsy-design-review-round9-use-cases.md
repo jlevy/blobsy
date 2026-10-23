@@ -549,7 +549,7 @@ compressed: zstd      # decided at add time; absent = stored as-is
 - **No backward compatibility.** The reader accepts exactly `blobsy-bref/0.2` and fails
   fast on anything else (“re-run `blobsy add`”). See §5.7.
 - **The design is specified in full** in
-  `docs/project/specs/active/plan-2026-10-22-pointers-with-computed-keys.md`.
+  `docs/project/specs/active/plan-2026-10-22-blobsy-v3-redesign.md`.
 - **“Pushed” becomes remote state, not pointer state.** Offline `status` reports
   tracked, modified or missing.
   `status --remote` and the pre-push check verify existence in batch (X-4).
@@ -1477,7 +1477,7 @@ If that is caches or build trees, do Phase 3 before Phase 2.
 | # | Decision | Recommendation | Blocks |
 | --- | --- | --- | --- |
 | D1 | Adopt the new model: one storage contract, one entry format, references in git or by name. Reword principles 5, 6 and 9, and “What This Design Eliminates”. | Yes | Phase 1 |
-| D2 | Keys derived from content, never stored: a fixed layout `<algo>/<h0h1>/<h2h3>/<hash>[.zst]`, with the filename as object metadata; `remote.key_template` deleted. Closes `pqyt`. Specified in `specs/active/plan-2026-10-22-pointers-with-computed-keys.md` (K1, K2). | Yes | Phase 1 |
+| D2 | Keys derived from content, never stored: a fixed layout `<algo>/<h0h1>/<h2h3>/<hash>[.zst]`, with the filename as object metadata; `remote.key_template` deleted. Closes `pqyt`. Specified in `specs/active/plan-2026-10-22-blobsy-v3-redesign.md` (K1, K2). | Yes | Phase 1 |
 | D3 | Replace the stat-cache merge base with the recoverability rule. `sync` = `pull` then `push`, with no logic of its own. | Yes; keep `sync` as the one recommended verb | Phase 1 |
 | D11 | Approve the S1–S3 deletions (hidden commands, trash, inert config). | Yes | Phase 1 |
 | D4 | Collection manifest: name and placement (`<dir>.brefs` sibling vs `.btree`), explicit `--collection`, explicit prune, and whether `setup` installs the merge driver once it exists. | `.brefs` sibling; explicit; explicit prune; driver on by default | Phase 2 |
