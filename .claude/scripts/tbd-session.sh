@@ -1,77 +1,77 @@
 #!/bin/bash
-# Ensure tbd CLI is installed and run tbd prime for Claude Code sessions
-# Installed by: tbd setup --auto
-# This script runs on SessionStart and PreCompact
+# Ensure the tbd CLI is available and run `tbd prime`.
+# Installed by: tbd setup --auto. Runs on SessionStart and PreCompact.
+#
+# Local-first when the installed CLI can read this repository's tbd_format. Otherwise,
+# use the exact version recorded by setup in .tbd/config.yml. Keeping the pin in config
+# avoids rewriting this script for every compatible patch while retaining deterministic
+# zero-install behavior.
 
-# Get npm global bin directory (if npm is available)
-NPM_GLOBAL_BIN=""
-if command -v npm &> /dev/null; then
-    NPM_PREFIX=$(npm config get prefix 2>/dev/null)
-    if [ -n "$NPM_PREFIX" ] && [ -d "$NPM_PREFIX/bin" ]; then
-        NPM_GLOBAL_BIN="$NPM_PREFIX/bin"
-    fi
+# Prefer common local bin locations.
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$repo_root" ] || [ ! -f "$repo_root/.tbd/config.yml" ]; then
+    echo "[tbd] Cannot locate repository .tbd/config.yml." >&2
+    exit 1
 fi
+cd "$repo_root" || exit 1
 
-# Add common binary locations to PATH (persists for entire script)
-# Include npm global bin if found
-export PATH="$NPM_GLOBAL_BIN:$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
+tbd_configured_fallback_version() {
+  local config_path=$1
+  local line configured_fallback_version
+  local version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
 
-# Function to ensure tbd is available
-ensure_tbd() {
-    # Check if tbd is already installed
-    if command -v tbd &> /dev/null; then
+  while IFS= read -r line; do
+    if [[ $line =~ ^tbd_fallback_version:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
+      configured_fallback_version=${BASH_REMATCH[1]}
+      if [[ $configured_fallback_version =~ $version_pattern ]]; then
+        printf '%s\n' "$configured_fallback_version"
         return 0
+      fi
+      return 1
     fi
-
-    echo "[tbd] CLI not found, installing..."
-
-    # Try npm first (most common for Node.js tools)
-    if command -v npm &> /dev/null; then
-        echo "[tbd] Installing via npm..."
-        npm install -g get-tbd 2>/dev/null || {
-            # If global install fails (permissions), try local install
-            echo "[tbd] Global npm install failed, trying user install..."
-            mkdir -p ~/.local/bin
-            npm install --prefix ~/.local get-tbd
-            # Create symlink if needed
-            if [ -f ~/.local/node_modules/.bin/tbd ]; then
-                ln -sf ~/.local/node_modules/.bin/tbd ~/.local/bin/tbd
-            fi
-        }
-    elif command -v pnpm &> /dev/null; then
-        echo "[tbd] Installing via pnpm..."
-        pnpm add -g get-tbd
-    elif command -v yarn &> /dev/null; then
-        echo "[tbd] Installing via yarn..."
-        yarn global add get-tbd
-    else
-        echo "[tbd] ERROR: No package manager found (npm, pnpm, or yarn required)"
-        echo "[tbd] Please install Node.js and npm, then run: npm install -g get-tbd"
-        return 1
-    fi
-
-    # Verify installation
-    if command -v tbd &> /dev/null; then
-        echo "[tbd] Successfully installed to $(which tbd)"
-        return 0
-    else
-        echo "[tbd] WARNING: tbd installed but not found in PATH"
-        echo "[tbd] Checking common locations..."
-        # Try to find and add to path (include npm global bin)
-        for dir in "$NPM_GLOBAL_BIN" ~/.local/bin ~/.local/node_modules/.bin /usr/local/bin; do
-            if [ -n "$dir" ] && [ -x "$dir/tbd" ]; then
-                export PATH="$dir:$PATH"
-                echo "[tbd] Found at $dir/tbd"
-                return 0
-            fi
-        done
-        echo "[tbd] Could not locate tbd after installation"
-        return 1
-    fi
+  done < "$config_path"
+  return 1
 }
 
-# Main
-ensure_tbd || exit 1
+tbd_local_can_read_repository() {
+  command -v tbd &> /dev/null && tbd config get tbd_format >/dev/null 2>&1
+}
 
-# Run tbd prime with any passed arguments (e.g., --brief for PreCompact)
-tbd prime "$@"
+if tbd_local_can_read_repository; then
+    # Mint this working directory's agent id once, before priming, so tbd start has an
+    # identity to claim under. Idempotent: SessionStart fires again on resume, clear, and
+    # compact, and re-running must not mint a second agent for the same session.
+    # Failure here is never fatal - identity resolution falls back to a derived name, and
+    # an agent that cannot name itself precisely should still get its briefing.
+    tbd whoami --ensure-id --quiet >/dev/null 2>&1 || true
+    tbd prime "$@"
+    exit $?
+fi
+
+# Read and validate the exact fallback before invoking a package runner. This prevents a
+# malformed or hand-edited config value from becoming an executable package spec.
+if ! configured_fallback_version=$(tbd_configured_fallback_version ".tbd/config.yml"); then
+    echo "[tbd] .tbd/config.yml does not contain a valid exact tbd_fallback_version." >&2
+    echo "[tbd] Run a current 'tbd setup --auto' to repair the managed launcher." >&2
+    exit 1
+fi
+
+if command -v npx &> /dev/null; then
+    if command -v tbd &> /dev/null; then
+        echo "[tbd] Local tbd cannot read this repository format; using configured fallback get-tbd@$configured_fallback_version." >&2
+    else
+        echo "[tbd] tbd CLI not found; using configured fallback get-tbd@$configured_fallback_version." >&2
+    fi
+    npx --yes "get-tbd@$configured_fallback_version" prime "$@"
+    exit $?
+fi
+
+if command -v tbd &> /dev/null; then
+    echo "[tbd] Local tbd cannot read this repository format, and npx is unavailable." >&2
+else
+    echo "[tbd] tbd CLI not found and npx is unavailable." >&2
+fi
+echo "[tbd] Install it with: npm install -g get-tbd@$configured_fallback_version" >&2
+exit 1
