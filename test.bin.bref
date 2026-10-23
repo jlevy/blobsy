@@ -1,0 +1,6 @@
+# blobsy -- https://github.com/jlevy/blobsy
+# Run: blobsy status | blobsy --help
+
+format: blobsy-bref/0.1
+hash: sha256:6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72
+size: 12
